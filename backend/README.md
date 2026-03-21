@@ -2,6 +2,8 @@
 
 Node.js/Express backend API for the EMS Call Centre System.
 
+<!-- Redeploy trigger: 2026-02-28 full stack CI -->
+
 ## Setup
 
 1. Install dependencies:

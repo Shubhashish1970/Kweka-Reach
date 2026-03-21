@@ -12,7 +12,7 @@ if ! command -v gcloud &> /dev/null; then
 fi
 
 # Service details
-SERVICE_NAME="cc-ems-backend"
+SERVICE_NAME="${SERVICE_NAME:-kweka-reach-backend}"
 REGION="us-central1"
 
 echo "Service: $SERVICE_NAME"

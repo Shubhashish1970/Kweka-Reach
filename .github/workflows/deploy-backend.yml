@@ -11,7 +11,7 @@ on:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  SERVICE_NAME: cc-ems-backend
+  SERVICE_NAME: kweka-reach-backend
   REGION: us-central1
 
 jobs:
@@ -200,26 +200,27 @@ jobs:
             echo "ℹ️ Service does not exist, will create..."
           fi
           
-          # Get Mock FFA API URL if it exists
+          # Get Mock FFA API URL if it exists (prefer new name, then legacy during cutover)
           echo "🔍 Checking for Mock FFA API service..."
           MOCK_FFA_API_URL=""
-          MOCK_FFA_API_CHECK_OUTPUT=$(gcloud run services describe mock-ffa-api \
-            --region ${{ env.REGION }} \
-            --project ${{ secrets.GCP_PROJECT_ID }} \
-            --quiet 2>&1) || MOCK_FFA_API_CHECK_OUTPUT=""
-          
-          if [ -z "$MOCK_FFA_API_CHECK_OUTPUT" ] || echo "$MOCK_FFA_API_CHECK_OUTPUT" | grep -q "ERROR"; then
-            echo "⚠️ Mock FFA API not found or error checking: $MOCK_FFA_API_CHECK_OUTPUT"
-          else
-            MOCK_FFA_API_URL=$(gcloud run services describe mock-ffa-api \
+          for MOCK_SVC in kweka-reach-mock-ffa-api mock-ffa-api; do
+            MOCK_FFA_API_CHECK_OUTPUT=$(gcloud run services describe "$MOCK_SVC" \
               --region ${{ env.REGION }} \
               --project ${{ secrets.GCP_PROJECT_ID }} \
-              --format 'value(status.url)' 2>&1)
-            if [ -n "$MOCK_FFA_API_URL" ] && [ "$MOCK_FFA_API_URL" != "null" ]; then
-              echo "✅ Found Mock FFA API at: $MOCK_FFA_API_URL"
-            else
-              echo "⚠️ Mock FFA API exists but URL is empty or null"
+              --quiet 2>&1) || MOCK_FFA_API_CHECK_OUTPUT=""
+            if [ -n "$MOCK_FFA_API_CHECK_OUTPUT" ] && ! echo "$MOCK_FFA_API_CHECK_OUTPUT" | grep -q "ERROR"; then
+              MOCK_FFA_API_URL=$(gcloud run services describe "$MOCK_SVC" \
+                --region ${{ env.REGION }} \
+                --project ${{ secrets.GCP_PROJECT_ID }} \
+                --format 'value(status.url)' 2>&1)
+              if [ -n "$MOCK_FFA_API_URL" ] && [ "$MOCK_FFA_API_URL" != "null" ]; then
+                echo "✅ Found Mock FFA API ($MOCK_SVC) at: $MOCK_FFA_API_URL"
+                break
+              fi
             fi
+          done
+          if [ -z "$MOCK_FFA_API_URL" ] || [ "$MOCK_FFA_API_URL" = "null" ]; then
+            echo "⚠️ Mock FFA API not found (tried kweka-reach-mock-ffa-api, mock-ffa-api)"
           fi
           
           # Use FFA_API_URL from secret if set, otherwise use deployed mock FFA API URL

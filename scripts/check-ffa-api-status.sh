@@ -18,29 +18,35 @@ fi
 # Get project ID from git config or environment
 PROJECT_ID=${GCP_PROJECT_ID:-cc-ems-dev}
 REGION=${GCP_REGION:-us-central1}
-SERVICE_NAME="mock-ffa-api"
 
 echo "📋 Configuration:"
 echo "  - Project: $PROJECT_ID"
 echo "  - Region: $REGION"
-echo "  - Service: $SERVICE_NAME"
+echo "  - Services tried: kweka-reach-mock-ffa-api, mock-ffa-api"
 echo ""
 
-# Check if service exists
+# Check if service exists (prefer new name, then legacy)
 echo "🔍 Checking if Mock FFA API service exists..."
-if gcloud run services describe $SERVICE_NAME \
-    --region $REGION \
-    --project $PROJECT_ID \
-    --quiet 2>/dev/null; then
-    
-    echo "✅ Mock FFA API service exists"
-    echo ""
-    
-    # Get service URL
-    SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
+SERVICE_NAME=""
+SERVICE_URL=""
+for CANDIDATE in kweka-reach-mock-ffa-api mock-ffa-api; do
+  if gcloud run services describe "$CANDIDATE" \
+      --region $REGION \
+      --project $PROJECT_ID \
+      --quiet 2>/dev/null; then
+    SERVICE_NAME="$CANDIDATE"
+    SERVICE_URL=$(gcloud run services describe "$CANDIDATE" \
         --region $REGION \
         --project $PROJECT_ID \
         --format 'value(status.url)' 2>/dev/null || echo "")
+    break
+  fi
+done
+
+if [ -n "$SERVICE_NAME" ]; then
+    
+    echo "✅ Mock FFA API service exists ($SERVICE_NAME)"
+    echo ""
     
     if [ -n "$SERVICE_URL" ] && [ "$SERVICE_URL" != "null" ]; then
         echo "✅ Service URL: $SERVICE_URL"
@@ -64,7 +70,7 @@ if gcloud run services describe $SERVICE_NAME \
     
     echo ""
     echo "📝 To set this as FFA_API_URL in backend deployment:"
-    echo "   1. Go to: https://github.com/Shubhashish1970/CC-EMS/settings/secrets/actions"
+    echo "   1. Go to: https://github.com/Shubhashish1970/Kweka-Reach/settings/secrets/actions"
     echo "   2. Add/edit secret: FFA_API_URL"
     echo "   3. Value: ${SERVICE_URL}/api"
     echo ""
@@ -74,7 +80,7 @@ else
     echo "❌ Mock FFA API service does not exist"
     echo ""
     echo "📝 To deploy Mock FFA API:"
-    echo "   1. Go to GitHub Actions: https://github.com/Shubhashish1970/CC-EMS/actions/workflows/deploy-mock-ffa-api.yml"
+    echo "   1. Go to GitHub Actions: https://github.com/Shubhashish1970/Kweka-Reach/actions/workflows/deploy-mock-ffa-api.yml"
     echo "   2. Click 'Run workflow' button"
     echo "   3. Select branch: main"
     echo "   4. Click 'Run workflow'"

@@ -3,7 +3,7 @@
 # Script to check Cloud Run logs for email/Resend issues
 
 PROJECT_ID="cc-ems-dev"
-SERVICE_NAME="cc-ems-backend"
+SERVICE_NAME="${SERVICE_NAME:-kweka-reach-backend}"
 
 echo "🔍 Checking Cloud Run logs for email issues..."
 echo "Project: $PROJECT_ID"

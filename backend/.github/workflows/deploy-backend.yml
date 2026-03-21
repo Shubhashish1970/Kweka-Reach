@@ -10,7 +10,7 @@ on:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  SERVICE_NAME: cc-ems-backend
+  SERVICE_NAME: kweka-reach-backend
   REGION: us-central1
 
 jobs:

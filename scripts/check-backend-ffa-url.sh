@@ -18,7 +18,7 @@ fi
 # Get project ID from git config or environment
 PROJECT_ID=${GCP_PROJECT_ID:-cc-ems-dev}
 REGION=${GCP_REGION:-us-central1}
-SERVICE_NAME="cc-ems-backend"
+SERVICE_NAME="${SERVICE_NAME:-kweka-reach-backend}"
 
 echo "📋 Configuration:"
 echo "  - Project: $PROJECT_ID"

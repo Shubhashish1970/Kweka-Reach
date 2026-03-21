@@ -6,7 +6,7 @@
 
 set -e
 
-SERVICE_NAME=${1:-cc-ems-backend}
+SERVICE_NAME=${1:-kweka-reach-backend}
 PROJECT_ID=${GCP_PROJECT_ID:-cc-ems-dev}
 REGION=${GCP_REGION:-us-central1}
 

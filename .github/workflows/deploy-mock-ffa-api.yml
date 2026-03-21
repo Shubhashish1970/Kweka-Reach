@@ -6,11 +6,12 @@ on:
       - main
     paths:
       - 'mock-ffa-api/**'
+      - '.github/workflows/deploy-mock-ffa-api.yml'
   workflow_dispatch:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  SERVICE_NAME: mock-ffa-api
+  SERVICE_NAME: kweka-reach-mock-ffa-api
   REGION: us-central1
 
 jobs:
@@ -86,15 +87,18 @@ jobs:
             echo "ℹ️ Service does not exist, will create..."
           fi
           
-          # Get EMS backend URL for mock to fetch masters (Option A)
+          # Get EMS backend URL for mock to fetch masters (prefer new name, then legacy during cutover)
           EMS_BACKEND_URL=""
-          if gcloud run services describe cc-ems-backend --region ${{ env.REGION }} --project ${{ secrets.GCP_PROJECT_ID }} --format 'value(status.url)' 2>/dev/null; then
-            EMS_BACKEND_URL=$(gcloud run services describe cc-ems-backend --region ${{ env.REGION }} --project ${{ secrets.GCP_PROJECT_ID }} --format 'value(status.url)' 2>/dev/null)
-          fi
-          if [ -z "$EMS_BACKEND_URL" ]; then
-            echo "⚠️ EMS backend (cc-ems-backend) not found; mock will use fallback crops/products until EMS is deployed"
-          else
-            echo "✅ EMS backend URL for masters: $EMS_BACKEND_URL"
+          for EMS_SVC in kweka-reach-backend cc-ems-backend; do
+            CANDIDATE=$(gcloud run services describe "$EMS_SVC" --region ${{ env.REGION }} --project ${{ secrets.GCP_PROJECT_ID }} --format 'value(status.url)' 2>/dev/null || true)
+            if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != "null" ]; then
+              EMS_BACKEND_URL="$CANDIDATE"
+              echo "✅ EMS backend URL for masters ($EMS_SVC): $EMS_BACKEND_URL"
+              break
+            fi
+          done
+          if [ -z "$EMS_BACKEND_URL" ] || [ "$EMS_BACKEND_URL" = "null" ]; then
+            echo "⚠️ EMS backend not found (tried kweka-reach-backend, cc-ems-backend); mock will use fallback crops/products until EMS is deployed"
           fi
 
           # Build env vars for mock: EMS_API_URL (backend URL) and FFA_MASTER_KEY (from secret)

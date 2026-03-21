@@ -37,15 +37,23 @@ echo "  - Project: $PROJECT_ID"
 echo "  - Region: $REGION"
 echo ""
 
-# Step 1: Check Mock FFA API service
+# Step 1: Check Mock FFA API service (prefer kweka-reach-mock-ffa-api, then legacy)
 echo "1️⃣  Checking Mock FFA API service..."
-MOCK_FFA_URL=$(gcloud run services describe mock-ffa-api \
-    --region $REGION \
-    --project $PROJECT_ID \
-    --format 'value(status.url)' 2>&1) || MOCK_FFA_URL=""
+MOCK_FFA_URL=""
+for MOCK_SVC in kweka-reach-mock-ffa-api mock-ffa-api; do
+  CANDIDATE=$(gcloud run services describe "$MOCK_SVC" \
+      --region $REGION \
+      --project $PROJECT_ID \
+      --format 'value(status.url)' 2>/dev/null || true)
+  if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != "null" ]; then
+    MOCK_FFA_URL="$CANDIDATE"
+    echo "   Using service: $MOCK_SVC"
+    break
+  fi
+done
 
 if [ -z "$MOCK_FFA_URL" ] || [ "$MOCK_FFA_URL" = "null" ]; then
-    echo -e "${RED}❌ Mock FFA API service not found${NC}"
+    echo -e "${RED}❌ Mock FFA API service not found (tried kweka-reach-mock-ffa-api, mock-ffa-api)${NC}"
     echo "   Solution: Deploy Mock FFA API via GitHub Actions"
     echo ""
     exit 1
@@ -56,12 +64,21 @@ else
     echo ""
 fi
 
-# Step 2: Check Backend FFA_API_URL
+# Step 2: Check Backend FFA_API_URL (prefer kweka-reach-backend, then legacy)
 echo "2️⃣  Checking Backend FFA_API_URL..."
-BACKEND_FFA_URL=$(gcloud run services describe cc-ems-backend \
-    --region $REGION \
-    --project $PROJECT_ID \
-    --format 'json' 2>&1 | python3 -c "
+BACKEND_JSON=""
+for BACKEND_SVC in kweka-reach-backend cc-ems-backend; do
+  if BACKEND_JSON=$(gcloud run services describe "$BACKEND_SVC" \
+      --region $REGION \
+      --project $PROJECT_ID \
+      --format 'json' 2>/dev/null); then
+    if [ -n "$BACKEND_JSON" ]; then
+      echo "   Using backend service: $BACKEND_SVC"
+      break
+    fi
+  fi
+done
+BACKEND_FFA_URL=$(echo "$BACKEND_JSON" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
@@ -72,6 +89,9 @@ except Exception as e:
     print('ERROR')
     sys.exit(1)
 " 2>&1) || BACKEND_FFA_URL="ERROR"
+if [ -z "$BACKEND_JSON" ]; then
+  BACKEND_FFA_URL="ERROR"
+fi
 
 if [ "$BACKEND_FFA_URL" = "NOT_SET" ] || [ "$BACKEND_FFA_URL" = "ERROR" ] || [ -z "$BACKEND_FFA_URL" ]; then
     echo -e "${RED}❌ FFA_API_URL not set in backend${NC}"

@@ -7,7 +7,8 @@ echo "🔍 Checking Deployed Backend Database"
 echo "======================================"
 echo ""
 
-BACKEND_URL="https://cc-ems-backend-1081361276534.us-central1.run.app"
+# Set to your live Cloud Run URL, e.g. from: gcloud run services describe kweka-reach-backend --format='value(status.url)'
+BACKEND_URL="${BACKEND_URL:-https://YOUR-KWEKA-REACH-BACKEND.run.app}"
 
 echo "Testing login endpoint..."
 echo ""

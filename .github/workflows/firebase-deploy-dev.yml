@@ -10,7 +10,7 @@ env:
   NODE_VERSION: '20'
   FIREBASE_PROJECT_ID: 'cc-ems-dev'
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  BACKEND_SERVICE_NAME: cc-ems-backend
+  BACKEND_SERVICE_NAME: kweka-reach-backend
   BACKEND_REGION: us-central1
 
 jobs:

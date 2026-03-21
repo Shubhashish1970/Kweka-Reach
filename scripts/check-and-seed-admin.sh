@@ -5,7 +5,7 @@
 
 set -e
 
-BACKEND_URL="${1:-https://cc-ems-backend-XXXXX.run.app}"
+BACKEND_URL="${1:-https://kweka-reach-backend-XXXXX.run.app}"
 SEED_TOKEN="${2:-change-this-secret-token}"
 
 echo "🔍 Checking admin user status..."

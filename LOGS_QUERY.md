@@ -6,14 +6,14 @@ https://console.cloud.google.com/logs/query?project=cc-ems-dev
 ## Query to Use (Fixed Syntax)
 ```
 resource.type="cloud_run_revision" 
-AND resource.labels.service_name="cc-ems-backend" 
+AND resource.labels.service_name="kweka-reach-backend" 
 AND (textPayload=~"email" OR textPayload=~"Resend" OR jsonPayload.message=~"email" OR jsonPayload.message=~"Resend")
 ```
 
 **Note:** The emoji search might not work. Use this simpler version if needed:
 ```
 resource.type="cloud_run_revision" 
-AND resource.labels.service_name="cc-ems-backend" 
+AND resource.labels.service_name="kweka-reach-backend" 
 AND (textPayload=~"email" OR textPayload=~"Resend" OR jsonPayload.message=~"email")
 ```
 
@@ -59,7 +59,7 @@ AND (textPayload=~"email" OR textPayload=~"Resend" OR jsonPayload.message=~"emai
 ## Alternative: Use This Query for Errors Only
 ```
 resource.type="cloud_run_revision" 
-AND resource.labels.service_name="cc-ems-backend" 
+AND resource.labels.service_name="kweka-reach-backend" 
 AND severity>=ERROR
 AND (textPayload=~"email" OR textPayload=~"Resend" OR jsonPayload.message=~"email" OR jsonPayload.message=~"Resend")
 ```

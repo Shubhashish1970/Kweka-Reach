@@ -2,7 +2,7 @@
 # Script to check Cloud Run logs for stats endpoint
 
 PROJECT_ID="cc-ems-dev"
-SERVICE_NAME="cc-ems-backend"
+SERVICE_NAME="${SERVICE_NAME:-kweka-reach-backend}"
 
 echo "🔍 Checking Cloud Run logs for stats calculation..."
 echo "Project: $PROJECT_ID"

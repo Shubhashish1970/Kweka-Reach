@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 
 PROJECT_ID=${GCP_PROJECT_ID:-cc-ems-dev}
 REGION=${GCP_REGION:-us-central1}
-BACKEND_SERVICE="cc-ems-backend"
+BACKEND_SERVICE="${BACKEND_SERVICE:-kweka-reach-backend}"
 
 echo -e "${BLUE}🔍 Automated FFA API Configuration Verification${NC}"
 echo "=================================================="

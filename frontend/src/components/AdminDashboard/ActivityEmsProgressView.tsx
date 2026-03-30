@@ -152,8 +152,9 @@ function computeEmsTotals(rows: EmsReportSummaryRow[]): EmsTotals | null {
   const meetingValidityPct = totalConnected > 0 ? Math.round((yesAttendedCount / totalConnected) * 100) : 0;
   const meetingConversionPct = totalConnected > 0 ? Math.round((purchasedCount / totalConnected) * 100) : 0;
   const purchaseIntentionPct = totalConnected > 0 ? Math.round(((willingYesCount + purchasedCount) / totalConnected) * 100) : 0;
+  // Snapshot formula: Total CS Score / Max CS Score. Max CS Score = totalAttempted × 5
   const cropSolutionsFocusPct =
-    activityQualityCount > 0 ? Math.round((activityQualitySum / activityQualityCount / 5) * 100) : 0;
+    totalAttempted > 0 ? Math.round((activityQualitySum / (totalAttempted * 5)) * 100) : 0;
   // EMS Score = 25% Meeting Conversion + 25% Purchase Intention + 50% Crop Solutions Focus (Meeting Validity & Hygiene not included)
   const emsScore = Math.round(
     0.25 * meetingConversionPct + 0.25 * purchaseIntentionPct + 0.5 * cropSolutionsFocusPct

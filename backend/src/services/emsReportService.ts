@@ -44,6 +44,15 @@ export interface EmsReportSummaryRow {
   cropSolutionsFocusPct: number;
   activityQualitySum: number;
   activityQualityCount: number;
+  /** Rating distribution for Crop Solution Rating section (0 = no rating) */
+  qualityCount1: number;
+  qualityCount2: number;
+  qualityCount3: number;
+  qualityCount4: number;
+  qualityCount5: number;
+  /** Total CS Score = sum(rating × count) for 1–5; Max CS Score = totalAttempted × 5 */
+  totalCsScore: number;
+  maxCsScore: number;
   emsScore: number;
   relativeRemarks: string;
 }
@@ -245,15 +254,32 @@ export async function getEmsReportSummary(
         activityQualitySum: {
           $sum: {
             $cond: [
-              { $and: ['$__isConnected', '$__hasQualityRating'] },
+              { $and: [
+                { $gte: [{ $ifNull: ['$callLog.activityQuality', 0] }, 1] },
+                { $lte: [{ $ifNull: ['$callLog.activityQuality', 0] }, 5] },
+              ] },
               { $ifNull: ['$callLog.activityQuality', 0] },
               0,
             ],
           },
         },
         activityQualityCount: {
-          $sum: { $cond: [{ $and: ['$__isConnected', '$__hasQualityRating'] }, 1, 0] },
+          $sum: {
+            $cond: [
+              { $and: [
+                { $gte: [{ $ifNull: ['$callLog.activityQuality', 0] }, 1] },
+                { $lte: [{ $ifNull: ['$callLog.activityQuality', 0] }, 5] },
+              ] },
+              1,
+              0,
+            ],
+          },
         },
+        qualityCount1: { $sum: { $cond: [{ $eq: ['$callLog.activityQuality', 1] }, 1, 0] } },
+        qualityCount2: { $sum: { $cond: [{ $eq: ['$callLog.activityQuality', 2] }, 1, 0] } },
+        qualityCount3: { $sum: { $cond: [{ $eq: ['$callLog.activityQuality', 3] }, 1, 0] } },
+        qualityCount4: { $sum: { $cond: [{ $eq: ['$callLog.activityQuality', 4] }, 1, 0] } },
+        qualityCount5: { $sum: { $cond: [{ $eq: ['$callLog.activityQuality', 5] }, 1, 0] } },
       },
     },
   );
@@ -281,6 +307,11 @@ export async function getEmsReportSummary(
     const willingYesCount = Number(row.willingYesCount || 0);
     const activityQualitySum = Number(row.activityQualitySum || 0);
     const activityQualityCount = Number(row.activityQualityCount || 0);
+    const qualityCount1 = Number(row.qualityCount1 || 0);
+    const qualityCount2 = Number(row.qualityCount2 || 0);
+    const qualityCount3 = Number(row.qualityCount3 || 0);
+    const qualityCount4 = Number(row.qualityCount4 || 0);
+    const qualityCount5 = Number(row.qualityCount5 || 0);
 
     const mobileValidityPct =
       totalAttempted > 0 ? Math.round(((totalAttempted - invalidCount) / totalAttempted) * 100) : 0;
@@ -292,11 +323,12 @@ export async function getEmsReportSummary(
     const meetingConversionPct = totalConnected > 0 ? Math.round((purchasedCount / totalConnected) * 100) : 0;
     const purchaseIntentionPct =
       totalConnected > 0 ? Math.round(((willingYesCount + purchasedCount) / totalConnected) * 100) : 0;
+    // Snapshot formula: Total CS Score / Max CS Score. Max CS Score = totalAttempted × 5
+    const totalCsScore = activityQualitySum;
+    const maxCsScore = totalAttempted * 5;
     const cropSolutionsFocusPct =
-      activityQualityCount > 0
-        ? Math.round((activityQualitySum / activityQualityCount / 5) * 100)
-        : 0;
-    // EMS Score = 25% Meeting Conversion + 25% Purchase Intention + 50% Crop Solutions Focus (Meeting Validity & Hygiene not included)
+      maxCsScore > 0 ? Math.round((totalCsScore / maxCsScore) * 100) : 0;
+    // EMS Score = 25% Meeting Conversion + 25% Purchase Intention + 50% Crop Solutions Focus
     const emsScore = Math.round(
       0.25 * meetingConversionPct + 0.25 * purchaseIntentionPct + 0.5 * cropSolutionsFocusPct
     );
@@ -331,6 +363,13 @@ export async function getEmsReportSummary(
       cropSolutionsFocusPct,
       activityQualitySum,
       activityQualityCount,
+      qualityCount1,
+      qualityCount2,
+      qualityCount3,
+      qualityCount4,
+      qualityCount5,
+      totalCsScore,
+      maxCsScore,
       emsScore,
       relativeRemarks,
     });
@@ -619,7 +658,6 @@ export async function getEmsReportTrends(
     const purchasedCount = Number(row.purchasedCount || 0);
     const willingYesCount = Number(row.willingYesCount || 0);
     const activityQualitySum = Number(row.activityQualitySum || 0);
-    const activityQualityCount = Number(row.activityQualityCount || 0);
 
     const mobileValidityPct =
       totalAttempted > 0 ? Math.round(((totalAttempted - invalidCount) / totalAttempted) * 100) : 0;
@@ -627,11 +665,9 @@ export async function getEmsReportTrends(
     const meetingConversionPct = totalConnected > 0 ? Math.round((purchasedCount / totalConnected) * 100) : 0;
     const purchaseIntentionPct =
       totalConnected > 0 ? Math.round(((willingYesCount + purchasedCount) / totalConnected) * 100) : 0;
+    const maxCsScore = totalAttempted * 5;
     const cropSolutionsFocusPct =
-      activityQualityCount > 0
-        ? Math.round((activityQualitySum / activityQualityCount / 5) * 100)
-        : 0;
-    // EMS Score = 25% Meeting Conversion + 25% Purchase Intention + 50% Crop Solutions Focus
+      maxCsScore > 0 ? Math.round((activityQualitySum / maxCsScore) * 100) : 0;
     const emsScore = Math.round(
       0.25 * meetingConversionPct + 0.25 * purchaseIntentionPct + 0.5 * cropSolutionsFocusPct
     );

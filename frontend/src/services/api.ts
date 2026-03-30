@@ -880,6 +880,13 @@ export interface EmsReportSummaryRow {
   cropSolutionsFocusPct: number;
   activityQualitySum: number;
   activityQualityCount: number;
+  qualityCount1?: number;
+  qualityCount2?: number;
+  qualityCount3?: number;
+  qualityCount4?: number;
+  qualityCount5?: number;
+  totalCsScore?: number;
+  maxCsScore?: number;
   emsScore: number;
   relativeRemarks: string;
 }
@@ -1253,13 +1260,17 @@ export const ffaAPI = {
 
   importExcel: async (file: File) => {
     const token = getAuthToken();
+    const activeRole = getActiveRole();
 
     const formData = new FormData();
     formData.append('file', file);
 
     const res = await fetch(`${API_BASE_URL}/ffa/import-excel`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      headers: {
+        ...(token && { Authorization: `Bearer ${token}` }),
+        ...(activeRole && { 'X-Active-Role': activeRole }),
+      },
       body: formData,
     });
 

@@ -832,8 +832,9 @@ const startServer = async (): Promise<void> => {
     // Connect to MongoDB
     await connectDB();
 
-    // Setup cron jobs (only in production or if enabled)
-    if (process.env.NODE_ENV === 'production' || process.env.ENABLE_CRON === 'true') {
+    // Setup cron jobs ONLY when explicitly enabled.
+    // This prevents unexpected background syncs (e.g., scheduled FFA sync) in production environments.
+    if (process.env.ENABLE_CRON === 'true') {
       const { setupCronJobs } = await import('./config/cron.js');
       setupCronJobs();
     }

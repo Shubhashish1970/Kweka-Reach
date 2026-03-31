@@ -52,7 +52,7 @@ jobs:
             --port 8080 \
             --memory 512Mi \
             --cpu 1 \
-            --set-env-vars MONGODB_URI=${{ secrets.MONGODB_URI }},JWT_SECRET=${{ secrets.JWT_SECRET }},NODE_ENV=production,CORS_ORIGIN=${{ secrets.CORS_ORIGIN }},ENABLE_CRON=true
+            --set-env-vars MONGODB_URI=${{ secrets.MONGODB_URI }},JWT_SECRET=${{ secrets.JWT_SECRET }},NODE_ENV=production,CORS_ORIGIN=${{ secrets.CORS_ORIGIN }},ENABLE_CRON=false
 
       - name: Get Service URL
         id: get-url

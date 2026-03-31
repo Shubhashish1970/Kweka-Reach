@@ -903,10 +903,18 @@ const ActivitySamplingView: React.FC = () => {
                       className="bg-lime-600 h-2.5 rounded-full transition-all duration-300 ease-out"
                       style={{
                         width: `${(() => {
-                          const a = importProgress.totalActivities ? importProgress.activitiesProcessed / importProgress.totalActivities : 0;
-                          const f = importProgress.totalFarmers ? importProgress.farmersProcessed / importProgress.totalFarmers : 0;
-                          const pct = Math.max(0, Math.min(1, (a + f) / 2));
-                          return Math.round(pct * 100);
+                          const aRatio = importProgress.totalActivities
+                            ? importProgress.activitiesProcessed / importProgress.totalActivities
+                            : 0;
+                          const fRatio = importProgress.totalFarmers
+                            ? importProgress.farmersProcessed / importProgress.totalFarmers
+                            : 0;
+
+                          // Progress semantics: Activities fill first 50%, then Farmers fill next 50%.
+                          const aPct = Math.max(0, Math.min(1, aRatio)) * 50;
+                          const fPct = Math.max(0, Math.min(1, fRatio)) * 50;
+                          const pct = aPct + (aRatio >= 1 ? fPct : 0);
+                          return Math.round(Math.max(0, Math.min(100, pct)));
                         })()}%`,
                       }}
                     />

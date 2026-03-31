@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Loader2, Download, Upload, Search, CheckCircle, XCircle, Globe, Check, Trash2, CheckSquare, Square, Filter } from 'lucide-react';
+import { Plus, Edit2, Loader2, Download, Search, CheckCircle, XCircle, Globe, Check, Trash2, CheckSquare, Square, Filter } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 import StyledSelect from '../../shared/StyledSelect';
 import ConfirmationModal from '../../shared/ConfirmationModal';
 import * as XLSX from 'xlsx';
+import ExcelUploadFlow from '../../shared/ExcelUploadFlow';
+import { STATE_LANGUAGE_MAP_FIELDS } from '../../../constants/excelUploadFields';
 
 interface StateLanguageMapping {
   _id: string;
@@ -281,146 +283,81 @@ const StateLanguageMappingView: React.FC = () => {
     XLSX.writeFile(wb, `state_language_mapping_export_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const importMappingsFromMappedRows = async (mappedRows: Record<string, unknown>[]) => {
+    const validRows = mappedRows.filter(
+      (row) =>
+        String(row.state ?? '').trim().length > 0 && String(row.primaryLanguage ?? '').trim().length > 0
+    );
+    if (validRows.length === 0) {
+      showError('Excel must have at least one row with State and Primary Language');
+      return { ok: false, message: 'No valid rows.' };
+    }
 
     setIsImporting(true);
     setImportProgress(0);
-    setImportTotal(0);
+    setImportTotal(validRows.length);
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+    const errors: string[] = [];
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
+    for (let i = 0; i < validRows.length; i++) {
+      const row = validRows[i];
+      const state = String(row.state ?? '').trim();
+      const primaryLanguage = String(row.primaryLanguage ?? '').trim();
+      const secondaryStr = String(row.secondaryLanguages ?? '').trim();
+      const secondaryLanguages = secondaryStr
+        ? secondaryStr.split(',').map((lang) => lang.trim()).filter(Boolean)
+        : [];
+      const statusValue = String(row.isActive ?? '').trim().toLowerCase();
+      const isActive = statusValue === 'active' || statusValue === '' || statusValue === 'true';
+
       try {
-        const data = e.target?.result;
-        if (!data) {
-          showError('Failed to read file');
-          setIsImporting(false);
-          return;
-        }
-
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const rows = XLSX.utils.sheet_to_json<any>(worksheet, { defval: '' });
-
-        if (rows.length === 0) {
-          showError('Excel file must have at least one data row');
-          setIsImporting(false);
-          return;
-        }
-
-        // Get headers from first row
-        const firstRow = rows[0];
-        const stateKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('state')) || '';
-        const primaryLanguageKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('primary language') || k.toLowerCase().includes('primarylanguage')) || '';
-        const secondaryLanguagesKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('secondary language') || k.toLowerCase().includes('secondarylanguage')) || '';
-        const statusKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('status')) || '';
-
-        if (!stateKey || !primaryLanguageKey) {
-          showError('Excel must have "State" and "Primary Language" columns');
-          setIsImporting(false);
-          return;
-        }
-
-        // Filter out empty rows
-        const validRows = rows.filter((row: any) => {
-          const state = String(row[stateKey] || '').trim();
-          const primaryLanguage = String(row[primaryLanguageKey] || '').trim();
-          return state.length > 0 && primaryLanguage.length > 0;
+        const response = await fetch(`${API_BASE}/master-data/state-languages`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ state, primaryLanguage, secondaryLanguages, isActive }),
         });
 
-        setImportTotal(validRows.length);
-        let successCount = 0;
-        let skippedCount = 0;
-        let errorCount = 0;
-        const errors: string[] = [];
-
-        for (let i = 0; i < validRows.length; i++) {
-          const row = validRows[i];
-          const state = String(row[stateKey] || '').trim();
-          const primaryLanguage = String(row[primaryLanguageKey] || '').trim();
-          if (!state || !primaryLanguage) {
-            setImportProgress(i + 1);
-            continue;
-          }
-
-          // Parse secondary languages (comma-separated)
-          const secondaryLanguagesStr = secondaryLanguagesKey ? String(row[secondaryLanguagesKey] || '').trim() : '';
-          const secondaryLanguages = secondaryLanguagesStr
-            ? secondaryLanguagesStr.split(',').map((lang: string) => lang.trim()).filter((lang: string) => lang.length > 0)
-            : [];
-
-          const statusValue = statusKey ? String(row[statusKey] || '').trim().toLowerCase() : '';
-          const isActive = statusValue === 'active' || statusValue === '';
-
-          try {
-            const response = await fetch(`${API_BASE}/master-data/state-languages`, {
-              method: 'POST',
-              headers: getAuthHeaders(),
-              body: JSON.stringify({
-                state,
-                primaryLanguage,
-                secondaryLanguages,
-                isActive,
-              }),
-            });
-
-            const data = await response.json();
-            if (response.ok && data.success) {
-              successCount++;
-            } else if (response.status === 409) {
-              // Mapping already exists - skip it, don't count as error
-              skippedCount++;
-            } else {
-              errorCount++;
-              const errorMsg = data.error?.message || data.error || `HTTP ${response.status}: ${response.statusText}`;
-              errors.push(`${state}: ${errorMsg}`);
-              console.error(`Import error for ${state}:`, { status: response.status, data });
-            }
-          } catch (error: any) {
-            errorCount++;
-            const errorMsg = error?.message || 'Network error';
-            errors.push(`${state}: ${errorMsg}`);
-            console.error(`Import exception for ${state}:`, error);
-          }
-
-          // Update progress
-          setImportProgress(i + 1);
-        }
-
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportTotal(0);
-
-        if (successCount > 0 || skippedCount > 0) {
-          let message = '';
-          if (successCount > 0) {
-            message = `${successCount} mapping(s) imported successfully`;
-          }
-          if (skippedCount > 0) {
-            message += message ? `. ${skippedCount} skipped (already exist)` : `${skippedCount} mapping(s) skipped (already exist)`;
-          }
-          if (errorCount > 0) {
-            message += `. ${errorCount} failed`;
-          }
-          showSuccess(message);
-          if (errorCount > 0 && errors.length > 0) {
-            console.error('Import errors:', errors);
-          }
-          fetchMappings();
+        const data = await response.json();
+        if (response.ok && data.success) {
+          successCount++;
+        } else if (response.status === 409) {
+          skippedCount++;
         } else {
-          showError(`Failed to import mappings. ${errorCount} error(s)`);
+          errorCount++;
+          const errorMsg = data.error?.message || data.error || `HTTP ${response.status}: ${response.statusText}`;
+          errors.push(`${state}: ${errorMsg}`);
+          console.error(`Import error for ${state}:`, { status: response.status, data });
         }
-      } catch (error) {
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportTotal(0);
-        showError('Failed to parse Excel file');
+      } catch (error: any) {
+        errorCount++;
+        const errorMsg = error?.message || 'Network error';
+        errors.push(`${state}: ${errorMsg}`);
+        console.error(`Import exception for ${state}:`, error);
       }
-    };
-    reader.readAsArrayBuffer(file);
-    event.target.value = '';
+
+      setImportProgress(i + 1);
+    }
+
+    setIsImporting(false);
+    setImportProgress(0);
+    setImportTotal(0);
+
+    if (successCount > 0 || skippedCount > 0) {
+      let message = '';
+      if (successCount > 0) message = `${successCount} mapping(s) imported successfully`;
+      if (skippedCount > 0) {
+        message += message ? `. ${skippedCount} skipped (already exist)` : `${skippedCount} mapping(s) skipped (already exist)`;
+      }
+      if (errorCount > 0) message += `. ${errorCount} failed`;
+      showSuccess(message);
+      if (errorCount > 0 && errors.length > 0) console.error('Import errors:', errors);
+      fetchMappings();
+      return { ok: true, message };
+    }
+    showError(`Failed to import mappings. ${errorCount} error(s)`);
+    return { ok: false, message: `Failed: ${errorCount} error(s)` };
   };
 
   const filteredMappings = mappings.filter(m => {
@@ -465,17 +402,6 @@ const StateLanguageMappingView: React.FC = () => {
               Delete ({selectedIds.size})
             </button>
           )}
-          <label className={`flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl transition-colors cursor-pointer ${isImporting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50'}`}>
-            <Upload size={16} className={isImporting ? 'animate-spin' : ''} />
-            {isImporting ? 'Importing...' : 'Import'}
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleFileUpload}
-              disabled={isImporting}
-              className="hidden"
-            />
-          </label>
           <button
             onClick={handleDownloadTemplate}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
@@ -498,6 +424,23 @@ const StateLanguageMappingView: React.FC = () => {
             Add Mapping
           </button>
         </div>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-200">
+          <ExcelUploadFlow
+            mode="single-sheet"
+            entityLabel="State–Language mappings"
+            infoBullets={[
+              'Download the template with State, Primary Language, Secondary Languages, and Status.',
+              'Upload and map columns if headers differ from the template.',
+              'Preview and confirm to create mappings (existing rows are skipped).',
+            ]}
+            template={{ label: 'Download template', onDownload: () => Promise.resolve(handleDownloadTemplate()) }}
+            submitLabel="Upload mappings"
+            mapFields={STATE_LANGUAGE_MAP_FIELDS}
+            disabled={isImporting}
+            onImport={(rows) => importMappingsFromMappedRows(rows)}
+          />
         </div>
 
         {showFilters && (

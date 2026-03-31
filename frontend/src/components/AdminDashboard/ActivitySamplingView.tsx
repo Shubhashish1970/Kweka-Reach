@@ -1,9 +1,11 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useToast } from '../../context/ToastContext';
 import { adminAPI, ffaAPI } from '../../services/api';
-import { Loader2, Filter, RefreshCw, ChevronDown, ChevronUp, CheckCircle, XCircle, AlertCircle, Calendar, MapPin, Users as UsersIcon, Activity as ActivityIcon, Phone, User as UserIcon, CheckCircle2, Download, BarChart3, ArrowDownToLine, ArrowUpToLine, UserCheck, Package, BarChart } from 'lucide-react';
+import { Loader2, Filter, RefreshCw, ChevronDown, ChevronUp, CheckCircle, XCircle, AlertCircle, Calendar, MapPin, Users as UsersIcon, Activity as ActivityIcon, Phone, User as UserIcon, CheckCircle2, Download, BarChart3, UserCheck, Package, BarChart } from 'lucide-react';
 import Button from '../shared/Button';
 import StyledSelect from '../shared/StyledSelect';
+import ExcelUploadFlow from '../shared/ExcelUploadFlow';
+import { FFA_ACTIVITY_MAP_FIELDS, FFA_FARMER_MAP_FIELDS } from '../../constants/excelUploadFields';
 import InfoBanner from '../shared/InfoBanner';
 import { getTaskStatusLabel } from '../../utils/taskStatusLabels';
 import { type DateRangePreset, getPresetRange, formatPretty } from '../../utils/dateRangeUtils';
@@ -130,7 +132,6 @@ const ActivitySamplingView: React.FC = () => {
     const v = localStorage.getItem('admin.activitySampling.dataSource');
     return v === 'excel' ? 'excel' : 'api';
   });
-  const [excelFile, setExcelFile] = useState<File | null>(null);
   const [isImportingExcel, setIsImportingExcel] = useState(false);
   const [importReport, setImportReport] = useState<any | null>(null);
   const [tableSort, setTableSort] = useState<{ key: ActivityTableColumnKey; dir: 'asc' | 'desc' }>(() => {
@@ -428,35 +429,6 @@ const ActivitySamplingView: React.FC = () => {
       setSyncProgress(null);
       if (fullSync) setIsFullSyncing(false);
       else setIsIncrementalSyncing(false);
-    }
-  };
-
-  const handleImportExcel = async () => {
-    if (!excelFile) {
-      showError('Please choose an Excel file first.');
-      return;
-    }
-    setIsImportingExcel(true);
-    setImportReport(null);
-    try {
-      const res = await ffaAPI.importExcel(excelFile);
-      setImportReport(res?.data || res);
-      showSuccess('Excel imported successfully');
-      // Refresh UI
-      await fetchActivities(1);
-      await fetchSyncStatus();
-    } catch (err: any) {
-      showError(err?.message || 'Failed to import Excel');
-    } finally {
-      setIsImportingExcel(false);
-    }
-  };
-
-  const handleDownloadTemplate = async () => {
-    try {
-      await ffaAPI.downloadExcelTemplate();
-    } catch (err: any) {
-      showError(err?.message || 'Failed to download template');
     }
   };
 
@@ -819,55 +791,57 @@ const ActivitySamplingView: React.FC = () => {
 
         {dataSource === 'excel' && (
           <div className="mt-3 pt-3 border-t border-slate-200">
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-              <div className="flex flex-col gap-3">
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">
-                    Upload Excel (2 sheets: Activities + Farmers)
-                </label>
-
-                <div className="flex flex-col md:flex-row md:items-center gap-3 md:justify-between">
-                  <div className="flex-1">
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0] || null;
-                        setExcelFile(f);
-                        setImportReport(null);
-                      }}
-                      className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-3 md:flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleDownloadTemplate}
-                    className="flex items-center justify-center h-10 w-10 rounded-2xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                    title="Download Excel template"
-                  >
-                    <ArrowDownToLine size={18} />
-                  </button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={handleImportExcel}
-                    disabled={!excelFile || isImportingExcel}
-                    title="Upload and import activities & farmers"
-                    className="h-10"
-                  >
-                    <ArrowUpToLine size={16} className={isImportingExcel ? 'animate-spin' : ''} />
-                    {isImportingExcel ? 'Importing...' : 'Upload & Import'}
-                  </Button>
-                  </div>
-                </div>
-
-                <p className="text-xs text-slate-500">
-                  Excel must include sheet names exactly: <span className="font-bold">Activities</span> and{' '}
-                  <span className="font-bold">Farmers</span>. Use the download template for correct column headers.
-                  Date format: <span className="font-bold">DD/MM/YYYY</span> or <span className="font-bold">YYYY-MM-DD</span>.
-                </p>
-              </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-4">
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">
+                Upload Excel (2 sheets: Activities + Farmers)
+              </label>
+              <p className="text-xs text-slate-500">
+                Excel must include sheet names exactly: <span className="font-bold">Activities</span> and{' '}
+                <span className="font-bold">Farmers</span>. Date format:{' '}
+                <span className="font-bold">DD/MM/YYYY</span> or <span className="font-bold">YYYY-MM-DD</span>.
+              </p>
+              <ExcelUploadFlow
+                mode="dual-sheet-ffa"
+                entityLabel="Activities & Farmers"
+                infoTitle="How to import FFA Activities & Farmers via Excel"
+                infoBullets={[
+                  'Download the template and fill the Activities and Farmers sheets.',
+                  'Upload the workbook and map columns if your headers differ from the template.',
+                  'Preview rows, then confirm to import into Activity Monitoring.',
+                ]}
+                template={{
+                  label: 'Download template',
+                  onDownload: async () => {
+                    await ffaAPI.downloadExcelTemplate();
+                  },
+                }}
+                submitLabel="Upload & Import"
+                disabled={isImportingExcel}
+                activityFields={FFA_ACTIVITY_MAP_FIELDS}
+                farmerFields={FFA_FARMER_MAP_FIELDS}
+                onImportFile={async (outFile) => {
+                  setIsImportingExcel(true);
+                  setImportReport(null);
+                  try {
+                    const json = await ffaAPI.importExcel(outFile);
+                    const data = (json && typeof json === 'object' && 'data' in json ? (json as any).data : json) ?? json;
+                    setImportReport(data);
+                    showSuccess((json as any)?.message || 'Excel imported successfully');
+                    await fetchActivities(1);
+                    await fetchSyncStatus();
+                    return {
+                      ok: true,
+                      message: (json as any)?.message || 'Excel imported successfully.',
+                      data,
+                    };
+                  } catch (err: any) {
+                    showError(err?.message || 'Failed to import Excel');
+                    return { ok: false, message: err?.message || 'Failed to import Excel' };
+                  } finally {
+                    setIsImportingExcel(false);
+                  }
+                }}
+              />
 
               {importReport && (
                 <div className="mt-4 text-sm text-slate-700">

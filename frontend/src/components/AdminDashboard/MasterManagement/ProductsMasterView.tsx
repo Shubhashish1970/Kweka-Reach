@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Loader2, Download, Upload, Search, CheckCircle, XCircle, Trash2, CheckSquare, Square, Filter } from 'lucide-react';
+import { Plus, Edit2, Loader2, Download, Search, CheckCircle, XCircle, Trash2, CheckSquare, Square, Filter } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 import ConfirmationModal from '../../shared/ConfirmationModal';
 import * as XLSX from 'xlsx';
+import ExcelUploadFlow from '../../shared/ExcelUploadFlow';
+import { PRODUCTS_MAP_FIELDS } from '../../../constants/excelUploadFields';
 
 interface Product {
   _id: string;
@@ -268,151 +270,87 @@ const ProductsMasterView: React.FC = () => {
     XLSX.writeFile(wb, `products_export_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const importProductsFromMappedRows = async (mappedRows: Record<string, unknown>[]) => {
+    const validRows = mappedRows.filter((row) => String(row.name ?? '').trim().length > 0);
+    if (validRows.length === 0) {
+      showError('Excel file must have at least one data row');
+      return { ok: false, message: 'No rows with Name.' };
+    }
 
     setIsImporting(true);
     setImportProgress(0);
-    setImportTotal(0);
+    setImportTotal(validRows.length);
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+    const errors: string[] = [];
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
+    for (let i = 0; i < validRows.length; i++) {
+      const row = validRows[i];
+      const name = String(row.name ?? '').trim();
+      const category = String(row.category ?? '').trim();
+      const segment = String(row.segment ?? '').trim();
+      const subcategory = String(row.subcategory ?? '').trim();
+      const productCode = String(row.productCode ?? '').trim();
+      const focusRaw = String(row.focusProducts ?? '').trim().toLowerCase();
+      const focusProducts = focusRaw === 'yes' || focusRaw === 'true';
+      const statusValue = String(row.isActive ?? '').trim().toLowerCase();
+      const isActive = statusValue === 'active' || statusValue === '' || statusValue === 'true';
+
       try {
-        const data = e.target?.result;
-        if (!data) {
-          showError('Failed to read file');
-          setIsImporting(false);
-          return;
-        }
-
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const rows = XLSX.utils.sheet_to_json<any>(worksheet, { defval: '' });
-
-        if (rows.length === 0) {
-          showError('Excel file must have at least one data row');
-          setIsImporting(false);
-          return;
-        }
-
-        // Get headers from first row
-        const firstRow = rows[0];
-        const headers = Object.keys(firstRow).map(h => h.trim().toLowerCase());
-        const nameKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('name') && !k.toLowerCase().includes('code')) || '';
-        const categoryKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('category')) || '';
-        const segmentKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('segment')) || '';
-        const subcategoryKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('subcategory')) || '';
-        const productCodeKey = Object.keys(firstRow).find(k => (k.toLowerCase().includes('product code') || k.toLowerCase().includes('productcode')) && !k.toLowerCase().includes('focus')) || '';
-        const focusProductsKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('focus')) || '';
-        const statusKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('status')) || '';
-
-        if (!nameKey) {
-          showError('Excel must have a "Name" column');
-          setIsImporting(false);
-          return;
-        }
-
-        // Filter out empty rows
-        const validRows = rows.filter((row: any) => {
-          const name = String(row[nameKey] || '').trim();
-          return name.length > 0;
+        const response = await fetch(`${API_BASE}/master-data/products`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            name,
+            category: category || undefined,
+            segment: segment || undefined,
+            subcategory: subcategory || undefined,
+            productCode: productCode || undefined,
+            focusProducts,
+            isActive,
+          }),
         });
 
-        setImportTotal(validRows.length);
-        let successCount = 0;
-        let skippedCount = 0;
-        let errorCount = 0;
-        const errors: string[] = [];
-
-        for (let i = 0; i < validRows.length; i++) {
-          const row = validRows[i];
-          const name = String(row[nameKey] || '').trim();
-          if (!name) {
-            setImportProgress(i + 1);
-            continue;
-          }
-
-          const category = categoryKey ? String(row[categoryKey] || '').trim() : '';
-          const segment = segmentKey ? String(row[segmentKey] || '').trim() : '';
-          const subcategory = subcategoryKey ? String(row[subcategoryKey] || '').trim() : '';
-          const productCode = productCodeKey ? String(row[productCodeKey] || '').trim() : '';
-          const focusProductsValue = focusProductsKey ? String(row[focusProductsKey] || '').trim().toLowerCase() : '';
-          const focusProducts = focusProductsValue === 'yes' || focusProductsValue === 'true';
-          const statusValue = statusKey ? String(row[statusKey] || '').trim().toLowerCase() : '';
-          const isActive = statusValue === 'active' || statusValue === '';
-
-          try {
-            const response = await fetch(`${API_BASE}/master-data/products`, {
-              method: 'POST',
-              headers: getAuthHeaders(),
-              body: JSON.stringify({
-                name,
-                category: category || undefined,
-                segment: segment || undefined,
-                subcategory: subcategory || undefined,
-                productCode: productCode || undefined,
-                focusProducts,
-                isActive,
-              }),
-            });
-
-            const data = await response.json();
-            if (response.ok && data.success) {
-              successCount++;
-            } else if (response.status === 409) {
-              // Product already exists - skip it, don't count as error
-              skippedCount++;
-            } else {
-              errorCount++;
-              const errorMsg = data.error?.message || data.error || `HTTP ${response.status}: ${response.statusText}`;
-              errors.push(`${name}: ${errorMsg}`);
-              console.error(`Import error for ${name}:`, { status: response.status, data });
-            }
-          } catch (error: any) {
-            errorCount++;
-            const errorMsg = error?.message || 'Network error';
-            errors.push(`${name}: ${errorMsg}`);
-            console.error(`Import exception for ${name}:`, error);
-          }
-
-          // Update progress
-          setImportProgress(i + 1);
-        }
-
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportTotal(0);
-
-        if (successCount > 0 || skippedCount > 0) {
-          let message = '';
-          if (successCount > 0) {
-            message = `${successCount} product(s) imported successfully`;
-          }
-          if (skippedCount > 0) {
-            message += message ? `. ${skippedCount} skipped (already exist)` : `${skippedCount} product(s) skipped (already exist)`;
-          }
-          if (errorCount > 0) {
-            message += `. ${errorCount} failed`;
-          }
-          showSuccess(message);
-          if (errorCount > 0 && errors.length > 0) {
-            console.error('Import errors:', errors);
-          }
-          fetchProducts();
+        const data = await response.json();
+        if (response.ok && data.success) {
+          successCount++;
+        } else if (response.status === 409) {
+          skippedCount++;
         } else {
-          showError(`Failed to import products. ${errorCount} error(s)`);
+          errorCount++;
+          const errorMsg = data.error?.message || data.error || `HTTP ${response.status}: ${response.statusText}`;
+          errors.push(`${name}: ${errorMsg}`);
+          console.error(`Import error for ${name}:`, { status: response.status, data });
         }
-      } catch (error) {
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportTotal(0);
-        showError('Failed to parse Excel file');
+      } catch (error: any) {
+        errorCount++;
+        const errorMsg = error?.message || 'Network error';
+        errors.push(`${name}: ${errorMsg}`);
+        console.error(`Import exception for ${name}:`, error);
       }
-    };
-    reader.readAsArrayBuffer(file);
-    event.target.value = '';
+
+      setImportProgress(i + 1);
+    }
+
+    setIsImporting(false);
+    setImportProgress(0);
+    setImportTotal(0);
+
+    if (successCount > 0 || skippedCount > 0) {
+      let message = '';
+      if (successCount > 0) message = `${successCount} product(s) imported successfully`;
+      if (skippedCount > 0) {
+        message += message ? `. ${skippedCount} skipped (already exist)` : `${skippedCount} product(s) skipped (already exist)`;
+      }
+      if (errorCount > 0) message += `. ${errorCount} failed`;
+      showSuccess(message);
+      if (errorCount > 0 && errors.length > 0) console.error('Import errors:', errors);
+      fetchProducts();
+      return { ok: true, message };
+    }
+    showError(`Failed to import products. ${errorCount} error(s)`);
+    return { ok: false, message: `Failed: ${errorCount} error(s)` };
   };
 
   const filteredProducts = products.filter(product => {
@@ -456,17 +394,6 @@ const ProductsMasterView: React.FC = () => {
               Delete ({selectedIds.size})
             </button>
           )}
-          <label className={`flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl transition-colors cursor-pointer ${isImporting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50'}`}>
-            <Upload size={16} className={isImporting ? 'animate-spin' : ''} />
-            {isImporting ? 'Importing...' : 'Import'}
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleFileUpload}
-              disabled={isImporting}
-              className="hidden"
-            />
-          </label>
           <button
             onClick={handleDownloadTemplate}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
@@ -489,6 +416,23 @@ const ProductsMasterView: React.FC = () => {
             Add Product
           </button>
         </div>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-200">
+          <ExcelUploadFlow
+            mode="single-sheet"
+            entityLabel="Products"
+            infoBullets={[
+              'Download the template with Name, Category, Segment, Product Code, Focus Products, and Status.',
+              'Upload your workbook and align columns using the mapping step.',
+              'Preview and confirm to import products.',
+            ]}
+            template={{ label: 'Download template', onDownload: () => Promise.resolve(handleDownloadTemplate()) }}
+            submitLabel="Upload products"
+            mapFields={PRODUCTS_MAP_FIELDS}
+            disabled={isImporting}
+            onImport={(rows) => importProductsFromMappedRows(rows)}
+          />
         </div>
 
         {showFilters && (

@@ -3,6 +3,8 @@ import { Plus, Edit2, Loader2, Download, Upload, Search, CheckCircle, XCircle, G
 import { useToast } from '../../../context/ToastContext';
 import ConfirmationModal from '../../shared/ConfirmationModal';
 import * as XLSX from 'xlsx';
+import ExcelUploadFlow from '../../shared/ExcelUploadFlow';
+import { LANGUAGES_MAP_FIELDS } from '../../../constants/excelUploadFields';
 
 interface Language {
   _id: string;
@@ -215,141 +217,77 @@ const LanguagesMasterView: React.FC = () => {
     XLSX.writeFile(wb, `languages_export_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const importLanguagesFromMappedRows = async (mappedRows: Record<string, unknown>[]) => {
+    const validRows = mappedRows.filter(
+      (row) => String(row.name ?? '').trim().length > 0 && String(row.code ?? '').trim().length > 0
+    );
+    if (validRows.length === 0) {
+      showError('Excel must have at least one row with Name and Code');
+      return { ok: false, message: 'No valid rows.' };
+    }
 
     setIsImporting(true);
     setImportProgress(0);
-    setImportTotal(0);
+    setImportTotal(validRows.length);
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+    const errors: string[] = [];
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
+    for (let i = 0; i < validRows.length; i++) {
+      const row = validRows[i];
+      const name = String(row.name ?? '').trim();
+      const code = String(row.code ?? '').trim();
+      const displayOrder = parseInt(String(row.displayOrder ?? '0'), 10) || 0;
+      const activeValue = String(row.isActive ?? '').trim().toLowerCase();
+      const isActive = activeValue === 'active' || activeValue === '' || activeValue === 'true';
+
       try {
-        const data = e.target?.result;
-        if (!data) {
-          showError('Failed to read file');
-          setIsImporting(false);
-          return;
-        }
-
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const rows = XLSX.utils.sheet_to_json<any>(worksheet, { defval: '' });
-
-        if (rows.length === 0) {
-          showError('Excel file must have at least one data row');
-          setIsImporting(false);
-          return;
-        }
-
-        // Get headers from first row
-        const firstRow = rows[0];
-        const nameKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('name')) || '';
-        const codeKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('code')) || '';
-        const displayOrderKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('display order') || k.toLowerCase().includes('displayorder')) || '';
-        const activeKey = Object.keys(firstRow).find(k => k.toLowerCase().includes('active')) || '';
-
-        if (!nameKey || !codeKey) {
-          showError('Excel must have "Name" and "Code" columns');
-          setIsImporting(false);
-          return;
-        }
-
-        // Filter out empty rows
-        const validRows = rows.filter((row: any) => {
-          const name = String(row[nameKey] || '').trim();
-          const code = String(row[codeKey] || '').trim();
-          return name.length > 0 && code.length > 0;
+        const response = await fetch(`${API_BASE}/master-data/languages`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ name, code, displayOrder, isActive }),
         });
 
-        setImportTotal(validRows.length);
-        let successCount = 0;
-        let skippedCount = 0;
-        let errorCount = 0;
-        const errors: string[] = [];
-
-        for (let i = 0; i < validRows.length; i++) {
-          const row = validRows[i];
-          const name = String(row[nameKey] || '').trim();
-          const code = String(row[codeKey] || '').trim();
-          if (!name || !code) {
-            setImportProgress(i + 1);
-            continue;
-          }
-
-          const displayOrder = displayOrderKey ? parseInt(String(row[displayOrderKey] || '0'), 10) || 0 : 0;
-          const activeValue = activeKey ? String(row[activeKey] || '').trim().toLowerCase() : '';
-          const isActive = activeValue === 'active' || activeValue === '';
-
-          try {
-            const response = await fetch(`${API_BASE}/master-data/languages`, {
-              method: 'POST',
-              headers: getAuthHeaders(),
-              body: JSON.stringify({
-                name,
-                code,
-                displayOrder,
-                isActive,
-              }),
-            });
-
-            const data = await response.json();
-            if (response.ok && data.success) {
-              successCount++;
-            } else if (response.status === 409) {
-              // Language already exists - skip it, don't count as error
-              skippedCount++;
-            } else {
-              errorCount++;
-              const errorMsg = data.error?.message || data.error || `HTTP ${response.status}: ${response.statusText}`;
-              errors.push(`${name} (${code}): ${errorMsg}`);
-              console.error(`Import error for ${name} (${code}):`, { status: response.status, data });
-            }
-          } catch (error: any) {
-            errorCount++;
-            const errorMsg = error?.message || 'Network error';
-            errors.push(`${name} (${code}): ${errorMsg}`);
-            console.error(`Import exception for ${name} (${code}):`, error);
-          }
-
-          // Update progress
-          setImportProgress(i + 1);
-        }
-
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportTotal(0);
-
-        if (successCount > 0 || skippedCount > 0) {
-          let message = '';
-          if (successCount > 0) {
-            message = `${successCount} language(s) imported successfully`;
-          }
-          if (skippedCount > 0) {
-            message += message ? `. ${skippedCount} skipped (already exist)` : `${skippedCount} language(s) skipped (already exist)`;
-          }
-          if (errorCount > 0) {
-            message += `. ${errorCount} failed`;
-          }
-          showSuccess(message);
-          if (errorCount > 0 && errors.length > 0) {
-            console.error('Import errors:', errors);
-          }
-          fetchLanguages();
+        const data = await response.json();
+        if (response.ok && data.success) {
+          successCount++;
+        } else if (response.status === 409) {
+          skippedCount++;
         } else {
-          showError(`Failed to import languages. ${errorCount} error(s)`);
+          errorCount++;
+          const errorMsg = data.error?.message || data.error || `HTTP ${response.status}: ${response.statusText}`;
+          errors.push(`${name} (${code}): ${errorMsg}`);
+          console.error(`Import error for ${name} (${code}):`, { status: response.status, data });
         }
-      } catch (error) {
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportTotal(0);
-        showError('Failed to parse Excel file');
+      } catch (error: any) {
+        errorCount++;
+        const errorMsg = error?.message || 'Network error';
+        errors.push(`${name} (${code}): ${errorMsg}`);
+        console.error(`Import exception for ${name} (${code}):`, error);
       }
-    };
-    reader.readAsArrayBuffer(file);
-    event.target.value = '';
+
+      setImportProgress(i + 1);
+    }
+
+    setIsImporting(false);
+    setImportProgress(0);
+    setImportTotal(0);
+
+    if (successCount > 0 || skippedCount > 0) {
+      let message = '';
+      if (successCount > 0) message = `${successCount} language(s) imported successfully`;
+      if (skippedCount > 0) {
+        message += message ? `. ${skippedCount} skipped (already exist)` : `${skippedCount} language(s) skipped (already exist)`;
+      }
+      if (errorCount > 0) message += `. ${errorCount} failed`;
+      showSuccess(message);
+      if (errorCount > 0 && errors.length > 0) console.error('Import errors:', errors);
+      fetchLanguages();
+      return { ok: true, message };
+    }
+    showError(`Failed to import languages. ${errorCount} error(s)`);
+    return { ok: false, message: `Failed: ${errorCount} error(s)` };
   };
 
   const filteredLanguages = languages.filter((language) => {
@@ -387,17 +325,6 @@ const LanguagesMasterView: React.FC = () => {
               Delete ({selectedIds.size})
             </button>
           )}
-          <label className={`flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
-            <Upload size={16} className={isImporting ? 'animate-spin' : ''} />
-            {isImporting ? 'Importing...' : 'Import'}
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleFileUpload}
-              disabled={isImporting}
-              className="hidden"
-            />
-          </label>
           <button
             onClick={handleDownloadTemplate}
             className="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
@@ -420,6 +347,23 @@ const LanguagesMasterView: React.FC = () => {
             Add Language
           </button>
         </div>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-200">
+          <ExcelUploadFlow
+            mode="single-sheet"
+            entityLabel="Languages"
+            infoBullets={[
+              'Download the template with Name, Code, Display Order, and Active columns.',
+              'Upload your file, map columns if needed, and preview rows.',
+              'Confirm to import languages (duplicates are skipped).',
+            ]}
+            template={{ label: 'Download template', onDownload: () => Promise.resolve(handleDownloadTemplate()) }}
+            submitLabel="Upload languages"
+            mapFields={LANGUAGES_MAP_FIELDS}
+            disabled={isImporting}
+            onImport={(rows) => importLanguagesFromMappedRows(rows)}
+          />
         </div>
 
         {showFilters && (

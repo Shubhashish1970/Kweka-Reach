@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useToast } from '../../context/ToastContext';
 import { ffaAPI } from '../../services/api';
-import { Trash2, Database, Upload, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Trash2, Database, Loader2 } from 'lucide-react';
 import Button from '../shared/Button';
 import ConfirmationModal from '../shared/ConfirmationModal';
+import ExcelUploadFlow from '../shared/ExcelUploadFlow';
+import { HIERARCHY_MAP_FIELDS } from '../../constants/excelUploadFields';
 
 const DataManagementView: React.FC = () => {
   const { showToast } = useToast();
@@ -14,8 +16,6 @@ const DataManagementView: React.FC = () => {
 
   const [activityCount, setActivityCount] = useState(50);
   const [farmersPerActivity, setFarmersPerActivity] = useState(12);
-  const [hierarchyFile, setHierarchyFile] = useState<File | null>(null);
-  const [seeding, setSeeding] = useState(false);
 
   const handleClear = async () => {
     setShowClearConfirm(false);
@@ -31,23 +31,6 @@ const DataManagementView: React.FC = () => {
       showToast(e instanceof Error ? e.message : 'Clear failed', 'error');
     } finally {
       setClearing(false);
-    }
-  };
-
-  const handleSeed = async () => {
-    setSeeding(true);
-    try {
-      const res = await ffaAPI.seedFromHierarchy(hierarchyFile ?? null, activityCount, farmersPerActivity);
-      const data = res?.data as { seed?: { activitiesGenerated?: number; farmersGenerated?: number }; hierarchyRowsUsed?: number } | undefined;
-      const seedMsg = data?.seed
-        ? `Generated ${data.seed.activitiesGenerated ?? 0} activities, ${data.seed.farmersGenerated ?? 0} farmers.`
-        : '';
-      const hierarchyMsg = data?.hierarchyRowsUsed ? ` Hierarchy: ${data.hierarchyRowsUsed} rows used.` : '';
-      showToast(`${res?.message ?? 'Done.'} ${seedMsg}${hierarchyMsg} Full sync started – check sync progress.`, 'success');
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Generate & sync failed', 'error');
-    } finally {
-      setSeeding(false);
     }
   };
 
@@ -142,48 +125,48 @@ const DataManagementView: React.FC = () => {
               />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Sales Hierarchy Excel (optional)</label>
-            <p className="text-xs text-slate-500 mb-2">Download template for clearly labelled columns (Territory Name, Region, Zone Name, BU). Template includes an Instructions sheet.</p>
-            <div className="flex flex-wrap items-center gap-3 mb-2">
-              <button
-                type="button"
-                onClick={() => ffaAPI.downloadHierarchyTemplate().then(() => showToast('Template downloaded', 'success')).catch(() => showToast('Download failed', 'error'))}
-                className="text-sm font-medium text-lime-600 hover:text-lime-700"
-              >
-                Download template
-              </button>
-            </div>
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 px-4 py-3 rounded-xl border border-slate-200 border-dashed bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors min-h-12">
-                <FileSpreadsheet size={20} className="text-slate-500" />
-                <span className="text-sm font-medium text-slate-700">{hierarchyFile ? hierarchyFile.name : 'Choose .xlsx file'}</span>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  className="hidden"
-                  onChange={(e) => setHierarchyFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
-              {hierarchyFile && (
-                <button
-                  type="button"
-                  onClick={() => setHierarchyFile(null)}
-                  className="text-sm text-slate-500 hover:text-red-600"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
+          <div className="border-t border-slate-200 pt-6">
+            <label className="block text-sm font-medium text-slate-700 mb-2">Sales Hierarchy Excel (optional)</label>
+            <p className="text-xs text-slate-500 mb-3">
+              Download the template for labelled columns (Territory Name, Region, Zone Name, BU). You can run Generate &amp; sync without a file, or map columns then confirm.
+            </p>
+            <ExcelUploadFlow
+              mode="optional-file"
+              entityLabel="Sales Hierarchy"
+              infoTitle="How to use Sales Hierarchy Excel with Mock FFA"
+              infoBullets={[
+                'Download the hierarchy template and fill territory, region, zone, and BU.',
+                'Optionally upload your file — or continue without a file to use defaults.',
+                'Map columns if headers differ, preview, then Generate & sync.',
+              ]}
+              template={{
+                label: 'Download template',
+                onDownload: async () => {
+                  await ffaAPI.downloadHierarchyTemplate();
+                  showToast('Template downloaded', 'success');
+                },
+              }}
+              submitLabel="Generate & sync"
+              mapFields={HIERARCHY_MAP_FIELDS}
+              onImport={async (mappedOrNull) => {
+                try {
+                  const res = await ffaAPI.seedFromHierarchy(mappedOrNull, activityCount, farmersPerActivity);
+                  const data = res?.data as
+                    | { seed?: { activitiesGenerated?: number; farmersGenerated?: number }; hierarchyRowsUsed?: number }
+                    | undefined;
+                  const seedMsg = data?.seed
+                    ? `Generated ${data.seed.activitiesGenerated ?? 0} activities, ${data.seed.farmersGenerated ?? 0} farmers.`
+                    : '';
+                  const hierarchyMsg = data?.hierarchyRowsUsed ? ` Hierarchy: ${data.hierarchyRowsUsed} rows used.` : '';
+                  showToast(`${res?.message ?? 'Done.'} ${seedMsg}${hierarchyMsg} Full sync started – check sync progress.`, 'success');
+                  return { ok: true, message: res?.message ?? 'Generate & sync completed.' };
+                } catch (e) {
+                  showToast(e instanceof Error ? e.message : 'Generate & sync failed', 'error');
+                  return { ok: false, message: e instanceof Error ? e.message : 'Generate & sync failed' };
+                }
+              }}
+            />
           </div>
-          <Button
-            variant="primary"
-            onClick={handleSeed}
-            disabled={seeding}
-          >
-            {seeding ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-            <span>{seeding ? 'Generating & syncing…' : 'Generate & sync'}</span>
-          </Button>
         </div>
       </div>
 

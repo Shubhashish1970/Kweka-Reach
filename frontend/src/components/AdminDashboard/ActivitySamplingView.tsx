@@ -857,7 +857,177 @@ const ActivitySamplingView: React.FC = () => {
           </div>
         )}
 
-        
+        {/* Filters – expand when Filter button clicked */}
+        {showFilters && (
+          <div className="mt-3 pt-3 border-t border-slate-200 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Activity Type</label>
+                <StyledSelect
+                  value={filters.activityType}
+                  onChange={(v) => setFilters({ ...filters, activityType: v })}
+                  options={[
+                    { value: '', label: 'All Types' },
+                    { value: 'Field Day', label: 'Field Day' },
+                    { value: 'Group Meeting', label: 'Group Meeting' },
+                    { value: 'Demo Visit', label: 'Demo Visit' },
+                    { value: 'OFM', label: 'OFM' },
+                    { value: 'Other', label: 'Other' },
+                  ]}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Territory</label>
+                <StyledSelect
+                  value={filters.territory}
+                  onChange={(v) => setFilters({ ...filters, territory: v })}
+                  options={[
+                    { value: '', label: 'All Territories' },
+                    ...filterOptions.territoryOptions.map((t) => ({ value: t, label: t })),
+                  ]}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Zone</label>
+                <StyledSelect
+                  value={filters.zone}
+                  onChange={(v) => setFilters({ ...filters, zone: v })}
+                  options={[
+                    { value: '', label: 'All Zones' },
+                    ...filterOptions.zoneOptions.map((z) => ({ value: z, label: z })),
+                  ]}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">BU</label>
+                <StyledSelect
+                  value={filters.bu}
+                  onChange={(v) => setFilters({ ...filters, bu: v })}
+                  options={[
+                    { value: '', label: 'All BUs' },
+                    ...filterOptions.buOptions.map((b) => ({ value: b, label: b })),
+                  ]}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Sampling Status</label>
+                <StyledSelect
+                  value={filters.samplingStatus}
+                  onChange={(v) => setFilters({ ...filters, samplingStatus: v as any })}
+                  options={[
+                    { value: '', label: 'All Statuses' },
+                    { value: 'sampled', label: 'Full (farmers selected)' },
+                    { value: 'not_sampled', label: 'Not Sampled' },
+                    { value: 'partial', label: 'Partial (no farmers selected)' },
+                  ]}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Date Range</label>
+                <div className="relative" ref={datePickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDatePickerOpen((prev) => {
+                        const next = !prev;
+                        if (!prev && next) syncDraftFromFilters();
+                        return next;
+                      });
+                    }}
+                    className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 flex items-center justify-between"
+                  >
+                    <span className="truncate">
+                      {selectedPreset}
+                      {filters.dateFrom && filters.dateTo ? ` • ${formatPretty(filters.dateFrom)} - ${formatPretty(filters.dateTo)}` : ''}
+                    </span>
+                    <span className="text-slate-400 font-black">▾</span>
+                  </button>
+                  {isDatePickerOpen && (
+                    <div className="absolute z-50 mt-2 right-0 left-auto w-[720px] max-w-[90vw] bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden">
+                      <div className="flex flex-col sm:flex-row">
+                        <div className="w-full sm:w-56 border-b sm:border-b-0 sm:border-r border-slate-200 bg-slate-50 p-2 shrink-0">
+                          {([
+                            'Custom',
+                            'Today',
+                            'Yesterday',
+                            'This week (Sun - Today)',
+                            'Last 7 days',
+                            'Last week (Sun - Sat)',
+                            'Last 28 days',
+                            'Last 30 days',
+                            'YTD',
+                          ] as DateRangePreset[]).map((p) => {
+                            const isActive = selectedPreset === p;
+                            return (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedPreset(p);
+                                  const { start, end } = getRange(p);
+                                  setDraftStart(start);
+                                  setDraftEnd(end);
+                                }}
+                                className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-colors ${
+                                  isActive ? 'bg-white border border-slate-200 text-slate-900' : 'text-slate-700 hover:bg-white'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="flex-1 p-4">
+                          <div className="flex items-center justify-between gap-3 mb-4">
+                            <div className="flex-1">
+                              <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">Start date</p>
+                              <input
+                                type="date"
+                                value={draftStart}
+                                onChange={(e) => { setSelectedPreset('Custom'); setDraftStart(e.target.value); }}
+                                className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">End date</p>
+                              <input
+                                type="date"
+                                value={draftEnd}
+                                onChange={(e) => { setSelectedPreset('Custom'); setDraftEnd(e.target.value); }}
+                                className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => { setIsDatePickerOpen(false); syncDraftFromFilters(); }}
+                              className="px-4 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFilters((prev) => ({ ...prev, dateFrom: draftStart || '', dateTo: draftEnd || '' }));
+                                setIsDatePickerOpen(false);
+                              }}
+                              className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-slate-900 hover:bg-slate-800"
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {dataSource === 'excel' && (
           <div className="mt-3 pt-3 border-t border-slate-200">
@@ -1123,177 +1293,6 @@ const ActivitySamplingView: React.FC = () => {
           </div>
         </div>
 
-        {/* Filters – expand when Filter button clicked */}
-        {showFilters && (
-          <div className="mt-3 pt-3 border-t border-slate-200 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Activity Type</label>
-            <StyledSelect
-              value={filters.activityType}
-              onChange={(v) => setFilters({ ...filters, activityType: v })}
-              options={[
-                { value: '', label: 'All Types' },
-                { value: 'Field Day', label: 'Field Day' },
-                { value: 'Group Meeting', label: 'Group Meeting' },
-                { value: 'Demo Visit', label: 'Demo Visit' },
-                { value: 'OFM', label: 'OFM' },
-                { value: 'Other', label: 'Other' },
-              ]}
-            />
-          </div>
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Territory</label>
-            <StyledSelect
-              value={filters.territory}
-              onChange={(v) => setFilters({ ...filters, territory: v })}
-              options={[
-                { value: '', label: 'All Territories' },
-                ...filterOptions.territoryOptions.map((t) => ({ value: t, label: t })),
-              ]}
-            />
-          </div>
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Zone</label>
-            <StyledSelect
-              value={filters.zone}
-              onChange={(v) => setFilters({ ...filters, zone: v })}
-              options={[
-                { value: '', label: 'All Zones' },
-                ...filterOptions.zoneOptions.map((z) => ({ value: z, label: z })),
-              ]}
-            />
-          </div>
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">BU</label>
-            <StyledSelect
-              value={filters.bu}
-              onChange={(v) => setFilters({ ...filters, bu: v })}
-              options={[
-                { value: '', label: 'All BUs' },
-                ...filterOptions.buOptions.map((b) => ({ value: b, label: b })),
-              ]}
-            />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Sampling Status</label>
-            <StyledSelect
-              value={filters.samplingStatus}
-              onChange={(v) => setFilters({ ...filters, samplingStatus: v as any })}
-              options={[
-                { value: '', label: 'All Statuses' },
-                { value: 'sampled', label: 'Full (farmers selected)' },
-                { value: 'not_sampled', label: 'Not Sampled' },
-                { value: 'partial', label: 'Partial (no farmers selected)' },
-              ]}
-            />
-              </div>
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Date Range</label>
-            <div className="relative" ref={datePickerRef}>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsDatePickerOpen((prev) => {
-                    const next = !prev;
-                    if (!prev && next) syncDraftFromFilters();
-                    return next;
-                  });
-                }}
-                className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 flex items-center justify-between"
-              >
-                <span className="truncate">
-                  {selectedPreset}
-                  {filters.dateFrom && filters.dateTo ? ` • ${formatPretty(filters.dateFrom)} - ${formatPretty(filters.dateTo)}` : ''}
-                </span>
-                <span className="text-slate-400 font-black">▾</span>
-              </button>
-              {isDatePickerOpen && (
-                <div className="absolute z-50 mt-2 right-0 left-auto w-[720px] max-w-[90vw] bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden">
-                  <div className="flex flex-col sm:flex-row">
-                    <div className="w-full sm:w-56 border-b sm:border-b-0 sm:border-r border-slate-200 bg-slate-50 p-2 shrink-0">
-                      {([
-                        'Custom',
-                        'Today',
-                        'Yesterday',
-                        'This week (Sun - Today)',
-                        'Last 7 days',
-                        'Last week (Sun - Sat)',
-                        'Last 28 days',
-                        'Last 30 days',
-                        'YTD',
-                      ] as DateRangePreset[]).map((p) => {
-                        const isActive = selectedPreset === p;
-                        return (
-                          <button
-                            key={p}
-                            type="button"
-                            onClick={() => {
-                              setSelectedPreset(p);
-                              const { start, end } = getRange(p);
-                              setDraftStart(start);
-                              setDraftEnd(end);
-                            }}
-                            className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-colors ${
-                              isActive ? 'bg-white border border-slate-200 text-slate-900' : 'text-slate-700 hover:bg-white'
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="flex-1 p-4">
-                      <div className="flex items-center justify-between gap-3 mb-4">
-                        <div className="flex-1">
-                          <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">Start date</p>
-                          <input
-                            type="date"
-                            value={draftStart}
-                            onChange={(e) => { setSelectedPreset('Custom'); setDraftStart(e.target.value); }}
-                            className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">End date</p>
-                          <input
-                            type="date"
-                            value={draftEnd}
-                            onChange={(e) => { setSelectedPreset('Custom'); setDraftEnd(e.target.value); }}
-                            className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => { setIsDatePickerOpen(false); syncDraftFromFilters(); }}
-                          className="px-4 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFilters((prev) => ({ ...prev, dateFrom: draftStart || '', dateTo: draftEnd || '' }));
-                            setIsDatePickerOpen(false);
-                          }}
-                          className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-slate-900 hover:bg-slate-800"
-                        >
-                          Apply
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Statistics Dashboard */}

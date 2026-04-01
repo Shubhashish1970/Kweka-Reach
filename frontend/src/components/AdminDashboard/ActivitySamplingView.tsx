@@ -959,8 +959,10 @@ const ActivitySamplingView: React.FC = () => {
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-bold text-slate-700">Importing Excel…</span>
                     <span className="text-sm font-bold text-slate-600">
-                      {importProgress.activitiesProcessed}/{importProgress.totalActivities} activities •{' '}
-                      {importProgress.farmersProcessed}/{importProgress.totalFarmers} farmers
+                      {Number((importProgress as any).loadedQualifiedActivities ?? importProgress.activitiesProcessed ?? 0)}/
+                      {Number((importProgress as any).totalQualifiedActivities ?? importProgress.totalActivities ?? 0)} activities •{' '}
+                      {Number((importProgress as any).loadedQualifiedFarmers ?? importProgress.farmersProcessed ?? 0)}/
+                      {Number((importProgress as any).totalQualifiedFarmers ?? importProgress.totalFarmers ?? 0)} farmers
                     </span>
                   </div>
                   <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">

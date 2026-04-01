@@ -502,6 +502,6 @@ export async function startImportExcelJob(fileBuffer: Buffer): Promise<{ started
     importProgress.errorCount += 1;
   });
 
-  return { started: true, jobId, message: 'Excel import started. Poll /api/ffa/import-excel-progress for status.' };
+  return { started: true, jobId, message: 'Excel import started. You can monitor progress on this page.' };
 }
 

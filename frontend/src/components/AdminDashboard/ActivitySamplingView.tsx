@@ -487,6 +487,9 @@ const ActivitySamplingView: React.FC = () => {
           ? `${res.message} Removed ${res?.data?.deletedActivities ?? 0} activities, ${res?.data?.deletedFarmers ?? 0} farmers.`
           : 'Batch deleted.'
       );
+      // Clear prior Excel import summary/progress since the underlying batch data may be gone now.
+      setImportProgress(null);
+      setImportReport(null);
       setBatchDeleteConfirm(null);
       await fetchDataBatches();
       await fetchActivities(pagination.page);

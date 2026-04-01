@@ -14,6 +14,11 @@ export type ImportExcelProgressState = {
   totalActivities: number;
   farmersProcessed: number;
   totalFarmers: number;
+  /** Qualified totals/loaded counts for unified progress UI */
+  totalQualifiedActivities?: number;
+  totalQualifiedFarmers?: number;
+  loadedQualifiedActivities?: number;
+  loadedQualifiedFarmers?: number;
   errorCount: number;
   message: string;
   jobId: string | null;
@@ -39,6 +44,10 @@ let importProgress: ImportExcelProgressState = {
   totalActivities: 0,
   farmersProcessed: 0,
   totalFarmers: 0,
+  totalQualifiedActivities: 0,
+  totalQualifiedFarmers: 0,
+  loadedQualifiedActivities: 0,
+  loadedQualifiedFarmers: 0,
   errorCount: 0,
   message: '',
   jobId: null,
@@ -161,6 +170,10 @@ export async function startImportExcelJob(fileBuffer: Buffer): Promise<{ started
     totalActivities: 0,
     farmersProcessed: 0,
     totalFarmers: 0,
+    totalQualifiedActivities: 0,
+    totalQualifiedFarmers: 0,
+    loadedQualifiedActivities: 0,
+    loadedQualifiedFarmers: 0,
     errorCount: 0,
     message: 'Excel import started',
     jobId,
@@ -241,12 +254,30 @@ export async function startImportExcelJob(fileBuffer: Buffer): Promise<{ started
       const farmerOps: any[] = [];
       const mobilesByActivity = new Map<string, string[]>();
       const uniqueMobiles = new Set<string>();
+      let qualifiedActivities = 0;
 
       for (const [activityId, { row: activityRow, rowNum }] of activityById.entries()) {
         const state = normalizeStr((activityRow as any).state);
         const territory = normalizeStr((activityRow as any).territory);
         const territoryName = normalizeStr((activityRow as any).territoryName || territory);
         const preferredLanguage = languageByState.get(state) || 'English';
+
+        // Activities must qualify by required fields + valid date (same checks as upsert phase).
+        try {
+          const type = normalizeStr((activityRow as any).type);
+          const officerId = normalizeStr((activityRow as any).officerId);
+          const officerName = normalizeStr((activityRow as any).officerName);
+          const location = normalizeStr((activityRow as any).location);
+          const terr = normalizeStr((activityRow as any).territory);
+          const st = normalizeStr((activityRow as any).state);
+          if (!type || !officerId || !officerName || !location || !terr || !st) {
+            throw new Error('Missing one or more required fields: type, officerId, officerName, location, territory, state');
+          }
+          void parseExcelDate((activityRow as any).date);
+          qualifiedActivities += 1;
+        } catch {
+          // Not qualified; errors are surfaced later during activity upsert.
+        }
 
         const farmerRowsForActivity = farmersByActivity.get(activityId) || [];
         const seenMobile = new Set<string>();
@@ -299,6 +330,11 @@ export async function startImportExcelJob(fileBuffer: Buffer): Promise<{ started
         }
       }
 
+      importProgress.totalQualifiedActivities = qualifiedActivities;
+      importProgress.totalQualifiedFarmers = uniqueMobiles.size;
+      importProgress.loadedQualifiedActivities = 0;
+      importProgress.loadedQualifiedFarmers = 0;
+
       // Bulk upsert farmers
       importProgress.message = 'Upserting farmers…';
       let farmersUpserted = 0;
@@ -312,6 +348,8 @@ export async function startImportExcelJob(fileBuffer: Buffer): Promise<{ started
         },
         (done) => {
           importProgress.farmersProcessed = Math.min(done, farmerOps.length);
+          // Track unified progress based on qualified farmer upserts (deduped by mobile).
+          importProgress.loadedQualifiedFarmers = Math.min(importProgress.farmersProcessed, importProgress.totalQualifiedFarmers || 0);
         }
       );
 
@@ -403,6 +441,10 @@ export async function startImportExcelJob(fileBuffer: Buffer): Promise<{ started
           importProgress.activitiesProcessed = Math.max(
             importProgress.activitiesProcessed,
             Math.min(done, activityOps.length)
+          );
+          importProgress.loadedQualifiedActivities = Math.min(
+            Math.max(0, done),
+            importProgress.totalQualifiedActivities || activityOps.length
           );
         }
       );

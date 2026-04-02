@@ -228,6 +228,8 @@ const CallTaskSchema = new Schema<ICallTask>(
     callbackNumber: {
       type: Number,
       default: 0, // 0 = original, 1 = 1st callback, 2 = 2nd callback (max)
+      min: [0, 'callbackNumber cannot be negative'],
+      max: [2, 'callbackNumber cannot exceed 2 (maximum 2 callbacks allowed)'],
     },
   },
   {

@@ -752,6 +752,14 @@ export const assignTaskToAgent = async (
       throw new Error('Task not found');
     }
 
+    // Prevent reopening terminal tasks
+    const terminalStatuses: ICallTask['status'][] = ['completed', 'not_reachable', 'invalid_number'];
+    if (terminalStatuses.includes(task.status)) {
+      const err: any = new Error(`Cannot reassign a task in terminal state "${task.status}"`);
+      err.statusCode = 400;
+      throw err;
+    }
+
     // Verify agent exists and is active
     const agent = await User.findById(agentId);
     if (!agent || !agent.isActive || agent.role !== 'cc_agent') {

@@ -33,8 +33,15 @@ export const authenticate = async (
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    // Verify token
-    const decoded = verifyToken(token) as JWTPayload;
+    // Verify token — verifyToken throws a plain Error; wrap it as 401
+    let decoded: JWTPayload;
+    try {
+      decoded = verifyToken(token) as JWTPayload;
+    } catch {
+      const tokenError: AppError = new Error('Invalid or expired token');
+      tokenError.statusCode = 401;
+      throw tokenError;
+    }
 
     // Get user from database
     const user = await User.findById(decoded.userId).select('+password');

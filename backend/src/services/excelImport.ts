@@ -298,6 +298,14 @@ export async function startImportExcelJob(fileBuffer: Buffer): Promise<{ started
             });
             continue;
           }
+          if (!/^[0-9]{10}$/.test(mobileNumber)) {
+            errors.push({
+              sheet: 'Farmers',
+              row: frw.rowNum,
+              message: `Invalid mobile number "${mobileNumber}" for activityId=${activityId}: must be exactly 10 digits`,
+            });
+            continue;
+          }
           if (seenMobile.has(mobileNumber)) continue;
           seenMobile.add(mobileNumber);
           mobiles.push(mobileNumber);

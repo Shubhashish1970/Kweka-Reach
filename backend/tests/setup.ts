@@ -7,6 +7,9 @@ beforeAll(async () => {
   mongo = await MongoMemoryServer.create();
   const uri = mongo.getUri();
   await mongoose.connect(uri);
+  // Ensure all schema indexes (including unique constraints) are created
+  // before any test runs, so unique-index tests work reliably.
+  await mongoose.syncIndexes();
 });
 
 beforeEach(async () => {

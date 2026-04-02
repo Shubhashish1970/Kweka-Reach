@@ -142,7 +142,7 @@ export const sampleAndCreateTasks = async (
 }> => {
   try {
     const config = await getActiveSamplingConfig();
-    const activity = await Activity.findById(activityId).populate('farmerIds');
+    const activity = await Activity.findById(activityId);
     
     if (!activity) {
       throw new Error('Activity not found');

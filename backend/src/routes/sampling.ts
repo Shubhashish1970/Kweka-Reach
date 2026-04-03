@@ -5,6 +5,7 @@ import { requirePermission } from '../middleware/rbac.js';
 import { sampleAndCreateTasks } from '../services/samplingService.js';
 import { SamplingAudit } from '../models/SamplingAudit.js';
 import { Activity } from '../models/Activity.js';
+import { Farmer } from '../models/Farmer.js';
 import { SamplingConfig } from '../models/SamplingConfig.js';
 import { CallTask } from '../models/CallTask.js';
 import { SamplingRun } from '../models/SamplingRun.js';
@@ -167,6 +168,24 @@ router.get(
 
       const auditCollection = SamplingAudit.collection.name;
       const taskCollection = CallTask.collection.name;
+      const farmerCollection = Farmer.collection.name;
+
+      /** Dedupe farmer ObjectIds on an activity, then resolve distinct mobile numbers (matches admin activities-sampling stats). */
+      const farmerIdBasis = [
+        { $addFields: { farmerIds: { $setUnion: [{ $ifNull: ['$farmerIds', []] }, []] } } },
+        { $project: { type: 1, farmerIds: 1 } },
+        { $unwind: { path: '$farmerIds', preserveNullAndEmptyArrays: false } },
+        {
+          $lookup: {
+            from: farmerCollection,
+            localField: 'farmerIds',
+            foreignField: '_id',
+            as: 'farmer',
+            pipeline: [{ $project: { _id: 0, mobileNumber: 1 } }],
+          },
+        },
+        { $unwind: { path: '$farmer', preserveNullAndEmptyArrays: false } },
+      ];
 
       const pipeline: any[] = [
         { $match: match },
@@ -188,7 +207,6 @@ router.get(
         },
         {
           $addFields: {
-            farmersTotal: { $size: { $ifNull: ['$farmerIds', []] } },
             // Farmers sampled = distinct farmers with at least one CallTask (first-time + ad-hoc), not just latest audit
             sampledFarmers: {
               $size: {
@@ -218,7 +236,6 @@ router.get(
             sampled: { $sum: { $cond: [{ $eq: ['$lifecycleStatus', 'sampled'] }, 1, 0] } },
             inactive: { $sum: { $cond: [{ $eq: ['$lifecycleStatus', 'inactive'] }, 1, 0] } },
             notEligible: { $sum: { $cond: [{ $eq: ['$lifecycleStatus', 'not_eligible'] }, 1, 0] } },
-            farmersTotal: { $sum: '$farmersTotal' },
             sampledFarmers: { $sum: '$sampledFarmers' },
             tasksCreated: { $sum: '$tasksCreated' },
             unassignedTasks: { $sum: '$unassignedTasks' },
@@ -227,16 +244,43 @@ router.get(
         { $sort: { totalActivities: -1 } },
       ];
 
-      const byType = await Activity.aggregate(pipeline);
+      const uniqueFarmersByTypePipeline: any[] = [
+        { $match: match },
+        ...farmerIdBasis,
+        { $group: { _id: { type: '$type', mobile: '$farmer.mobileNumber' } } },
+        { $group: { _id: '$_id.type', farmersTotal: { $sum: 1 } } },
+      ];
 
-      const totals = byType.reduce(
+      const uniqueFarmersGlobalPipeline: any[] = [
+        { $match: match },
+        ...farmerIdBasis,
+        { $group: { _id: '$farmer.mobileNumber' } },
+        { $count: 'count' },
+      ];
+
+      const [byType, uniqueByTypeRows, uniqueGlobalRow] = await Promise.all([
+        Activity.aggregate(pipeline),
+        Activity.aggregate(uniqueFarmersByTypePipeline),
+        Activity.aggregate(uniqueFarmersGlobalPipeline),
+      ]);
+
+      const farmersTotalByType = new Map<string, number>(
+        uniqueByTypeRows.map((r: any) => [String(r._id ?? ''), Number(r.farmersTotal || 0)])
+      );
+      const globalUniqueFarmers = Number(uniqueGlobalRow?.[0]?.count ?? 0);
+
+      const byTypeWithFarmers = byType.map((r: any) => ({
+        ...r,
+        farmersTotal: farmersTotalByType.get(String(r._id ?? '')) ?? 0,
+      }));
+
+      const totals = byTypeWithFarmers.reduce(
         (acc: any, row: any) => {
           acc.totalActivities += row.totalActivities || 0;
           acc.active += row.active || 0;
           acc.sampled += row.sampled || 0;
           acc.inactive += row.inactive || 0;
           acc.notEligible += row.notEligible || 0;
-          acc.farmersTotal += row.farmersTotal || 0;
           acc.sampledFarmers += row.sampledFarmers || 0;
           acc.tasksCreated += row.tasksCreated || 0;
           acc.unassignedTasks += row.unassignedTasks || 0;
@@ -248,7 +292,7 @@ router.get(
           sampled: 0,
           inactive: 0,
           notEligible: 0,
-          farmersTotal: 0,
+          farmersTotal: globalUniqueFarmers,
           sampledFarmers: 0,
           tasksCreated: 0,
           unassignedTasks: 0,
@@ -261,7 +305,7 @@ router.get(
           dateFrom: dateFrom || null,
           dateTo: dateTo || null,
           totals,
-          byType: byType.map((r: any) => ({
+          byType: byTypeWithFarmers.map((r: any) => ({
             type: r._id,
             totalActivities: r.totalActivities,
             active: r.active,

@@ -1218,7 +1218,7 @@ const SamplingControlView: React.FC = () => {
             { label: 'Sampled', value: stats?.totals?.sampled ?? 0, description: 'Activities that have been sampled (first-time or ad-hoc).' },
             { label: 'Inactive', value: stats?.totals?.inactive ?? 0, description: 'Inactive: An activity is marked Inactive when a sampling run processed it but no farmers were selected (e.g. all farmers were in cooling or already sampled).' },
             { label: 'Not Eligible', value: stats?.totals?.notEligible ?? 0, description: 'Not Eligible: An activity is Not Eligible when its type is excluded from sampling in Sampling Control (eligible activity types). Team Lead configures which types can be sampled.' },
-            { label: 'Farmers Total', value: stats?.totals?.farmersTotal ?? 0, description: 'Total farmers linked to these activities.' },
+            { label: 'Farmers Total', value: stats?.totals?.farmersTotal ?? 0, description: 'Distinct farmers (by mobile number) linked to activities in this date range. Header total is globally unique; per-type rows count farmers within that type only.' },
             { label: 'Farmers Sampled', value: stats?.totals?.sampledFarmers ?? 0, description: 'Distinct farmers who have at least one call task (first-time + ad-hoc).' },
             { label: 'Tasks Created', value: stats?.totals?.tasksCreated ?? 0, description: 'Total call tasks created for these activities.' },
           ].map((card) => (
@@ -1261,7 +1261,7 @@ const SamplingControlView: React.FC = () => {
           <div className="bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-black text-slate-700">By Activity Type</div>
             <div className="text-xs text-slate-500 min-w-0">
-              Farmers sampled = distinct farmers with call tasks (first-time + ad-hoc); Tasks created = call tasks count
+              Farmers total = distinct farmers by mobile (per type in each row; header = unique across all types). Farmers sampled = distinct farmers with call tasks (first-time + ad-hoc); Tasks = call tasks count
             </div>
           </div>
           <div className="overflow-x-auto min-w-0 -mx-px">

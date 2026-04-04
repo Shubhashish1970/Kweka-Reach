@@ -13,12 +13,23 @@ export interface TaskAssignmentOptions {
 }
 
 /**
- * Call tasks that still need a CC agent (Sampling stats "Unassigned", unassigned task list, allocation pool).
- * Uses assignedAgentId, not only status === 'unassigned', so legacy docs without status and orphan queued tasks count.
+ * Mongo match: task has no CC agent on file — `assignedAgentId` is null, absent, or empty.
+ * Sampling "Unassigned", getUnassignedTasks, and allocation use this so counts match the DB field, not only `status`.
+ */
+export const callTaskNoAgentAssignedMatch = (): Record<string, unknown> => ({
+  $or: [
+    { assignedAgentId: null },
+    { assignedAgentId: { $exists: false } },
+    { assignedAgentId: '' },
+  ],
+});
+
+/**
+ * Tasks that still need assignment: no agent (see `callTaskNoAgentAssignedMatch`) and not in a terminal call outcome.
  */
 export const callTaskNeedsAgentMongoFilter = (): Record<string, unknown> => ({
   status: { $nin: ['completed', 'not_reachable', 'invalid_number'] },
-  $or: [{ assignedAgentId: null }, { assignedAgentId: { $exists: false } }],
+  ...callTaskNoAgentAssignedMatch(),
 });
 
 /**

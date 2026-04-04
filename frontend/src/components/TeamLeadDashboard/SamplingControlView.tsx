@@ -1424,8 +1424,8 @@ const SamplingControlView: React.FC = () => {
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Unassigned{sortIndicator('unassignedTasks')}
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6rem]">
-                        No CC agent; open outcomes only
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[7rem]">
+                        No agent on task (ID blank / null); open outcomes only
                       </span>
                     </button>
                   </th>

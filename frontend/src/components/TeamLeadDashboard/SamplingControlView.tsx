@@ -552,25 +552,15 @@ const SamplingControlView: React.FC = () => {
     return eligibleTypes.join(', ');
   }, [eligibleTypes]);
 
-  /** Checkboxes: every type in the DB catalog, saved config, and current stats rollup (date-scoped). */
+  /** Eligible-type chips: unique `type` values from all Activity documents (API distinct only). */
   const eligibilityChecklistTypes = useMemo(() => {
     const set = new Set<string>();
     for (const t of activityTypesCatalog) {
       const s = typeof t === 'string' ? t.trim() : '';
       if (s) set.add(s);
     }
-    for (const t of eligibleTypes) {
-      const s = typeof t === 'string' ? t.trim() : '';
-      if (s) set.add(s);
-    }
-    if (Array.isArray(stats?.byType)) {
-      for (const row of stats.byType) {
-        const t = row?.type;
-        if (t != null && String(t).trim()) set.add(String(t).trim());
-      }
-    }
     return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-  }, [activityTypesCatalog, eligibleTypes, stats?.byType]);
+  }, [activityTypesCatalog]);
 
   /** Empty `eligibleTypes` means all types eligible (API). Clicks move to/from an explicit subset. */
   const toggleEligibilityType = (type: string) => {
@@ -901,7 +891,7 @@ const SamplingControlView: React.FC = () => {
                 <p className="text-xs text-amber-700 mt-2">No activity types found yet. Sync or import activities, then refresh.</p>
               ) : (
                 <p className="text-xs text-slate-500 mt-2">
-                  Types come from your activity data (plus saved config and the current date range table). Current: {eligibleSummary}
+                  Unique activity types from your Activity records (entire database). Current: {eligibleSummary}
                 </p>
               )}
             </div>

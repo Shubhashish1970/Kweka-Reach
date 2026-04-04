@@ -1216,8 +1216,13 @@ const SamplingControlView: React.FC = () => {
             { label: 'Total Activities', value: stats?.totals?.totalActivities ?? 0, description: 'Number of activities in the selected date range and filters.' },
             { label: 'Active', value: stats?.totals?.active ?? 0, description: 'Activities with lifecycle Active (eligible for first-time sampling).' },
             { label: 'Sampled', value: stats?.totals?.sampled ?? 0, description: 'Activities that have been sampled (first-time or ad-hoc).' },
-            { label: 'Inactive', value: stats?.totals?.inactive ?? 0, description: 'Inactive: An activity is marked Inactive when a sampling run processed it but no farmers were selected (e.g. all farmers were in cooling or already sampled).' },
-            { label: 'Not Eligible', value: stats?.totals?.notEligible ?? 0, description: 'Not Eligible: An activity is Not Eligible when its type is excluded from sampling in Sampling Control (eligible activity types). Team Lead configures which types can be sampled.' },
+            { label: 'Inactive', value: stats?.totals?.inactive ?? 0, description: 'Inactive (lifecycle): A sampling run processed this activity but selected zero farmers—e.g. everyone in cooling or already sampled. Not the same as “not active” or “ineligible type”.' },
+            {
+              label: 'Ineligible for sampling',
+              value: stats?.totals?.notEligible ?? 0,
+              description:
+                'Counts activities whose lifecycle is Not eligible (database). That usually appears after you save eligible types and run Apply eligibility. If the eligible-types list is empty, all types are allowed—this number stays 0. If the list is non-empty but this is 0, check the yellow note when Active rows still use excluded types.',
+            },
             { label: 'Distinct farmers', value: stats?.totals?.farmersTotal ?? 0, description: 'Distinct farmers (by mobile number) linked to activities in this date range. Top number is globally unique; each table row counts farmers only within that activity type.' },
             { label: 'Farmers Sampled', value: stats?.totals?.sampledFarmers ?? 0, description: 'Distinct farmers who have at least one call task (first-time + ad-hoc).' },
             { label: 'Tasks Created', value: stats?.totals?.tasksCreated ?? 0, description: 'Total call tasks created for these activities.' },
@@ -1257,13 +1262,39 @@ const SamplingControlView: React.FC = () => {
           ))}
         </div>
 
+        {stats?.eligibility?.restrictsByEligibleTypes && (stats.eligibility.activeButTypeExcludedFromList ?? 0) > 0 && (
+          <div
+            className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+            role="status"
+          >
+            <p className="font-bold text-amber-900">Why “Ineligible for sampling” can be 0 in the table</p>
+            <p className="mt-1 text-amber-900/90">
+              You are restricting eligible types, but{' '}
+              <strong>{stats.eligibility.activeButTypeExcludedFromList}</strong> activities in this date range are still{' '}
+              <strong>Active</strong> while their type is <strong>not</strong> on the eligible list. Sampling already skips
+              them; the table column only counts rows already marked <strong>Not eligible</strong> in the database. Use{' '}
+              <strong>Save &amp; apply eligibility</strong> (or your usual apply step) so those activities move to the Not
+              eligible lifecycle—then this column and the KPI will match what you expect.
+            </p>
+          </div>
+        )}
+
+        {!stats?.eligibility?.restrictsByEligibleTypes && stats?.totals && (
+          <p className="mt-2 text-xs text-slate-500">
+            Eligible activity types list is empty → <span className="font-semibold text-slate-600">all types are allowed</span>{' '}
+            for sampling. The Ineligible column stays 0 until activities are marked Not eligible (e.g. after apply eligibility with a
+            restricted list).
+          </p>
+        )}
+
         <div className="mt-5 border border-slate-200 rounded-2xl overflow-hidden">
           <div className="bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-black text-slate-700">By Activity Type</div>
             <div className="text-xs text-slate-500 min-w-0 max-w-3xl">
-              Table groups: <span className="font-semibold text-slate-600">Activities</span> = event rows by lifecycle;{' '}
-              <span className="font-semibold text-slate-600">Farmers</span> = distinct people (mobile);{' '}
-              <span className="font-semibold text-slate-600">Call tasks</span> = outreach tasks. One farmer can join many activities, so activity counts and farmer counts are not meant to match.
+              <span className="font-semibold text-slate-600">Activities</span> columns = lifecycle counts (total = active + sampled + inactive + ineligible for sampling).{' '}
+              <span className="font-semibold text-slate-600">Inactive</span> = run picked no farmers;{' '}
+              <span className="font-semibold text-slate-600">Ineligible</span> = lifecycle Not eligible (see note above when types are restricted).{' '}
+              <span className="font-semibold text-slate-600">Farmers</span> / <span className="font-semibold text-slate-600">Call tasks</span> = people and outreach tasks—farmer totals need not match activity totals.
             </div>
           </div>
           <div className="overflow-x-auto min-w-0 -mx-px">
@@ -1284,7 +1315,7 @@ const SamplingControlView: React.FC = () => {
                   >
                     <div className="text-xs font-black text-slate-600 uppercase tracking-widest">Activities</div>
                     <div className="mt-0.5 text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug">
-                      Activity records in the date range, split by lifecycle status
+                      Total, Active, Sampled, Inactive (0 farmers selected), Ineligible for sampling (type excluded)
                     </div>
                   </th>
                   <th colSpan={2} className="px-2 py-2.5 border-b border-slate-200 border-r border-slate-300 bg-emerald-50/80">
@@ -1328,17 +1359,19 @@ const SamplingControlView: React.FC = () => {
                     </button>
                   </th>
                   <th className="px-3 py-2.5 bg-slate-50/50">
-                    <button type="button" className="hover:text-slate-700 text-left" onClick={() => toggleByTypeSort('inactive')}>
+                    <button type="button" className="hover:text-slate-700 flex flex-col items-start gap-0.5 text-left" onClick={() => toggleByTypeSort('inactive')}>
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Inactive{sortIndicator('inactive')}
                       </span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-tight">run, 0 farmers</span>
                     </button>
                   </th>
                   <th className="px-3 py-2.5 border-r border-slate-300 bg-slate-50/50">
-                    <button type="button" className="hover:text-slate-700 text-left" onClick={() => toggleByTypeSort('notEligible')}>
+                    <button type="button" className="hover:text-slate-700 flex flex-col items-start gap-0.5 text-left" onClick={() => toggleByTypeSort('notEligible')}>
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
-                        Not eligible{sortIndicator('notEligible')}
+                        Ineligible{sortIndicator('notEligible')}
                       </span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-tight">for sampling (type)</span>
                     </button>
                   </th>
                   <th className="px-3 py-2.5 bg-emerald-50/40">

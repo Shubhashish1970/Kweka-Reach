@@ -217,8 +217,8 @@ router.get(
               },
             },
             tasksCreated: { $size: { $ifNull: ['$tasks', []] } },
-            // Not "status === unassigned" only: treat missing status as unassigned (legacy docs) and count any
-            // non-terminal task with no assignedAgentId (orphan sampled_in_queue / in_progress still needs a team lead).
+            // Non-terminal tasks with no CC agent. $ifNull(assignedAgentId, sentinel) === sentinel covers both
+            // missing field and BSON null; plain $eq to null inside $filter often misses absent fields.
             unassignedTasks: {
               $size: {
                 $filter: {
@@ -234,7 +234,12 @@ router.get(
                           ],
                         },
                       },
-                      { $eq: [{ $ifNull: ['$$t.assignedAgentId', null] }, null] },
+                      {
+                        $eq: [
+                          { $ifNull: ['$$t.assignedAgentId', '__no_cc_agent__'] },
+                          '__no_cc_agent__',
+                        ],
+                      },
                     ],
                   },
                 },
@@ -271,6 +276,23 @@ router.get(
         { $group: { _id: '$farmer.mobileNumber' } },
         { $count: 'count' },
       ];
+
+      const configLean = await SamplingConfig.findOne({ key: 'default' }).select('eligibleActivityTypes').lean();
+      const eligibleTypesArr = Array.isArray((configLean as { eligibleActivityTypes?: string[] })?.eligibleActivityTypes)
+        ? (configLean as { eligibleActivityTypes: string[] }).eligibleActivityTypes.filter(
+            (t) => typeof t === 'string' && t.length > 0
+          )
+        : [];
+      const restrictsByEligibleTypes = eligibleTypesArr.length > 0;
+
+      let activeButTypeNotInEligibleList = 0;
+      if (restrictsByEligibleTypes) {
+        activeButTypeNotInEligibleList = await Activity.countDocuments({
+          ...match,
+          lifecycleStatus: 'active',
+          type: { $nin: eligibleTypesArr },
+        });
+      }
 
       const [byType, uniqueByTypeRows, uniqueGlobalRow] = await Promise.all([
         Activity.aggregate(pipeline),
@@ -319,6 +341,12 @@ router.get(
           dateFrom: dateFrom || null,
           dateTo: dateTo || null,
           totals,
+          /** Explains why "Ineligible" lifecycle counts can be 0 (config vs DB lifecycle). */
+          eligibility: {
+            restrictsByEligibleTypes,
+            eligibleActivityTypes: eligibleTypesArr,
+            activeButTypeExcludedFromList: activeButTypeNotInEligibleList,
+          },
           byType: byTypeWithFarmers.map((r: any) => ({
             type: r._id,
             totalActivities: r.totalActivities,

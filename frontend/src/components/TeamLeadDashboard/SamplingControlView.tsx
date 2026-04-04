@@ -1298,15 +1298,18 @@ const SamplingControlView: React.FC = () => {
             </div>
           </div>
           <div className="overflow-x-auto min-w-0 -mx-px">
-            <table className="min-w-[1180px] w-full text-sm">
+            <table className="min-w-[1240px] w-full text-sm">
               <thead className="bg-white">
                 <tr className="text-center">
                   <th
                     rowSpan={2}
                     className="px-3 py-3 text-left align-middle border-b border-slate-200 bg-white min-w-[14rem] w-[14rem] sm:min-w-[16rem] sm:w-[16rem] whitespace-nowrap"
                   >
-                    <button type="button" className="hover:text-slate-700 text-left" onClick={() => toggleByTypeSort('type')}>
+                    <button type="button" className="hover:text-slate-700 flex flex-col items-start gap-1 text-left" onClick={() => toggleByTypeSort('type')}>
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Activity type{sortIndicator('type')}</span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[12rem]">
+                        Row label (e.g. FFA event category)
+                      </span>
                     </button>
                   </th>
                   <th
@@ -1315,19 +1318,19 @@ const SamplingControlView: React.FC = () => {
                   >
                     <div className="text-xs font-black text-slate-600 uppercase tracking-widest">Activities</div>
                     <div className="mt-0.5 text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug">
-                      Total, Active, Sampled, Inactive (0 farmers selected), Ineligible for sampling (type excluded)
+                      Lifecycle columns—short definitions under each heading below
                     </div>
                   </th>
                   <th colSpan={2} className="px-2 py-2.5 border-b border-slate-200 border-r border-slate-300 bg-emerald-50/80">
                     <div className="text-xs font-black text-emerald-900 uppercase tracking-widest">Farmers</div>
                     <div className="mt-0.5 text-[10px] font-semibold text-emerald-800/90 normal-case tracking-normal leading-snug">
-                      Distinct people (mobile). Row = this type only; top KPI = all types combined.
+                      People metrics—see column hints below (top KPI = all types)
                     </div>
                   </th>
                   <th colSpan={2} className="px-2 py-2.5 border-b border-slate-200 bg-sky-50/80">
                     <div className="text-xs font-black text-sky-900 uppercase tracking-widest">Call tasks</div>
                     <div className="mt-0.5 text-[10px] font-semibold text-sky-800/90 normal-case tracking-normal leading-snug">
-                      Tasks created for calling. Unassigned = no CC agent on the task yet (matches Task Allocation pool; excludes completed / not reachable / invalid number)
+                      Outreach tasks—definitions under Created & Unassigned below
                     </div>
                   </th>
                 </tr>
@@ -1341,20 +1344,28 @@ const SamplingControlView: React.FC = () => {
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Total{sortIndicator('totalActivities')}
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-tight">in range</span>
-                    </button>
-                  </th>
-                  <th className="px-3 py-2.5 bg-slate-50/50">
-                    <button type="button" className="hover:text-slate-700 text-left" onClick={() => toggleByTypeSort('active')}>
-                      <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
-                        Active{sortIndicator('active')}
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[5.5rem]">
+                        Activity rows in date filter
                       </span>
                     </button>
                   </th>
                   <th className="px-3 py-2.5 bg-slate-50/50">
-                    <button type="button" className="hover:text-slate-700 text-left" onClick={() => toggleByTypeSort('sampled')}>
+                    <button type="button" className="hover:text-slate-700 flex flex-col items-start gap-0.5 text-left" onClick={() => toggleByTypeSort('active')}>
+                      <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
+                        Active{sortIndicator('active')}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6rem]">
+                        Open lifecycle; eligible for sampling runs
+                      </span>
+                    </button>
+                  </th>
+                  <th className="px-3 py-2.5 bg-slate-50/50">
+                    <button type="button" className="hover:text-slate-700 flex flex-col items-start gap-0.5 text-left" onClick={() => toggleByTypeSort('sampled')}>
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Sampled{sortIndicator('sampled')}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6rem]">
+                        Sampling has run (tasks / audit may exist)
                       </span>
                     </button>
                   </th>
@@ -1363,7 +1374,9 @@ const SamplingControlView: React.FC = () => {
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Inactive{sortIndicator('inactive')}
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-tight">run, 0 farmers</span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6rem]">
+                        Run finished; zero farmers selected
+                      </span>
                     </button>
                   </th>
                   <th className="px-3 py-2.5 border-r border-slate-300 bg-slate-50/50">
@@ -1371,7 +1384,9 @@ const SamplingControlView: React.FC = () => {
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Ineligible{sortIndicator('notEligible')}
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-tight">for sampling (type)</span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6.5rem]">
+                        Not eligible lifecycle (type / apply rules)
+                      </span>
                     </button>
                   </th>
                   <th className="px-3 py-2.5 bg-emerald-50/40">
@@ -1379,7 +1394,9 @@ const SamplingControlView: React.FC = () => {
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Distinct{sortIndicator('farmersTotal')}
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-tight">by mobile</span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6rem]">
+                        Unique farmers (10-digit mobile), this type
+                      </span>
                     </button>
                   </th>
                   <th className="px-3 py-2.5 border-r border-slate-300 bg-emerald-50/40">
@@ -1387,7 +1404,9 @@ const SamplingControlView: React.FC = () => {
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         With tasks{sortIndicator('sampledFarmers')}
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-tight">≥1 call task</span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6rem]">
+                        Distinct farmers with ≥1 call task
+                      </span>
                     </button>
                   </th>
                   <th className="px-3 py-2.5 bg-sky-50/40">
@@ -1395,12 +1414,18 @@ const SamplingControlView: React.FC = () => {
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Created{sortIndicator('tasksCreated')}
                       </span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6rem]">
+                        Call tasks linked to this type
+                      </span>
                     </button>
                   </th>
                   <th className="px-3 py-2.5 bg-sky-50/40">
                     <button type="button" className="hover:text-slate-700 flex flex-col items-start gap-0.5 text-left" onClick={() => toggleByTypeSort('unassignedTasks')}>
                       <span className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">
                         Unassigned{sortIndicator('unassignedTasks')}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-500 normal-case tracking-normal leading-snug max-w-[6rem]">
+                        No CC agent; open outcomes only
                       </span>
                     </button>
                   </th>

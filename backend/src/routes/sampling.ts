@@ -9,6 +9,7 @@ import { Farmer } from '../models/Farmer.js';
 import { SamplingConfig } from '../models/SamplingConfig.js';
 import { CallTask } from '../models/CallTask.js';
 import { SamplingRun } from '../models/SamplingRun.js';
+import { callTaskNeedsAgentMongoFilter } from '../services/taskService.js';
 import logger from '../config/logger.js';
 import mongoose from 'mongoose';
 
@@ -217,34 +218,6 @@ router.get(
               },
             },
             tasksCreated: { $size: { $ifNull: ['$tasks', []] } },
-            // Non-terminal tasks with no CC agent. $ifNull(assignedAgentId, sentinel) === sentinel covers both
-            // missing field and BSON null; plain $eq to null inside $filter often misses absent fields.
-            unassignedTasks: {
-              $size: {
-                $filter: {
-                  input: { $ifNull: ['$tasks', []] },
-                  as: 't',
-                  cond: {
-                    $and: [
-                      {
-                        $not: {
-                          $in: [
-                            { $ifNull: ['$$t.status', 'unassigned'] },
-                            ['completed', 'not_reachable', 'invalid_number'],
-                          ],
-                        },
-                      },
-                      {
-                        $eq: [
-                          { $ifNull: ['$$t.assignedAgentId', '__no_cc_agent__'] },
-                          '__no_cc_agent__',
-                        ],
-                      },
-                    ],
-                  },
-                },
-              },
-            },
           },
         },
         {
@@ -257,7 +230,6 @@ router.get(
             notEligible: { $sum: { $cond: [{ $eq: ['$lifecycleStatus', 'not_eligible'] }, 1, 0] } },
             sampledFarmers: { $sum: '$sampledFarmers' },
             tasksCreated: { $sum: '$tasksCreated' },
-            unassignedTasks: { $sum: '$unassignedTasks' },
           },
         },
         { $sort: { totalActivities: -1 } },
@@ -294,11 +266,33 @@ router.get(
         });
       }
 
-      const [byType, uniqueByTypeRows, uniqueGlobalRow] = await Promise.all([
+      const [byType, uniqueByTypeRows, uniqueGlobalRow, activitiesInRange] = await Promise.all([
         Activity.aggregate(pipeline),
         Activity.aggregate(uniqueFarmersByTypePipeline),
         Activity.aggregate(uniqueFarmersGlobalPipeline),
+        Activity.find(match).select('_id type').lean(),
       ]);
+
+      const idToType = new Map<string, string>();
+      for (const a of activitiesInRange as { _id: mongoose.Types.ObjectId; type?: string }[]) {
+        const typeKey =
+          a.type != null && String(a.type).length > 0 ? String(a.type) : '(unknown type)';
+        idToType.set(String(a._id), typeKey);
+      }
+      const actIds = activitiesInRange.map((a: { _id: mongoose.Types.ObjectId }) => a._id);
+
+      const unassignedByType = new Map<string, number>();
+      if (actIds.length > 0) {
+        const unassignedPerActivity = await CallTask.aggregate([
+          { $match: { ...callTaskNeedsAgentMongoFilter(), activityId: { $in: actIds } } },
+          { $group: { _id: '$activityId', n: { $sum: 1 } } },
+        ]);
+        for (const row of unassignedPerActivity) {
+          const typ = idToType.get(String(row._id));
+          if (typ === undefined) continue;
+          unassignedByType.set(typ, (unassignedByType.get(typ) ?? 0) + Number(row.n || 0));
+        }
+      }
 
       const farmersTotalByType = new Map<string, number>(
         uniqueByTypeRows.map((r: any) => [String(r._id ?? ''), Number(r.farmersTotal || 0)])
@@ -308,6 +302,10 @@ router.get(
       const byTypeWithFarmers = byType.map((r: any) => ({
         ...r,
         farmersTotal: farmersTotalByType.get(String(r._id ?? '')) ?? 0,
+        unassignedTasks:
+          unassignedByType.get(
+            r._id != null && String(r._id).length > 0 ? String(r._id) : '(unknown type)'
+          ) ?? 0,
       }));
 
       const totals = byTypeWithFarmers.reduce(

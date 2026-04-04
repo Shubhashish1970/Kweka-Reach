@@ -13,15 +13,12 @@ export interface TaskAssignmentOptions {
 }
 
 /**
- * Mongo match: task has no CC agent on file — `assignedAgentId` is null, absent, or empty.
- * Sampling "Unassigned", getUnassignedTasks, and allocation use this so counts match the DB field, not only `status`.
+ * Mongo match: task has no CC agent on file — `assignedAgentId` null or field absent.
+ * Do not use `assignedAgentId: ''` here: Mongoose casts query values to ObjectId and throws
+ * "Cast to ObjectId failed for value \"\" " on find/aggregate $match.
  */
 export const callTaskNoAgentAssignedMatch = (): Record<string, unknown> => ({
-  $or: [
-    { assignedAgentId: null },
-    { assignedAgentId: { $exists: false } },
-    { assignedAgentId: '' },
-  ],
+  $or: [{ assignedAgentId: null }, { assignedAgentId: { $exists: false } }],
 });
 
 /**

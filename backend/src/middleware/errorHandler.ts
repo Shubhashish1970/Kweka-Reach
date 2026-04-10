@@ -4,6 +4,7 @@ import logger from '../config/logger.js';
 export interface AppError extends Error {
   statusCode?: number;
   isOperational?: boolean;
+  code?: string;
 }
 
 export const errorHandler = (
@@ -27,6 +28,7 @@ export const errorHandler = (
     success: false,
     error: {
       message,
+      ...(err.code && { code: err.code }),
       ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
     },
   });

@@ -27,7 +27,13 @@ const Login: React.FC = () => {
 
     try {
       await login(email, password);
-      navigate('/', { replace: true });
+      const raw = localStorage.getItem('user');
+      const stored = raw ? JSON.parse(raw) : null;
+      if (stored?.mustChangePassword) {
+        navigate('/change-password-required', { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please check your credentials.');
     } finally {

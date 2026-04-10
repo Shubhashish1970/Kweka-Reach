@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Edit2, Trash2, UserCheck, UserX, Mail, Hash, Users as UsersIcon, ChevronUp, ChevronDown } from 'lucide-react';
+import { Edit2, Trash2, UserCheck, UserX, Mail, Hash, Users as UsersIcon, ChevronUp, ChevronDown, KeyRound } from 'lucide-react';
 import { UserRole } from './UserForm';
 
 type UserTableColumnKey = 'name' | 'role' | 'languages' | 'teamLead' | 'status';
@@ -27,6 +27,7 @@ interface UserListProps {
   isLoading: boolean;
   onEdit: (user: User) => void;
   onDelete: (user: User) => void;
+  onResetDefaultPassword?: (user: User) => void;
   currentUserId?: string;
 }
 
@@ -46,7 +47,7 @@ const ROLE_COLORS: Record<UserRole, string> = {
   marketing_head: 'bg-pink-100 text-pink-800',
 };
 
-const UserList: React.FC<UserListProps> = ({ users, isLoading, onEdit, onDelete, currentUserId }) => {
+const UserList: React.FC<UserListProps> = ({ users, isLoading, onEdit, onDelete, onResetDefaultPassword, currentUserId }) => {
   const [tableSort, setTableSort] = useState<{ key: UserTableColumnKey; dir: 'asc' | 'desc' }>(() => {
     const raw = localStorage.getItem('admin.userManagement.tableSort');
     try {
@@ -251,6 +252,26 @@ const UserList: React.FC<UserListProps> = ({ users, isLoading, onEdit, onDelete,
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {onResetDefaultPassword && (
+                        <button
+                          onClick={() => onResetDefaultPassword(user)}
+                          disabled={isCurrentUser || !user.isActive}
+                          className={`p-2 rounded-lg transition-colors ${
+                            isCurrentUser || !user.isActive
+                              ? 'text-slate-300 cursor-not-allowed'
+                              : 'text-amber-700 hover:bg-amber-50'
+                          }`}
+                          title={
+                            isCurrentUser
+                              ? 'Cannot reset your own password here'
+                              : !user.isActive
+                                ? 'Inactive user'
+                                : 'Reset to default password (user must set a new password on next login)'
+                          }
+                        >
+                          <KeyRound size={18} />
+                        </button>
+                      )}
                       <button
                         onClick={() => onEdit(user)}
                         className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"

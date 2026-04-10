@@ -14,6 +14,7 @@ interface User {
   assignedTerritories: string[];
   teamLeadId?: string;
   isActive: boolean;
+  mustChangePassword?: boolean;
 }
 
 interface AuthContextType {
@@ -22,6 +23,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
   switchRole: (role: string) => void; // Switch active role
   isAuthenticated: boolean;
   hasMultipleRoles: boolean; // Convenience check
@@ -63,6 +65,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // Ensure roles array exists (backward compatibility)
             if (!fetchedUser.roles || fetchedUser.roles.length === 0) {
               fetchedUser.roles = [fetchedUser.role];
+            }
+            if (fetchedUser._id && !fetchedUser.id) {
+              fetchedUser.id = String(fetchedUser._id);
             }
             setUser(fetchedUser);
             
@@ -108,6 +113,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!loggedInUser.roles || loggedInUser.roles.length === 0) {
         loggedInUser.roles = [loggedInUser.role];
       }
+      if (loggedInUser._id && !loggedInUser.id) {
+        loggedInUser.id = String(loggedInUser._id);
+      }
       setUser(loggedInUser);
       
       // Set active role to primary role on login
@@ -125,6 +133,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setActiveRole(null);
   };
 
+  const refreshUser = async () => {
+    const response: any = await authAPI.getCurrentUser();
+    if (response?.success && response?.data?.user) {
+      const u = response.data.user;
+      if (!u.roles || u.roles.length === 0) {
+        u.roles = [u.role];
+      }
+      if (u._id && !u.id) {
+        u.id = String(u._id);
+      }
+      setUser(u);
+      localStorage.setItem('user', JSON.stringify(u));
+    }
+  };
+
   const switchRole = (role: string) => {
     if (user && user.roles.includes(role)) {
       setActiveRole(role);
@@ -138,6 +161,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     loading,
     login,
     logout,
+    refreshUser,
     switchRole,
     isAuthenticated: !!user,
     hasMultipleRoles: !!user && user.roles && user.roles.length > 1,

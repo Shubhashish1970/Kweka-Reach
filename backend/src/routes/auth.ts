@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { User } from '../models/User.js';
 import { hashPassword, comparePassword } from '../utils/password.js';
 import { generateToken } from '../utils/jwt.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import logger from '../config/logger.js';
 
@@ -119,6 +119,7 @@ router.post(
             employeeId: user.employeeId,
             languageCapabilities: user.languageCapabilities,
             assignedTerritories: user.assignedTerritories,
+            mustChangePassword: !!user.mustChangePassword,
           },
         },
       });
@@ -180,6 +181,7 @@ router.get('/me', authenticate, async (req: Request, res: Response, next: NextFu
           teamLeadId: user.teamLeadId,
           isActive: user.isActive,
           lastLogin: user.lastLogin,
+          mustChangePassword: !!user.mustChangePassword,
         },
       },
     });
@@ -187,6 +189,72 @@ router.get('/me', authenticate, async (req: Request, res: Response, next: NextFu
     next(error);
   }
 });
+
+// @route   POST /api/auth/change-password
+// @desc    After admin "default password" reset: verify current password and set a new one (clears mustChangePassword)
+// @access  Private
+router.post(
+  '/change-password',
+  authenticate,
+  [
+    body('currentPassword').notEmpty().withMessage('Current password is required'),
+    body('newPassword').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const authReq = req as AuthRequest;
+      const user = await User.findById(authReq.user._id).select('+password');
+      if (!user) {
+        const error: AppError = new Error('User not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      if (!user.mustChangePassword) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Password change is not required for your account' },
+        });
+      }
+
+      const { currentPassword, newPassword } = req.body;
+      const valid = await comparePassword(currentPassword, user.password);
+      if (!valid) {
+        const error: AppError = new Error('Current password is incorrect');
+        error.statusCode = 401;
+        throw error;
+      }
+
+      if (newPassword === currentPassword) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'New password must be different from your current password' },
+        });
+      }
+
+      user.password = await hashPassword(newPassword);
+      user.mustChangePassword = false;
+      await user.save();
+
+      logger.info(`User ${user.email} completed forced password change`);
+
+      res.json({
+        success: true,
+        message: 'Password updated successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // @route   POST /api/auth/forgot-password
 // @desc    Request password reset

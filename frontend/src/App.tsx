@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './components/Login';
 import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
+import ForceChangePassword from './components/ForceChangePassword';
 import ModuleSelection from './components/ModuleSelection';
 import AgentWorkspace from './components/AgentWorkspace';
 import TaskList from './components/TaskList';
@@ -46,6 +47,15 @@ const App: React.FC = () => {
             <Route path="/login" element={<Login />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+
+            <Route
+              path="/change-password-required"
+              element={
+                <ProtectedRoute>
+                  <ForceChangePassword />
+                </ProtectedRoute>
+              }
+            />
             
             {/* Protected routes */}
             <Route

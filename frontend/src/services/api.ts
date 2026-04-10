@@ -122,6 +122,13 @@ export const authAPI = {
     return apiRequest<{ success: boolean; data: { user: any } }>('/auth/me');
   },
 
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    return apiRequest<{ success: boolean; message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  },
+
   forgotPassword: async (email: string) => {
     return apiRequest<{ success: boolean; message: string }>('/auth/forgot-password', {
       method: 'POST',
@@ -653,6 +660,12 @@ export const usersAPI = {
   deleteUser: async (userId: string) => {
     return apiRequest(`/users/${userId}`, {
       method: 'DELETE',
+    });
+  },
+
+  resetUserToDefaultPassword: async (userId: string) => {
+    return apiRequest<{ success: boolean; message: string }>(`/users/${userId}/reset-default-password`, {
+      method: 'POST',
     });
   },
 

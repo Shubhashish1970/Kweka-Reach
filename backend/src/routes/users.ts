@@ -9,6 +9,17 @@ import logger from '../config/logger.js';
 
 const router = express.Router();
 
+/** Plaintext password applied on admin "reset to default"; set env USER_DEFAULT_RESET_PASSWORD (min 8 chars) in production */
+function resolveDefaultResetPassword(): string | null {
+  const fromEnv = process.env.USER_DEFAULT_RESET_PASSWORD?.trim();
+  if (fromEnv && fromEnv.length >= 8) return fromEnv;
+  if (process.env.NODE_ENV !== 'production') {
+    logger.warn('[users] USER_DEFAULT_RESET_PASSWORD unset; using dev-only temporary default');
+    return 'KwekaReach#Temp1';
+  }
+  return null;
+}
+
 // All routes require authentication
 router.use(authenticate);
 
@@ -357,6 +368,60 @@ router.delete(
   }
 );
 
+// @route   POST /api/users/:id/reset-default-password
+// @desc    Set password to configured default and require user to change password on next login
+// @access  Private (MIS Admin only)
+router.post(
+  '/:id/reset-default-password',
+  requirePermission('users.edit'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.params.id;
+
+      if (userId === req.user?._id.toString()) {
+        const error: AppError = new Error('Cannot reset your own password with this action');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const defaultPlain = resolveDefaultResetPassword();
+      if (!defaultPlain) {
+        return res.status(503).json({
+          success: false,
+          error: {
+            message:
+              'Default reset password is not configured. Set USER_DEFAULT_RESET_PASSWORD (at least 8 characters) on the server.',
+          },
+        });
+      }
+
+      const hashedPassword = await hashPassword(defaultPlain);
+
+      const user = await User.findByIdAndUpdate(
+        userId,
+        { password: hashedPassword, mustChangePassword: true },
+        { new: true }
+      ).select('-password');
+
+      if (!user) {
+        const error: AppError = new Error('User not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      logger.info(`Default password reset (must change on login) for user: ${user.email} by ${req.user?.email}`);
+
+      res.json({
+        success: true,
+        message:
+          'Temporary password applied. The user must sign in with the configured default password and choose a new password.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // @route   PUT /api/users/:id/password
 // @desc    Reset user password
 // @access  Private (MIS Admin only)
@@ -383,7 +448,7 @@ router.put(
 
       const user = await User.findByIdAndUpdate(
         userId,
-        { password: hashedPassword },
+        { password: hashedPassword, mustChangePassword: false },
         { new: true }
       ).select('-password');
 

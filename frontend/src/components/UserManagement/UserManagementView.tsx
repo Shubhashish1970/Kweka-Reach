@@ -55,6 +55,10 @@ const UserManagementView: React.FC = () => {
     isOpen: false,
     user: null,
   });
+  const [resetPwdModal, setResetPwdModal] = useState<{ isOpen: boolean; user: User | null }>({
+    isOpen: false,
+    user: null,
+  });
 
   useEffect(() => {
     const userData = localStorage.getItem('user');
@@ -164,6 +168,24 @@ const UserManagementView: React.FC = () => {
 
   const handleDeleteUser = (user: User) => {
     setConfirmModal({ isOpen: true, user });
+  };
+
+  const handleResetDefaultPassword = (user: User) => {
+    setResetPwdModal({ isOpen: true, user });
+  };
+
+  const confirmResetDefaultPassword = async () => {
+    if (!resetPwdModal.user) return;
+    try {
+      await usersAPI.resetUserToDefaultPassword(resetPwdModal.user._id);
+      showSuccess(
+        'Temporary password applied. User must sign in with the server default password, then choose a new one.'
+      );
+      setResetPwdModal({ isOpen: false, user: null });
+      fetchUsers(pagination.page);
+    } catch (error: any) {
+      showError(error.message || 'Failed to reset password');
+    }
   };
 
   const confirmDeleteUser = async () => {
@@ -324,6 +346,7 @@ const UserManagementView: React.FC = () => {
             isLoading={isLoading}
             onEdit={handleEditUser}
             onDelete={handleDeleteUser}
+            onResetDefaultPassword={handleResetDefaultPassword}
             currentUserId={currentUserId}
           />
 
@@ -389,6 +412,17 @@ const UserManagementView: React.FC = () => {
         title="Deactivate User"
         message={`Are you sure you want to deactivate ${confirmModal.user?.name}?`}
         confirmText="Deactivate"
+        cancelText="Cancel"
+        confirmVariant="danger"
+      />
+
+      <ConfirmationModal
+        isOpen={resetPwdModal.isOpen}
+        onClose={() => setResetPwdModal({ isOpen: false, user: null })}
+        onConfirm={confirmResetDefaultPassword}
+        title="Reset to default password?"
+        message={`Apply the server-configured temporary password for ${resetPwdModal.user?.name}? They must sign in with that password once, then set a new password before using the app. Ensure USER_DEFAULT_RESET_PASSWORD is set on the server (see deployment notes).`}
+        confirmText="Reset password"
         cancelText="Cancel"
         confirmVariant="danger"
       />

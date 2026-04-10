@@ -1,5 +1,5 @@
 import React, { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Loader2 } from 'lucide-react';
 
@@ -10,6 +10,7 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
   const { isAuthenticated, user, activeRole, loading } = useAuth();
+  const location = useLocation();
 
   // Show loading screen while checking authentication
   if (loading) {
@@ -26,6 +27,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles 
   // If not authenticated, redirect to login
   if (!isAuthenticated || !user) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (user.mustChangePassword && location.pathname !== '/change-password-required') {
+    return <Navigate to="/change-password-required" replace />;
   }
 
   // Use activeRole for permission check (falls back to primary role if not set)

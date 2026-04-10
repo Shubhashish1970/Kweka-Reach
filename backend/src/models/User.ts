@@ -15,6 +15,8 @@ export interface IUser extends Document {
   assignedTerritories: string[];
   teamLeadId?: mongoose.Types.ObjectId; // For cc_agent role - points to team_lead user
   isActive: boolean;
+  /** When true, user may only call auth/me, logout, and change-password until they set a new password */
+  mustChangePassword?: boolean;
   lastLogin?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -79,6 +81,10 @@ const UserSchema = new Schema<IUser>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    mustChangePassword: {
+      type: Boolean,
+      default: false,
     },
     lastLogin: {
       type: Date,

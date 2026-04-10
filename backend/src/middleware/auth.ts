@@ -58,6 +58,22 @@ export const authenticate = async (
       throw error;
     }
 
+    // Enforce password change before any other protected action
+    if (user.mustChangePassword) {
+      const pathOnly = (req.originalUrl || req.url || '').split('?')[0];
+      const method = req.method.toUpperCase();
+      const allowed =
+        (method === 'GET' && pathOnly === '/api/auth/me') ||
+        (method === 'POST' && pathOnly === '/api/auth/logout') ||
+        (method === 'POST' && pathOnly === '/api/auth/change-password');
+      if (!allowed) {
+        const err: AppError = new Error('You must change your password before continuing');
+        err.statusCode = 403;
+        err.code = 'MUST_CHANGE_PASSWORD';
+        throw err;
+      }
+    }
+
     // Attach user to request
     req.user = user;
     next();

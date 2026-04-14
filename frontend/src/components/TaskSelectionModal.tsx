@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Phone, MapPin, Loader2, Search, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { X, Phone, PhoneCall, MapPin, Loader2, Search, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { tasksAPI } from '../services/api';
 
 interface Task {
@@ -325,7 +325,8 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
           </div>
           <p className="text-[10px] text-slate-500 mt-2 leading-snug">
             Up to 300 earliest-scheduled tasks (language-matched). &quot;Done&quot; includes successful and unsuccessful
-            outcomes. History (sidebar) uses the selected date range and may show different totals.
+            outcomes — use the <span className="font-semibold text-slate-600">phone icon</span> on the right to reopen a
+            task in the dialer (same as History). History uses the selected date range and may show different totals.
           </p>
         </div>
 
@@ -366,22 +367,17 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                 const isInProgress = task.status === 'in_progress';
                 const isCompleted = task.status === 'completed' || task.status === 'not_reachable' || task.status === 'invalid_number';
                 const isSuccessful = task.status === 'completed';
-                const isUnsuccessful = task.status === 'not_reachable' || task.status === 'invalid_number';
 
-                return (
-                  <button
-                    key={task.taskId}
-                    onClick={() => {
-                      if (isLoadingTask) return;
-                      // Completed tasks are shown for visibility but cannot be loaded into an active call flow.
-                      if (isCompleted) return;
-                      handleSelectTask(task);
-                    }}
-                    disabled={isLoadingTask || isCompleted}
-                    className={`w-full px-6 py-4 hover:bg-white active:bg-slate-50 transition-colors flex items-center gap-4 ${
-                      isSelected ? 'bg-green-50' : ''
-                    } ${isLoadingTask ? 'opacity-50 cursor-not-allowed' : isCompleted ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
+                const rowClass = `w-full px-6 py-4 flex items-center gap-4 ${
+                  isCompleted ? 'bg-slate-50/80' : 'hover:bg-white active:bg-slate-50'
+                } transition-colors ${
+                  isSelected && !isCompleted ? 'bg-green-50' : ''
+                } ${isLoadingTask ? 'opacity-50' : ''} ${
+                  !isCompleted && !isLoadingTask ? 'cursor-pointer' : ''
+                }`;
+
+                const inner = (
+                  <>
                     {/* Profile Icon/Photo - Light theme */}
                     <div className="flex-shrink-0 relative">
                       {task.farmer.photoUrl ? (
@@ -412,18 +408,6 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                       {isInProgress && (
                         <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-500 border-2 border-white rounded-full flex items-center justify-center">
                           <Clock size={10} className="text-white animate-pulse" />
-                        </div>
-                      )}
-                      {/* Completed Status Indicator */}
-                      {isCompleted && (
-                        <div className={`absolute -bottom-1 -right-1 w-5 h-5 border-2 border-white rounded-full flex items-center justify-center ${
-                          isSuccessful ? 'bg-green-500' : 'bg-red-500'
-                        }`}>
-                          {isSuccessful ? (
-                            <CheckCircle size={10} className="text-white" />
-                          ) : (
-                            <XCircle size={10} className="text-white" />
-                          )}
                         </div>
                       )}
                     </div>
@@ -490,28 +474,47 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
 
                     {/* Right Side - Time and Action */}
                     <div className="flex-shrink-0 flex flex-col items-end gap-2">
-                      {/* Call Button / Status Icon */}
                       {isCompleted ? (
                         <>
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md ${
-                              isSuccessful ? 'bg-green-500' : 'bg-red-500'
-                            }`}
-                          >
-                            {isSuccessful ? (
-                              <CheckCircle size={18} className="text-white" />
-                            ) : (
-                              <XCircle size={18} className="text-white" />
-                            )}
-                          </div>
-                          {/* Final Update Date/Time - Below status icon for completed calls */}
                           <span className="text-xs text-slate-500 whitespace-nowrap">
                             {formatTime(task.updatedAt || task.scheduledDate)}
                           </span>
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`w-8 h-8 rounded-full flex items-center justify-center shadow-sm shrink-0 ${
+                                isSuccessful ? 'bg-green-500' : 'bg-red-500'
+                              }`}
+                              title={isSuccessful ? 'Completed' : 'Unsuccessful'}
+                            >
+                              {isSuccessful ? (
+                                <CheckCircle size={14} className="text-white" />
+                              ) : (
+                                <XCircle size={14} className="text-white" />
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (isLoadingTask) return;
+                                handleSelectTask(task);
+                              }}
+                              disabled={isLoadingTask}
+                              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-lime-400/80 bg-lime-500/15 text-lime-800 hover:bg-lime-500/25 disabled:opacity-50 transition-colors shrink-0"
+                              title="Open in dialer — continue or update this call"
+                              aria-label="Continue task in dialer"
+                            >
+                              {isSelected && isLoadingTask ? (
+                                <Loader2 size={18} className="animate-spin text-lime-700" />
+                              ) : (
+                                <PhoneCall size={18} className="text-lime-700" strokeWidth={2.25} />
+                              )}
+                            </button>
+                          </div>
                         </>
                       ) : (
                         <>
-                          {/* Scheduled Date/Time - Above call button for active calls */}
                           <span className="text-xs text-slate-500 whitespace-nowrap">
                             {formatTime(task.scheduledDate)}
                           </span>
@@ -531,6 +534,29 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                         </>
                       )}
                     </div>
+                  </>
+                );
+
+                if (isCompleted) {
+                  return (
+                    <div key={task.taskId} className={rowClass}>
+                      {inner}
+                    </div>
+                  );
+                }
+
+                return (
+                  <button
+                    key={task.taskId}
+                    type="button"
+                    onClick={() => {
+                      if (isLoadingTask) return;
+                      handleSelectTask(task);
+                    }}
+                    disabled={isLoadingTask}
+                    className={rowClass}
+                  >
+                    {inner}
                   </button>
                 );
               })}

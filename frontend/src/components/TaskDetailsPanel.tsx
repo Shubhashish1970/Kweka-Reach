@@ -79,18 +79,22 @@ const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({ taskData, isActive 
                 <div className="flex-1 min-w-0">
                   <h4 className="text-sm font-bold text-slate-900 truncate">{taskData.farmer.name}</h4>
                   {taskData.farmer.mobileNumber && (
-                    <p className="text-[10px] text-slate-600 flex items-center gap-1 font-medium">
-                      <Phone size={10} className="text-green-600" /> {taskData.farmer.mobileNumber}
-                    </p>
+                    <a
+                      href={`tel:${taskData.farmer.mobileNumber.replace(/\s/g, '')}`}
+                      className="mt-1 flex items-center gap-2 text-xl font-extrabold tracking-wide text-emerald-800 tabular-nums hover:text-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-lime-400 focus-visible:ring-offset-1 rounded-sm"
+                    >
+                      <Phone size={20} className="text-lime-600 shrink-0" strokeWidth={2.25} aria-hidden />
+                      <span>{taskData.farmer.mobileNumber}</span>
+                    </a>
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
-                <MapPin size={10} className="text-green-600" /> 
-                <span className="truncate">{taskData.farmer.location}</span>
-                <span className="text-slate-400">•</span>
-                <span className="text-slate-500">{taskData.farmer.preferredLanguage}</span>
-              </div>
+              {taskData.farmer.preferredLanguage ? (
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
+                  <span className="text-slate-400 font-bold">Language:</span>
+                  <span className="text-slate-700 font-medium">{taskData.farmer.preferredLanguage}</span>
+                </div>
+              ) : null}
             </div>
           </div>
 

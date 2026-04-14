@@ -107,10 +107,10 @@ describe('T1: submit sets correct final status', () => {
   });
 });
 
-// ─── T4: completed task cannot regress via mark-in-progress ──────────────────
+// ─── T4: follow-up from History — terminal tasks can re-enter in_progress ────
 
-describe('T4: completed task cannot be moved to in_progress', () => {
-  test('mark-in-progress on completed task does not change status', async () => {
+describe('T4: follow-up mark-in-progress from terminal status', () => {
+  test('mark-in-progress on completed task moves to in_progress', async () => {
     const teamLead = await makeTeamLead();
     const agent = await makeAgent(teamLead._id);
     const token = await login(agent.email);
@@ -126,11 +126,10 @@ describe('T4: completed task cannot be moved to in_progress', () => {
       .post(`/api/tasks/${task._id}/mark-in-progress`)
       .set('Authorization', `Bearer ${token}`);
 
-    // mark-in-progress only transitions from sampled_in_queue → does nothing for completed
     expect(res.status).toBe(200);
 
     const updated = await CallTask.findById(task._id);
-    expect(updated?.status).toBe('completed');
+    expect(updated?.status).toBe('in_progress');
   });
 });
 
@@ -304,9 +303,54 @@ describe('T8: non-existent task', () => {
     const fakeId = new (await import('mongoose')).default.Types.ObjectId().toString();
 
     const res = await request(app)
-      .get(`/api/tasks/${fakeId}/load`)
+      .post(`/api/tasks/${fakeId}/load`)
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(404);
+  });
+});
+
+// ─── T9: resume task from History (load after prior submission) ──────────────
+
+describe('T9: agent can load terminal tasks for follow-up', () => {
+  test('POST load succeeds for not_reachable task assigned to agent', async () => {
+    const teamLead = await makeTeamLead();
+    const agent = await makeAgent(teamLead._id);
+    const token = await login(agent.email);
+
+    const farmer = await makeFarmer();
+    const activity = await makeActivity([farmer._id]);
+    const task = await makeTask(farmer._id, activity._id, {
+      status: 'not_reachable',
+      assignedAgentId: agent._id,
+    });
+
+    const res = await request(app)
+      .post(`/api/tasks/${task._id}/load`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(String(res.body.data.taskId)).toBe(task._id.toString());
+  });
+
+  test('POST load succeeds for completed task assigned to agent', async () => {
+    const teamLead = await makeTeamLead();
+    const agent = await makeAgent(teamLead._id);
+    const token = await login(agent.email);
+
+    const farmer = await makeFarmer();
+    const activity = await makeActivity([farmer._id]);
+    const task = await makeTask(farmer._id, activity._id, {
+      status: 'completed',
+      assignedAgentId: agent._id,
+    });
+
+    const res = await request(app)
+      .post(`/api/tasks/${task._id}/load`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
   });
 });

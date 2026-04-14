@@ -133,8 +133,16 @@ router.post(
         throw error;
       }
 
-      // Verify task is available (sampled_in_queue or in_progress)
-      if (task.status !== 'sampled_in_queue' && task.status !== 'in_progress') {
+      // Allow queue/active tasks plus terminal outcomes so agents can resume a follow-up call
+      // (e.g. submitted No Answer earlier, farmer calls back later).
+      const loadable: string[] = [
+        'sampled_in_queue',
+        'in_progress',
+        'not_reachable',
+        'invalid_number',
+        'completed',
+      ];
+      if (!loadable.includes(String(task.status))) {
         const error: AppError = new Error('Task is not available to load');
         error.statusCode = 400;
         throw error;
@@ -217,6 +225,16 @@ router.post(
           timestamp: new Date(),
           status: 'in_progress',
           notes: 'Outbound status selected by agent',
+        });
+        await task.save();
+      } else if (['not_reachable', 'invalid_number', 'completed'].includes(task.status)) {
+        // Follow-up attempt after a prior submission (History → Continue in dialer)
+        task.status = 'in_progress';
+        task.outcome = getOutcomeFromStatus('in_progress');
+        task.interactionHistory.push({
+          timestamp: new Date(),
+          status: 'in_progress',
+          notes: 'Follow-up attempt from agent workspace',
         });
         await task.save();
       }

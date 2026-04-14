@@ -208,6 +208,22 @@ const AgentWorkspace: React.FC = () => {
       setActiveTab('flow');
       hasMarkedInProgressRef.current = false;
       setError(null);
+      setCallDuration(0);
+      setFormData({
+        callStatus: '',
+        didAttend: null,
+        didRecall: null,
+        cropsDiscussed: [],
+        productsDiscussed: [],
+        hasPurchased: null,
+        willingToPurchase: null,
+        likelyPurchaseDate: undefined,
+        nonPurchaseReason: '',
+        purchasedProducts: [],
+        farmerComments: '',
+        sentiment: 'N/A',
+        activityQuality: undefined,
+      });
     } catch (e: any) {
       showError(e?.message || 'Failed to open task');
     }

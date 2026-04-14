@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, ChevronDown, ArrowDownToLine, Filter, RefreshCw, Search, ChevronRight, Loader2, ChevronUp, User as UserIcon, Activity as ActivityIcon, Phone, MessageSquare, Package } from 'lucide-react';
+import { BarChart3, ChevronDown, ArrowDownToLine, Filter, RefreshCw, Search, ChevronRight, Loader2, ChevronUp, User as UserIcon, Activity as ActivityIcon, Phone, PhoneCall, MessageSquare, Package } from 'lucide-react';
 import Button from './shared/Button';
 import StyledSelect from './shared/StyledSelect';
 import { tasksAPI } from '../services/api';
@@ -15,7 +15,8 @@ type HistoryColumnKey =
   | 'outbound'
   | 'activityType'
   | 'territory'
-  | 'updated';
+  | 'updated'
+  | 'dialer';
 
 const DEFAULT_COL_WIDTHS: Record<HistoryColumnKey, number> = {
   expand: 56,
@@ -25,6 +26,7 @@ const DEFAULT_COL_WIDTHS: Record<HistoryColumnKey, number> = {
   activityType: 160,
   territory: 220,
   updated: 140,
+  dialer: 132,
 };
 
 // Get initials from name for avatar display
@@ -60,7 +62,7 @@ const formatDateTime = (d: any) => {
   }
 };
 
-const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void }> = ({ onOpenTask }) => {
+const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promise<void> }> = ({ onOpenTask }) => {
   const toast = useToast();
   // Initialize default date range once to avoid race condition
   const defaultDateRange = getPresetRange('Last 7 days');
@@ -124,6 +126,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void }> = ({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailById, setDetailById] = useState<Record<string, any>>({});
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
+  const [openingTaskId, setOpeningTaskId] = useState<string | null>(null);
 
   const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 7 days');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
@@ -309,6 +312,32 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void }> = ({
     }
   };
 
+  const handleOpenInDialer = async (taskId: string) => {
+    if (!onOpenTask) return;
+    setOpeningTaskId(taskId);
+    try {
+      await Promise.resolve(onOpenTask(taskId));
+    } catch {
+      // Parent shows errors
+    } finally {
+      setOpeningTaskId(null);
+    }
+  };
+
+  const historyTableColumns: Array<[HistoryColumnKey, string]> = useMemo(() => {
+    const base: Array<[HistoryColumnKey, string]> = [
+      ['expand', ''],
+      ['farmer', 'Farmer'],
+      ['outcome', 'Outcome'],
+      ['outbound', 'Outbound'],
+      ['activityType', 'Activity'],
+      ['territory', 'Territory'],
+      ['updated', 'Updated'],
+    ];
+    if (onOpenTask) base.push(['dialer', 'Dialer']);
+    return base;
+  }, [onOpenTask]);
+
   const visible = useMemo(() => {
     const data = Array.isArray(rows) ? [...rows] : [];
 
@@ -321,6 +350,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void }> = ({
       if (key === 'activityType') return String(activity?.type || '');
       if (key === 'territory') return String(activity?.territoryName || activity?.territory || '');
       if (key === 'updated') return String(t.updatedAt || '');
+      if (key === 'dialer') return '';
       return '';
     };
 
@@ -372,10 +402,29 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void }> = ({
             </div>
           </div>
 
+          <div className="mb-4 pb-4 border-b border-slate-100">
+            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Find farmer</label>
+            <div className="relative max-w-xl">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
+              <input
+                value={filters.search}
+                onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
+                placeholder="Name or mobile — filters the table as you type"
+                className="w-full min-h-12 pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                aria-label="Search history by farmer name or mobile"
+              />
+            </div>
+            {onOpenTask ? (
+              <p className="text-[11px] text-slate-500 mt-2 font-medium">
+                Use <span className="font-bold text-slate-700">Continue in dialer</span> on a row to open that task in the workspace and submit an updated call.
+              </p>
+            ) : null}
+          </div>
+
           {/* Filters Section - Matching Activity Sampling */}
           {showFilters && (
             <div className="mt-3 pt-3 border-t border-slate-200 space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Activity Type</label>
                   <StyledSelect
@@ -413,19 +462,6 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void }> = ({
                       { value: 'invalid_number', label: 'Invalid number' },
                     ]}
                   />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Search</label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input
-                      value={filters.search}
-                      onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
-                      placeholder="Farmer, mobile, territory, activity..."
-                      className="w-full min-h-12 pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
-                    />
-                  </div>
                 </div>
               </div>
 
@@ -624,46 +660,40 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void }> = ({
               <table className="w-full table-fixed text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  {(
-                    [
-                      ['expand', ''],
-                      ['farmer', 'Farmer'],
-                      ['outcome', 'Outcome'],
-                      ['outbound', 'Outbound'],
-                      ['activityType', 'Activity'],
-                      ['territory', 'Territory'],
-                      ['updated', 'Updated'],
-                    ] as Array<[HistoryColumnKey, string]>
-                  ).map(([key, label]) => (
+                  {historyTableColumns.map(([key, label]) => (
                     <th
                       key={key}
                       className="relative px-3 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-widest select-none"
                       style={{ width: colWidths[key], minWidth: colWidths[key] }}
-                      onClick={key === 'expand' ? undefined : () => {
-                            setTableSort((p) => {
-                          if (p.key === key) return { key, dir: p.dir === 'asc' ? 'desc' : 'asc' };
-                          return { key, dir: 'asc' };
-                            });
-                          }}
-                      title={key === 'expand' ? undefined : 'Click to sort'}
+                      onClick={
+                        key === 'expand' || key === 'dialer'
+                          ? undefined
+                          : () => {
+                              setTableSort((p) => {
+                                if (p.key === key) return { key, dir: p.dir === 'asc' ? 'desc' : 'asc' };
+                                return { key, dir: 'asc' };
+                              });
+                            }
+                      }
+                      title={key === 'expand' || key === 'dialer' ? undefined : 'Click to sort'}
                     >
                       <div className="flex items-center gap-2">
                         <span className="truncate">{label}</span>
-                        {key !== 'expand' && tableSort.key === key && (
+                        {key !== 'expand' && key !== 'dialer' && tableSort.key === key && (
                           tableSort.dir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
                         )}
                       </div>
-                        {key !== 'expand' && (
-                          <div
+                      {key !== 'expand' && key !== 'dialer' && (
+                        <div
                           className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
                           onMouseDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             handleResizeStart(key, e.clientX);
                           }}
-                            title="Drag to resize"
-                          />
-                        )}
+                          title="Drag to resize"
+                        />
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -732,11 +762,29 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void }> = ({
                         <td className="px-3 py-3 text-sm text-slate-700" style={{ width: colWidths.updated, minWidth: colWidths.updated }}>
                         {updated}
                       </td>
+                        {onOpenTask ? (
+                          <td className="px-2 py-3 align-middle" style={{ width: colWidths.dialer, minWidth: colWidths.dialer }}>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenInDialer(String(t._id))}
+                              disabled={openingTaskId === String(t._id)}
+                              className="w-full min-h-10 px-2 rounded-xl border border-lime-300 bg-lime-50 text-lime-900 text-[11px] font-black uppercase tracking-wide hover:bg-lime-100 disabled:opacity-60 flex items-center justify-center gap-1.5"
+                              title="Open this task in the dialer to place another call and submit an updated response"
+                            >
+                              {openingTaskId === String(t._id) ? (
+                                <Loader2 size={14} className="animate-spin shrink-0" />
+                              ) : (
+                                <PhoneCall size={14} className="shrink-0" strokeWidth={2.25} />
+                              )}
+                              <span className="truncate">Continue</span>
+                            </button>
+                          </td>
+                        ) : null}
                       </tr>
 
                       {isOpen && (
                         <tr className="bg-white">
-                          <td colSpan={8} className="px-3 pb-3 pt-2">
+                          <td colSpan={historyTableColumns.length} className="px-3 pb-3 pt-2">
                             <div className="mx-1 bg-white rounded-xl border border-slate-200 p-3">
                               {detailLoadingId === String(t._id) && (
                                 <div className="flex items-center gap-2 text-slate-600 text-xs font-bold">

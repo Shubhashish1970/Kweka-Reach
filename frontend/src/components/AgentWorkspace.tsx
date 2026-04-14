@@ -82,7 +82,30 @@ const AgentWorkspace: React.FC = () => {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showTaskSelectionModal, setShowTaskSelectionModal] = useState(false);
   const [isAIPanelExpanded, setIsAIPanelExpanded] = useState(false);
+  const aiPanelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMarkedInProgressRef = useRef(false);
+
+  const openAIPanel = () => {
+    if (aiPanelCloseTimerRef.current) {
+      clearTimeout(aiPanelCloseTimerRef.current);
+      aiPanelCloseTimerRef.current = null;
+    }
+    setIsAIPanelExpanded(true);
+  };
+
+  const scheduleCloseAIPanel = () => {
+    if (aiPanelCloseTimerRef.current) clearTimeout(aiPanelCloseTimerRef.current);
+    aiPanelCloseTimerRef.current = setTimeout(() => {
+      setIsAIPanelExpanded(false);
+      aiPanelCloseTimerRef.current = null;
+    }, 220);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (aiPanelCloseTimerRef.current) clearTimeout(aiPanelCloseTimerRef.current);
+    };
+  }, []);
   const [formData, setFormData] = useState({
     callStatus: '',
     didAttend: null as string | null,
@@ -595,18 +618,6 @@ const AgentWorkspace: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-4">
-            {activeSection === 'dialer' && taskData && (
-              <Button 
-                variant="primary" 
-                size="sm" 
-                onClick={handleFinishCall}
-                disabled={isSubmitting || !formData.callStatus}
-                title={!formData.callStatus ? 'Please select call status' : formData.callStatus === 'Connected' ? 'Finish call and submit' : 'Save call attempt'}
-              >
-                <PhoneOff size={16} />
-                {formData.callStatus === 'Connected' ? 'Finish Call' : 'Save Call'}
-              </Button>
-            )}
             {/* User Info */}
             {user && (
               <div className="hidden sm:flex items-center gap-2 text-sm text-slate-300">
@@ -658,19 +669,23 @@ const AgentWorkspace: React.FC = () => {
                 onOutboundStatusSelected={handleOutboundStatusSelected}
               />
 
-          {/* Edge Hover Detector for AI Panel - Invisible trigger zone */}
+          {/* Edge-only hover strip: opens Notetaker only when cursor reaches the viewport edge (not a wide margin). */}
           <div
-            className="hidden lg:block fixed right-0 top-20 bottom-0 w-12 z-40"
-            onMouseEnter={() => setIsAIPanelExpanded(true)}
+            className="hidden lg:block fixed right-0 top-20 bottom-0 w-1.5 z-[45] pointer-events-auto"
+            onMouseEnter={openAIPanel}
+            onMouseLeave={scheduleCloseAIPanel}
+            title="Show Notetaker"
+            aria-hidden
           />
 
-          {/* AI Copilot (AI) - Auto-collapsible with overlay */}
+          {/* AI Copilot (AI) - Slides in from the right; stays open while pointer is on panel or edge strip */}
           <div
             className={`hidden lg:block fixed right-0 top-20 bottom-0 z-50 transition-transform duration-300 ease-in-out ${
-              isAIPanelExpanded ? 'translate-x-0' : 'translate-x-full'
+              isAIPanelExpanded ? 'translate-x-0' : 'translate-x-full pointer-events-none'
             }`}
-            onMouseEnter={() => setIsAIPanelExpanded(true)}
-            onMouseLeave={() => setIsAIPanelExpanded(false)}
+            onMouseEnter={openAIPanel}
+            onMouseLeave={scheduleCloseAIPanel}
+            aria-hidden={!isAIPanelExpanded}
           >
             <AICopilotPanel
               formData={formData}
@@ -721,15 +736,37 @@ const AgentWorkspace: React.FC = () => {
         </div>
       </main>
 
-      {/* Floating Dialer Button - Always visible to quickly switch farmers */}
-      <button
-        onClick={() => setShowTaskSelectionModal(true)}
-        className="fixed bottom-6 right-6 w-16 h-16 bg-lime-500 hover:bg-lime-400 text-slate-900 rounded-full shadow-2xl flex items-center justify-center z-40 transition-all hover:scale-110 active:scale-95 border-4 border-white"
-        title="Switch Farmer / Load Task"
-        aria-label="Open contact dialer"
-      >
-        <PhoneCall size={28} className="text-slate-900" />
-      </button>
+      {/* Floating action: open contact list, or finish/save call when a task is active on the dialer */}
+      {(() => {
+        const fabIsFinish = activeSection === 'dialer' && !!taskData;
+        const finishLabel =
+          formData.callStatus === 'Connected' ? 'Finish call' : 'Save call attempt';
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              if (fabIsFinish) handleFinishCall();
+              else setShowTaskSelectionModal(true);
+            }}
+            disabled={fabIsFinish && (isSubmitting || !formData.callStatus)}
+            className={`fixed bottom-6 right-6 w-16 h-16 rounded-full shadow-2xl flex items-center justify-center z-40 transition-all border-4 border-white ${
+              fabIsFinish
+                ? 'bg-rose-500 hover:bg-rose-400 text-white disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:scale-100 hover:scale-110 active:scale-95'
+                : 'bg-lime-500 hover:bg-lime-400 text-slate-900 hover:scale-110 active:scale-95 disabled:opacity-50'
+            }`}
+            title={
+              fabIsFinish
+                ? !formData.callStatus
+                  ? 'Select outbound status first'
+                  : finishLabel
+                : 'Switch farmer / load task'
+            }
+            aria-label={fabIsFinish ? finishLabel : 'Open contact dialer'}
+          >
+            {fabIsFinish ? <PhoneOff size={28} className="text-white" strokeWidth={2.25} /> : <PhoneCall size={28} className="text-slate-900" />}
+          </button>
+        );
+      })()}
 
       {/* Task Selection Modal */}
       <TaskSelectionModal

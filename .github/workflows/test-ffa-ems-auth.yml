@@ -1,5 +1,4 @@
-# One-off / manual test: EMS UAT authenticate using GitHub Actions secrets.
-# Does not print secret values. Response body is logged (may contain session tokens).
+# Manual test: EMS UAT authenticate using GitHub Actions secrets.
 name: Test FFA EMS Authenticate
 
 on:
@@ -10,26 +9,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Validate secrets are configured
+      - name: Validate required secrets
         env:
           FFA_API_URL: ${{ secrets.FFA_API_URL }}
           FFA_EMS_CTID: ${{ secrets.FFA_EMS_CTID }}
-          FFA_EMS_TOKEN: ${{ secrets.FFA_EMS_TOKEN }}
           FFA_EMS_SECTKEY: ${{ secrets.FFA_EMS_SECTKEY }}
+          FFA_EMS_TOKEN: ${{ secrets.FFA_EMS_TOKEN }}
         run: |
           missing=0
-          for name in FFA_API_URL FFA_EMS_CTID FFA_EMS_TOKEN FFA_EMS_SECTKEY; do
-            val="${!name}"
-            if [ -z "$val" ]; then
+          for name in FFA_API_URL FFA_EMS_CTID FFA_EMS_SECTKEY; do
+            if [ -z "${!name}" ]; then
               echo "::error::Missing GitHub secret: $name"
               missing=1
             else
               echo "✅ $name is set"
             fi
           done
+          if [ -n "${FFA_EMS_TOKEN:-}" ]; then
+            echo "✅ FFA_EMS_TOKEN is set"
+          else
+            echo "::warning::FFA_EMS_TOKEN is empty — sending empty token in request body"
+          fi
           exit $missing
 
-      - name: POST /api/EMS/authenticate
+      - name: POST authenticate and extract session token
         env:
           FFA_API_URL: ${{ secrets.FFA_API_URL }}
           FFA_EMS_CTID: ${{ secrets.FFA_EMS_CTID }}
@@ -37,23 +40,48 @@ jobs:
           FFA_EMS_SECTKEY: ${{ secrets.FFA_EMS_SECTKEY }}
         run: |
           set -euo pipefail
-          BASE="${FFA_API_URL%/api}"
-          URL="${BASE}/api/EMS/authenticate"
+          # FFA_API_URL is the full authenticate endpoint URL
+          URL="${FFA_API_URL%/}"
           echo "Target: $URL"
           HTTP_CODE=$(curl -sS -o /tmp/ems_auth_response.json -w "%{http_code}" \
             -X POST "$URL" \
             -H "Content-Type: application/json" \
             -d "$(jq -n \
               --arg ctid "$FFA_EMS_CTID" \
-              --arg token "$FFA_EMS_TOKEN" \
+              --arg token "${FFA_EMS_TOKEN:-}" \
               --arg sectkey "$FFA_EMS_SECTKEY" \
               '{ctid: $ctid, token: $token, sectkey: $sectkey}')")
           echo "HTTP status: $HTTP_CODE"
           echo "--- Response body ---"
           jq . /tmp/ems_auth_response.json 2>/dev/null || cat /tmp/ems_auth_response.json
-          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            echo "✅ Authenticate succeeded"
-            exit 0
+
+          STYP=$(jq -r '.styp // empty' /tmp/ems_auth_response.json 2>/dev/null || true)
+          SENM=$(jq -r '.senm // empty' /tmp/ems_auth_response.json 2>/dev/null || true)
+          if [ "$STYP" = "E" ] || [ "$STYP" = "e" ]; then
+            echo "::error::EMS returned error: ${SENM:-unknown}"
+            exit 1
           fi
-          echo "::error::Authenticate failed with HTTP $HTTP_CODE"
-          exit 1
+
+          # Session token may be in odat (object/string) or top-level token/accessToken
+          SESSION_TOKEN=$(jq -r '
+            if .odat != null and .odat != "" then
+              if (.odat | type) == "object" then (.odat.token // .odat.accessToken // .odat.sessionToken // .odat) | tostring
+              else .odat | tostring end
+            elif .token != null and .token != "" then .token
+            elif .accessToken != null then .accessToken
+            else empty end
+          ' /tmp/ems_auth_response.json 2>/dev/null || true)
+
+          if [ -z "${SESSION_TOKEN:-}" ] || [ "$SESSION_TOKEN" = "null" ]; then
+            echo "::warning::No session token field found in response (check odat/token shape)"
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ] && [ "$STYP" != "E" ]; then
+              echo "✅ HTTP OK — inspect response body above for token location"
+              exit 0
+            fi
+            echo "::error::Authenticate did not return a usable token"
+            exit 1
+          fi
+
+          echo "✅ EMS session token obtained (length: ${#SESSION_TOKEN} chars)"
+          echo "::add-mask::$SESSION_TOKEN"
+          echo "Token preview: ${SESSION_TOKEN:0:8}...${SESSION_TOKEN: -4}"

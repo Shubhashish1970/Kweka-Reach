@@ -41,6 +41,10 @@ interface FFAFarmer {
 
 const FFA_API_URL = process.env.FFA_API_URL || 'http://localhost:4000/api';
 
+/** Shown when FFA/EMS API responds OK but returns zero activities (not a failure). */
+export const FFA_SYNC_NO_ACTIVITIES_MESSAGE =
+  'Sync completed successfully, but there are no new activities to update from FFA.';
+
 /**
  * Parse FFA activity date string into a Date.
  * Supports:
@@ -341,6 +345,7 @@ export type SyncProgressState = {
     syncType: 'full' | 'incremental';
     skipped?: boolean;
     skipReason?: string;
+    infoMessage?: string;
   };
 };
 
@@ -369,6 +374,7 @@ export const syncFFAData = async (fullSync: boolean = false): Promise<{
   lastSyncDate?: Date;
   skipped?: boolean;
   skipReason?: string;
+  infoMessage?: string;
 }> => {
   const startTime = Date.now();
   const errors: string[] = [];
@@ -471,22 +477,24 @@ export const syncFFAData = async (fullSync: boolean = false): Promise<{
     }
 
     if (!ffaActivities || ffaActivities.length === 0) {
-      logger.warn('[FFA SYNC] No activities returned from FFA API');
+      logger.info(`[FFA SYNC] ${FFA_SYNC_NO_ACTIVITIES_MESSAGE}`);
       isSyncing = false;
       syncProgress.running = false;
       syncProgress.lastResult = {
         activitiesSynced: 0,
         farmersSynced: 0,
-        errors: ['No activities found in FFA API response'],
+        errors: [],
         syncType: fullSync ? 'full' : 'incremental',
+        infoMessage: FFA_SYNC_NO_ACTIVITIES_MESSAGE,
       };
       lastSyncTime = Date.now();
       return {
         activitiesSynced: 0,
         farmersSynced: 0,
-        errors: ['No activities found in FFA API response'],
+        errors: [],
         syncType: fullSync ? 'full' : 'incremental',
         lastSyncDate,
+        infoMessage: FFA_SYNC_NO_ACTIVITIES_MESSAGE,
       };
     }
 

@@ -125,6 +125,7 @@ const ActivitySamplingView: React.FC = () => {
       syncType: 'full' | 'incremental';
       skipped?: boolean;
       skipReason?: string;
+      infoMessage?: string;
     };
   } | null>(null);
   const syncProgressPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -453,6 +454,8 @@ const ActivitySamplingView: React.FC = () => {
             const result = data.lastResult;
             if (result?.skipped) {
               showSuccess(result.skipReason || 'Sync skipped');
+            } else if (result?.infoMessage && (result.errors?.length ?? 0) === 0) {
+              showSuccess(result.infoMessage);
             } else if (result) {
               showSuccess(`FFA sync completed (${result.syncType}): ${result.activitiesSynced} activities, ${result.farmersSynced} farmers synced${(result.errors?.length ?? 0) > 0 ? `, ${result.errors.length} errors` : ''}`);
             }
@@ -838,6 +841,11 @@ const ActivitySamplingView: React.FC = () => {
                       )}
                     </div>
                   </div>
+                  {syncProgress.lastResult.infoMessage && (syncProgress.lastResult.errors?.length ?? 0) === 0 && (
+                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                      {syncProgress.lastResult.infoMessage}
+                    </div>
+                  )}
                   {(syncProgress.lastResult.errors?.length ?? 0) > 0 && (
                     <div className="mt-3 text-xs text-slate-700">
                       <div className="font-black text-slate-900 mb-1">Errors (first 20)</div>

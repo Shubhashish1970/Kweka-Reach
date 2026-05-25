@@ -8,7 +8,7 @@
  */
 
 import axios from 'axios';
-import { syncFFAData } from '../../src/services/ffaSync.js';
+import { syncFFAData, FFA_SYNC_NO_ACTIVITIES_MESSAGE } from '../../src/services/ffaSync.js';
 import { Activity } from '../../src/models/Activity.js';
 import { Farmer } from '../../src/models/Farmer.js';
 
@@ -113,14 +113,14 @@ describe('F1: successful sync creates activities and farmers', () => {
 // ─── F2: empty response ───────────────────────────────────────────────────────
 
 describe('F2: FFA API returns empty activities array', () => {
-  test('sync completes with 0 synced and an informational error entry', async () => {
+  test('sync completes with 0 synced and a user-friendly info message', async () => {
     mockAxiosSuccess([]);
 
     const result = await syncFFAData(true);
 
     expect(result.activitiesSynced).toBe(0);
-    // Returns with "no activities found" error
-    expect(result.errors.length).toBeGreaterThanOrEqual(1);
+    expect(result.errors).toEqual([]);
+    expect(result.infoMessage).toBe(FFA_SYNC_NO_ACTIVITIES_MESSAGE);
   });
 });
 

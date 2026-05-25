@@ -14,6 +14,7 @@ import logger from '../config/logger.js';
 import mongoose from 'mongoose';
 import { syncFFAData } from '../services/ffaSync.js';
 import {
+  getFfaEmsDefaultDateFromDisplay,
   getFfaEmsDefaultDateFromIso,
   isEmsFfaApiEnabled,
   parseFfaEmsDefaultDateFrom,
@@ -23,30 +24,32 @@ const router = express.Router();
 
 /** Activate-from for auto-run: locked to FFA_EMS_DEFAULT_DATE_FROM when set in env. */
 const getAutoRunActivateFromConfig = (config: { autoRunActivateFrom?: Date | string | null } | null) => {
-  const lockedIso = getFfaEmsDefaultDateFromIso();
-  if (lockedIso) {
+  const displayDdMmYyyy = getFfaEmsDefaultDateFromDisplay();
+  if (displayDdMmYyyy) {
     const activateStart = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
     activateStart.setHours(0, 0, 0, 0);
-    return { activateStart, isoDate: lockedIso, locked: true };
+    return { activateStart, displayDate: displayDdMmYyyy, locked: true };
   }
   if (config?.autoRunActivateFrom) {
     const activateStart = new Date(config.autoRunActivateFrom);
     activateStart.setHours(0, 0, 0, 0);
-    const isoDate = activateStart.toISOString().split('T')[0];
-    return { activateStart, isoDate, locked: false };
+    const dd = String(activateStart.getDate()).padStart(2, '0');
+    const mm = String(activateStart.getMonth() + 1).padStart(2, '0');
+    const displayDate = `${dd}/${mm}/${activateStart.getFullYear()}`;
+    return { activateStart, displayDate, locked: false };
   }
-  return { activateStart: null as Date | null, isoDate: '', locked: false };
+  return { activateStart: null as Date | null, displayDate: '', locked: false };
 };
 
 const enrichSamplingConfigResponse = (config: Record<string, unknown> | null) => {
   const base = config ? { ...config } : {};
-  const { isoDate, locked } = getAutoRunActivateFromConfig(config as { autoRunActivateFrom?: Date | string | null });
-  if (locked && isoDate) {
-    base.autoRunActivateFrom = isoDate;
-    base.autoRunActivateFromLocked = true;
+  const { displayDate, locked } = getAutoRunActivateFromConfig(config as { autoRunActivateFrom?: Date | string | null });
+  if (displayDate) {
+    base.autoRunActivateFrom = displayDate;
+  }
+  base.autoRunActivateFromLocked = locked;
+  if (locked) {
     base.autoRunActivateFromSource = 'FFA_EMS_DEFAULT_DATE_FROM';
-  } else {
-    base.autoRunActivateFromLocked = false;
   }
   return base;
 };
@@ -526,8 +529,8 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const config = await SamplingConfig.findOne({ key: 'default' }).lean();
-      const lockedIso = getFfaEmsDefaultDateFromIso();
-      if (lockedIso) {
+      const lockedDisplay = getFfaEmsDefaultDateFromDisplay();
+      if (lockedDisplay) {
         const activateDate = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
         await SamplingConfig.findOneAndUpdate(
           { key: 'default' },
@@ -579,7 +582,7 @@ router.put(
         ...body,
         updatedByUserId: authUserId || null,
       };
-      if (getFfaEmsDefaultDateFromIso()) {
+      if (getFfaEmsDefaultDateFromDisplay()) {
         delete update.autoRunActivateFrom;
         update.autoRunActivateFrom = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
       } else if (body.autoRunActivateFrom === '' || body.autoRunActivateFrom === null || body.autoRunActivateFrom === undefined) {
@@ -885,7 +888,7 @@ router.post(
       const config = await SamplingConfig.findOne({ key: 'default' }).lean();
       const autoRunEnabled = (config as any)?.autoRunEnabled === true;
       const autoRunThreshold = Number((config as any)?.autoRunThreshold ?? 200);
-      const { activateStart, isoDate: activateFromIso } = getAutoRunActivateFromConfig(
+      const { activateStart, displayDate: activateFromDisplay } = getAutoRunActivateFromConfig(
         config as { autoRunActivateFrom?: Date | string | null } | null
       );
 
@@ -918,7 +921,7 @@ router.post(
             success: true,
             ran: false,
             reason: 'before_activate_date',
-            activateFrom: activateFromIso || activateStart.toISOString().split('T')[0],
+            activateFrom: activateFromDisplay || activateStart.toISOString().split('T')[0],
           });
         }
       }

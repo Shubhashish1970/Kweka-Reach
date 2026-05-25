@@ -61,6 +61,8 @@ const SamplingControlView: React.FC = () => {
   const [autoRunThreshold, setAutoRunThreshold] = useState<number>(200);
   const [autoRunActivateFrom, setAutoRunActivateFrom] = useState<string>('');
   const [autoRunActivateFromLocked, setAutoRunActivateFromLocked] = useState<boolean>(false);
+  /** DD/MM/YYYY from FFA_EMS_DEFAULT_DATE_FROM when integration is configured */
+  const [ffaDefaultActivateFrom, setFfaDefaultActivateFrom] = useState<string>('');
   const [taskDueInDays, setTaskDueInDays] = useState<number>(0);
 
   const [activityFilters, setActivityFilters] = useState(() => {
@@ -176,7 +178,12 @@ const SamplingControlView: React.FC = () => {
           : new Date(cfg.autoRunActivateFrom).toISOString().split('T')[0])
       : '';
     setAutoRunActivateFrom(activateFrom);
-    setAutoRunActivateFromLocked(!!cfg?.autoRunActivateFromLocked);
+    const locked = !!cfg?.autoRunActivateFromLocked;
+    setAutoRunActivateFromLocked(locked);
+    setFfaDefaultActivateFrom(locked ? activateFrom : '');
+    if (locked && !!cfg?.autoRunEnabled && activateFrom) {
+      setAutoRunActivateFrom(activateFrom);
+    }
     setTaskDueInDays(Math.max(0, Math.min(365, Number(cfg?.taskDueInDays ?? 0))));
   };
 
@@ -914,7 +921,13 @@ const SamplingControlView: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={autoRunEnabled}
-                  onChange={(e) => setAutoRunEnabled(e.target.checked)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAutoRunEnabled(checked);
+                    if (checked && autoRunActivateFromLocked && ffaDefaultActivateFrom) {
+                      setAutoRunActivateFrom(ffaDefaultActivateFrom);
+                    }
+                  }}
                   className="rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                 />
                 <span className="text-sm font-bold text-slate-800">Enable auto-run</span>
@@ -927,27 +940,36 @@ const SamplingControlView: React.FC = () => {
                     min={1}
                     value={autoRunThreshold}
                     onChange={(e) => setAutoRunThreshold(Number(e.target.value) || 200)}
-                    className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
+                    disabled={!autoRunEnabled}
+                    className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 disabled:bg-slate-100 disabled:cursor-not-allowed"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Activate from date</label>
-                  <input
-                    type="date"
-                    value={autoRunActivateFrom}
-                    onChange={(e) => setAutoRunActivateFrom(e.target.value)}
-                    readOnly={autoRunActivateFromLocked}
-                    disabled={autoRunActivateFromLocked}
-                    className={`w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 ${
-                      autoRunActivateFromLocked ? 'bg-slate-100 cursor-not-allowed' : 'bg-white'
-                    }`}
-                  />
-                  <p className="text-xs text-slate-500 mt-1">
-                    {autoRunActivateFromLocked
-                      ? 'Set from FFA integration (FFA_EMS_DEFAULT_DATE_FROM). Contact your admin to change.'
-                      : 'Leave empty to allow runs immediately when enabled'}
-                  </p>
-                </div>
+                {autoRunEnabled && (
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Activate from date (DD/MM/YYYY)</label>
+                    {autoRunActivateFromLocked ? (
+                      <input
+                        type="text"
+                        value={autoRunActivateFrom}
+                        readOnly
+                        className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-slate-100 text-sm font-medium text-slate-900 cursor-not-allowed"
+                        aria-label="Activate from date"
+                      />
+                    ) : (
+                      <input
+                        type="date"
+                        value={autoRunActivateFrom}
+                        onChange={(e) => setAutoRunActivateFrom(e.target.value)}
+                        className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
+                      />
+                    )}
+                    <p className="text-xs text-slate-500 mt-1">
+                      {autoRunActivateFromLocked
+                        ? 'Set from FFA integration (FFA_EMS_DEFAULT_DATE_FROM). Contact your admin to change.'
+                        : 'Leave empty to allow runs immediately when enabled'}
+                    </p>
+                  </div>
+                )}
               </div>
               <p className="text-sm text-slate-700 mt-2">
                 <strong>Last auto-run:</strong>{' '}

@@ -74,16 +74,24 @@ export const parseFfaEmsDefaultDateFrom = (rawInput?: string): Date => {
   return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
 };
 
-/** ISO date (YYYY-MM-DD) for HTML date inputs; null if env not set. */
-export const getFfaEmsDefaultDateFromIso = (): string | null => {
+/** Normalized DD/MM/YYYY from env; null if not set or invalid. */
+export const getFfaEmsDefaultDateFromDisplay = (): string | null => {
   const raw = process.env.FFA_EMS_DEFAULT_DATE_FROM?.trim();
   if (!raw) return null;
   const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return null;
   const dd = String(Number(m[1])).padStart(2, '0');
   const mm = String(Number(m[2])).padStart(2, '0');
-  const yyyy = m[3];
-  return `${yyyy}-${mm}-${dd}`;
+  return `${dd}/${mm}/${m[3]}`;
+};
+
+/** ISO date (YYYY-MM-DD) for HTML date inputs; null if env not set. */
+export const getFfaEmsDefaultDateFromIso = (): string | null => {
+  const display = getFfaEmsDefaultDateFromDisplay();
+  if (!display) return null;
+  const m = display.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
 };
 
 export const resolveActivitiesDateFrom = (dateFrom?: Date): Date => {

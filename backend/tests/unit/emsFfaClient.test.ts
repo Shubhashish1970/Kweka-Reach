@@ -3,6 +3,7 @@ import {
   authenticateEms,
   fetchEmsActivities,
   formatDateFromParam,
+  getFfaEmsDefaultDateFromDisplay,
   getFfaEmsDefaultDateFromIso,
   isEmsFfaApiEnabled,
   parseFfaEmsDefaultDateFrom,
@@ -43,8 +44,9 @@ describe('emsFfaClient', () => {
     expect(formatDateFromParam(new Date(2025, 4, 1))).toBe('01/05/2025');
   });
 
-  test('getFfaEmsDefaultDateFromIso converts DD/MM/YYYY env to YYYY-MM-DD', () => {
-    process.env.FFA_EMS_DEFAULT_DATE_FROM = '01/05/2025';
+  test('getFfaEmsDefaultDateFromDisplay and ISO conversion', () => {
+    process.env.FFA_EMS_DEFAULT_DATE_FROM = '1/5/2025';
+    expect(getFfaEmsDefaultDateFromDisplay()).toBe('01/05/2025');
     expect(getFfaEmsDefaultDateFromIso()).toBe('2025-05-01');
     expect(parseFfaEmsDefaultDateFrom('01/05/2025').getMonth()).toBe(4);
   });

@@ -64,8 +64,9 @@ export const formatDateFromParam = (date: Date): string => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
-const parseDefaultFullSyncDate = (): Date => {
-  const raw = (process.env.FFA_EMS_DEFAULT_DATE_FROM || '01/01/2020').trim();
+/** Parse DD/MM/YYYY from FFA_EMS_DEFAULT_DATE_FROM (or fallback for full FFA sync). */
+export const parseFfaEmsDefaultDateFrom = (rawInput?: string): Date => {
+  const raw = (rawInput ?? process.env.FFA_EMS_DEFAULT_DATE_FROM ?? '01/01/2020').trim();
   const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) {
     return new Date(2020, 0, 1);
@@ -73,9 +74,21 @@ const parseDefaultFullSyncDate = (): Date => {
   return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
 };
 
+/** ISO date (YYYY-MM-DD) for HTML date inputs; null if env not set. */
+export const getFfaEmsDefaultDateFromIso = (): string | null => {
+  const raw = process.env.FFA_EMS_DEFAULT_DATE_FROM?.trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const dd = String(Number(m[1])).padStart(2, '0');
+  const mm = String(Number(m[2])).padStart(2, '0');
+  const yyyy = m[3];
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 export const resolveActivitiesDateFrom = (dateFrom?: Date): Date => {
   if (dateFrom) return dateFrom;
-  return parseDefaultFullSyncDate();
+  return parseFfaEmsDefaultDateFrom();
 };
 
 const normalizeFarmer = (raw: Record<string, unknown>): EmsFfaFarmer => ({

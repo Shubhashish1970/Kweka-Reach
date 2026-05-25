@@ -12,8 +12,44 @@ import { SamplingRun } from '../models/SamplingRun.js';
 import { callTaskNeedsAgentMongoFilter } from '../services/taskService.js';
 import logger from '../config/logger.js';
 import mongoose from 'mongoose';
+import { syncFFAData } from '../services/ffaSync.js';
+import {
+  getFfaEmsDefaultDateFromIso,
+  isEmsFfaApiEnabled,
+  parseFfaEmsDefaultDateFrom,
+} from '../services/emsFfaClient.js';
 
 const router = express.Router();
+
+/** Activate-from for auto-run: locked to FFA_EMS_DEFAULT_DATE_FROM when set in env. */
+const getAutoRunActivateFromConfig = (config: { autoRunActivateFrom?: Date | string | null } | null) => {
+  const lockedIso = getFfaEmsDefaultDateFromIso();
+  if (lockedIso) {
+    const activateStart = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
+    activateStart.setHours(0, 0, 0, 0);
+    return { activateStart, isoDate: lockedIso, locked: true };
+  }
+  if (config?.autoRunActivateFrom) {
+    const activateStart = new Date(config.autoRunActivateFrom);
+    activateStart.setHours(0, 0, 0, 0);
+    const isoDate = activateStart.toISOString().split('T')[0];
+    return { activateStart, isoDate, locked: false };
+  }
+  return { activateStart: null as Date | null, isoDate: '', locked: false };
+};
+
+const enrichSamplingConfigResponse = (config: Record<string, unknown> | null) => {
+  const base = config ? { ...config } : {};
+  const { isoDate, locked } = getAutoRunActivateFromConfig(config as { autoRunActivateFrom?: Date | string | null });
+  if (locked && isoDate) {
+    base.autoRunActivateFrom = isoDate;
+    base.autoRunActivateFromLocked = true;
+    base.autoRunActivateFromSource = 'FFA_EMS_DEFAULT_DATE_FROM';
+  } else {
+    base.autoRunActivateFromLocked = false;
+  }
+  return base;
+};
 
 // All routes require authentication
 router.use(authenticate);
@@ -490,7 +526,20 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const config = await SamplingConfig.findOne({ key: 'default' }).lean();
-      res.json({ success: true, data: { config } });
+      const lockedIso = getFfaEmsDefaultDateFromIso();
+      if (lockedIso) {
+        const activateDate = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
+        await SamplingConfig.findOneAndUpdate(
+          { key: 'default' },
+          { $set: { autoRunActivateFrom: activateDate } },
+          { upsert: true }
+        );
+      }
+      const fresh = await SamplingConfig.findOne({ key: 'default' }).lean();
+      res.json({
+        success: true,
+        data: { config: enrichSamplingConfigResponse((fresh as Record<string, unknown>) || null) },
+      });
     } catch (error) {
       next(error);
     }
@@ -530,7 +579,10 @@ router.put(
         ...body,
         updatedByUserId: authUserId || null,
       };
-      if (body.autoRunActivateFrom === '' || body.autoRunActivateFrom === null || body.autoRunActivateFrom === undefined) {
+      if (getFfaEmsDefaultDateFromIso()) {
+        delete update.autoRunActivateFrom;
+        update.autoRunActivateFrom = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
+      } else if (body.autoRunActivateFrom === '' || body.autoRunActivateFrom === null || body.autoRunActivateFrom === undefined) {
         update.autoRunActivateFrom = null;
       }
 
@@ -540,7 +592,11 @@ router.put(
         { upsert: true, new: true }
       );
 
-      res.json({ success: true, message: 'Sampling config updated', data: { config } });
+      res.json({
+        success: true,
+        message: 'Sampling config updated',
+        data: { config: enrichSamplingConfigResponse((config as unknown as Record<string, unknown>) || null) },
+      });
     } catch (error) {
       next(error);
     }
@@ -829,18 +885,41 @@ router.post(
       const config = await SamplingConfig.findOne({ key: 'default' }).lean();
       const autoRunEnabled = (config as any)?.autoRunEnabled === true;
       const autoRunThreshold = Number((config as any)?.autoRunThreshold ?? 200);
-      const autoRunActivateFrom = (config as any)?.autoRunActivateFrom ? new Date((config as any).autoRunActivateFrom) : null;
+      const { activateStart, isoDate: activateFromIso } = getAutoRunActivateFromConfig(
+        config as { autoRunActivateFrom?: Date | string | null } | null
+      );
 
       if (!autoRunEnabled) {
         return res.json({ success: true, ran: false, reason: 'auto_run_disabled' });
       }
-      if (autoRunActivateFrom) {
+
+      if (isEmsFfaApiEnabled()) {
+        try {
+          logger.info('[auto-run] Running incremental FFA sync (EMS API) before auto-run');
+          const syncResult = await syncFFAData(false);
+          logger.info('[auto-run] FFA sync finished', {
+            activitiesSynced: syncResult.activitiesSynced,
+            farmersSynced: syncResult.farmersSynced,
+            skipped: syncResult.skipped,
+            infoMessage: syncResult.infoMessage,
+          });
+        } catch (syncErr) {
+          const msg = syncErr instanceof Error ? syncErr.message : 'FFA sync failed';
+          logger.error('[auto-run] FFA sync failed', syncErr);
+          return res.json({ success: true, ran: false, reason: 'ffa_sync_failed', message: msg });
+        }
+      }
+
+      if (activateStart) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const activateStart = new Date(autoRunActivateFrom);
-        activateStart.setHours(0, 0, 0, 0);
         if (today < activateStart) {
-          return res.json({ success: true, ran: false, reason: 'before_activate_date', activateFrom: autoRunActivateFrom.toISOString().split('T')[0] });
+          return res.json({
+            success: true,
+            ran: false,
+            reason: 'before_activate_date',
+            activateFrom: activateFromIso || activateStart.toISOString().split('T')[0],
+          });
         }
       }
       const { count, range } = await getLaterRunEligibleCount(authUserId);

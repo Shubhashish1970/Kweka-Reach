@@ -3,7 +3,9 @@ import {
   authenticateEms,
   fetchEmsActivities,
   formatDateFromParam,
+  getFfaEmsDefaultDateFromIso,
   isEmsFfaApiEnabled,
+  parseFfaEmsDefaultDateFrom,
   resolveEmsApiBase,
 } from '../../src/services/emsFfaClient.js';
 
@@ -39,6 +41,12 @@ describe('emsFfaClient', () => {
 
   test('formatDateFromParam uses DD/MM/YYYY', () => {
     expect(formatDateFromParam(new Date(2025, 4, 1))).toBe('01/05/2025');
+  });
+
+  test('getFfaEmsDefaultDateFromIso converts DD/MM/YYYY env to YYYY-MM-DD', () => {
+    process.env.FFA_EMS_DEFAULT_DATE_FROM = '01/05/2025';
+    expect(getFfaEmsDefaultDateFromIso()).toBe('2025-05-01');
+    expect(parseFfaEmsDefaultDateFrom('01/05/2025').getMonth()).toBe(4);
   });
 
   test('authenticateEms returns odat[0].token', async () => {

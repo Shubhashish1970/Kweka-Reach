@@ -60,6 +60,7 @@ const SamplingControlView: React.FC = () => {
   const [autoRunEnabled, setAutoRunEnabled] = useState<boolean>(false);
   const [autoRunThreshold, setAutoRunThreshold] = useState<number>(200);
   const [autoRunActivateFrom, setAutoRunActivateFrom] = useState<string>('');
+  const [autoRunActivateFromLocked, setAutoRunActivateFromLocked] = useState<boolean>(false);
   const [taskDueInDays, setTaskDueInDays] = useState<number>(0);
 
   const [activityFilters, setActivityFilters] = useState(() => {
@@ -169,7 +170,13 @@ const SamplingControlView: React.FC = () => {
     setDefaultPercentage(Number(cfg?.defaultPercentage ?? 10));
     setAutoRunEnabled(!!cfg?.autoRunEnabled);
     setAutoRunThreshold(Number(cfg?.autoRunThreshold ?? 200));
-    setAutoRunActivateFrom(cfg?.autoRunActivateFrom ? (typeof cfg.autoRunActivateFrom === 'string' ? cfg.autoRunActivateFrom.split('T')[0] : new Date(cfg.autoRunActivateFrom).toISOString().split('T')[0]) : '');
+    const activateFrom = cfg?.autoRunActivateFrom
+      ? (typeof cfg.autoRunActivateFrom === 'string'
+          ? cfg.autoRunActivateFrom.split('T')[0]
+          : new Date(cfg.autoRunActivateFrom).toISOString().split('T')[0])
+      : '';
+    setAutoRunActivateFrom(activateFrom);
+    setAutoRunActivateFromLocked(!!cfg?.autoRunActivateFromLocked);
     setTaskDueInDays(Math.max(0, Math.min(365, Number(cfg?.taskDueInDays ?? 0))));
   };
 
@@ -356,7 +363,9 @@ const SamplingControlView: React.FC = () => {
         autoRunThreshold: Math.max(1, Math.min(100000, autoRunThreshold)),
         taskDueInDays: Math.max(0, Math.min(365, taskDueInDays)),
       };
-      if (autoRunActivateFrom?.trim()) payload.autoRunActivateFrom = autoRunActivateFrom.trim();
+      if (!autoRunActivateFromLocked && autoRunActivateFrom?.trim()) {
+        payload.autoRunActivateFrom = autoRunActivateFrom.trim();
+      }
       await samplingAPI.updateConfig(payload);
       // Requirement: if a type is not selected, activities of that type should move to Not Eligible.
       await samplingAPI.applyEligibility(eligibleTypes);
@@ -898,7 +907,9 @@ const SamplingControlView: React.FC = () => {
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
               <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Automatic later run (cron)</p>
-              <p className="text-xs text-slate-600">When the scheduler calls POST /api/sampling/auto-run, it will run a later Run Sample only if enabled, on or after the activate-from date, and when unsampled activities ≥ threshold.</p>
+              <p className="text-xs text-slate-600">
+                When the scheduler calls POST /api/sampling/auto-run, it syncs activities from the configured FFA/EMS API first, then runs a later Run Sample only if enabled, on or after the activate-from date, and when unsampled activities ≥ threshold.
+              </p>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -925,9 +936,17 @@ const SamplingControlView: React.FC = () => {
                     type="date"
                     value={autoRunActivateFrom}
                     onChange={(e) => setAutoRunActivateFrom(e.target.value)}
-                    className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
+                    readOnly={autoRunActivateFromLocked}
+                    disabled={autoRunActivateFromLocked}
+                    className={`w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 ${
+                      autoRunActivateFromLocked ? 'bg-slate-100 cursor-not-allowed' : 'bg-white'
+                    }`}
                   />
-                  <p className="text-xs text-slate-500 mt-1">Leave empty to allow runs immediately when enabled</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {autoRunActivateFromLocked
+                      ? 'Set from FFA integration (FFA_EMS_DEFAULT_DATE_FROM). Contact your admin to change.'
+                      : 'Leave empty to allow runs immediately when enabled'}
+                  </p>
                 </div>
               </div>
               <p className="text-sm text-slate-700 mt-2">

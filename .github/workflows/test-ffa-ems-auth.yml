@@ -1,4 +1,4 @@
-# Manual test: EMS UAT authenticate using GitHub Actions secrets.
+# Manual test: EMS UAT authenticate + activities GET using GitHub Actions secrets.
 name: Test FFA EMS Authenticate
 
 on:
@@ -69,26 +69,82 @@ jobs:
             exit 1
           fi
 
-          # Session token may be in odat (object/string) or top-level token/accessToken
           SESSION_TOKEN=$(jq -r '
-            if .odat != null and .odat != "" then
-              if (.odat | type) == "object" then (.odat.token // .odat.accessToken // .odat.sessionToken // .odat) | tostring
-              else .odat | tostring end
+            if (.odat | type) == "array" and (.odat | length) > 0 then .odat[0].token // empty
+            elif (.odat | type) == "object" then .odat.token // empty
             elif .token != null and .token != "" then .token
-            elif .accessToken != null then .accessToken
             else empty end
-          ' /tmp/ems_auth_response.json 2>/dev/null || true)
+          ' /tmp/ems_auth_response.json)
 
           if [ -z "${SESSION_TOKEN:-}" ] || [ "$SESSION_TOKEN" = "null" ]; then
-            echo "::warning::No session token field found in response (check odat/token shape)"
-            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ] && [ "$STYP" != "E" ]; then
-              echo "✅ HTTP OK — inspect response body above for token location"
-              exit 0
-            fi
-            echo "::error::Authenticate did not return a usable token"
+            echo "::error::Authenticate did not return odat[0].token"
             exit 1
           fi
 
           echo "✅ EMS session token obtained (length: ${#SESSION_TOKEN} chars)"
           echo "::add-mask::$SESSION_TOKEN"
-          echo "Token preview: ${SESSION_TOKEN:0:8}...${SESSION_TOKEN: -4}"
+          echo "$SESSION_TOKEN" > /tmp/ems_session_token.txt
+
+      - name: GET /api/EMS/activities
+        env:
+          FFA_API_URL: ${{ secrets.FFA_API_URL }}
+        run: |
+          set -euo pipefail
+          SESSION_TOKEN=$(cat /tmp/ems_session_token.txt)
+          BASE="${FFA_API_URL%/}"
+          if [[ "$BASE" == */authenticate ]]; then
+            BASE="${BASE%/EMS/authenticate}"
+          fi
+          if [[ "$BASE" != */api ]]; then
+            BASE="${BASE}/api"
+          fi
+          ACTIVITIES_URL="${BASE}/EMS/activities?limit=100&dateFrom=11%2F05%2F2025"
+          echo "Target: $ACTIVITIES_URL"
+          HTTP_CODE=$(curl -sS -o /tmp/ems_activities_response.json -w "%{http_code}" \
+            -X GET "$ACTIVITIES_URL" \
+            -H "Authorization: Bearer $SESSION_TOKEN" \
+            -H "Content-Type: application/json")
+          echo "HTTP status: $HTTP_CODE"
+          echo "--- Response summary ---"
+          if [ ! -s /tmp/ems_activities_response.json ]; then
+            echo "(empty body)"
+            exit 1
+          fi
+          jq -r '
+            if type == "object" then
+              "styp: \(.styp // "n/a")",
+              "senm: \(.senm // "n/a")",
+              (if .success != null then "success: \(.success)" else empty end),
+              (if .data.activities then "activities_count: \(.data.activities | length)" else empty end),
+              (if .odat then "odat_type: \(.odat | type)" else empty end)
+            else "response_type: \(type)"
+            end
+          ' /tmp/ems_activities_response.json 2>/dev/null || true
+          echo "--- First 2500 chars of body ---"
+          head -c 2500 /tmp/ems_activities_response.json
+          echo ""
+          COUNT=$(jq -r '
+            if .data.activities then (.data.activities | length)
+            elif (.odat | type) == "array" then (.odat | length)
+            else 0 end
+          ' /tmp/ems_activities_response.json 2>/dev/null || echo "0")
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            STYP=$(jq -r '.styp // empty' /tmp/ems_activities_response.json 2>/dev/null || true)
+            if [ "$STYP" = "E" ] || [ "$STYP" = "e" ]; then
+              SENM=$(jq -r '.senm // "unknown"' /tmp/ems_activities_response.json)
+              echo "::error::EMS activities error: $SENM"
+              exit 1
+            fi
+            if [ "${COUNT:-0}" -gt 0 ] 2>/dev/null; then
+              echo "✅ Activities data received (count: $COUNT)"
+              exit 0
+            fi
+            if jq -e '.success == true' /tmp/ems_activities_response.json >/dev/null 2>&1; then
+              echo "✅ HTTP 200 with success:true (check activities array shape)"
+              exit 0
+            fi
+            echo "::warning::HTTP 200 but no activities array detected — inspect body above"
+            exit 0
+          fi
+          echo "::error::Activities request failed with HTTP $HTTP_CODE"
+          exit 1

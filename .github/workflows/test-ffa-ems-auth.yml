@@ -40,8 +40,15 @@ jobs:
           FFA_EMS_SECTKEY: ${{ secrets.FFA_EMS_SECTKEY }}
         run: |
           set -euo pipefail
-          # FFA_API_URL is the full authenticate endpoint URL
+          # FFA_API_URL: full auth URL, or base ending in /api (we append /EMS/authenticate)
           URL="${FFA_API_URL%/}"
+          if [[ "$URL" != *authenticate* ]]; then
+            if [[ "$URL" == */api ]]; then
+              URL="${URL}/EMS/authenticate"
+            else
+              URL="${URL}/api/EMS/authenticate"
+            fi
+          fi
           echo "Target: $URL"
           HTTP_CODE=$(curl -sS -o /tmp/ems_auth_response.json -w "%{http_code}" \
             -X POST "$URL" \

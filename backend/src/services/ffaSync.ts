@@ -4,6 +4,11 @@ import logger from '../config/logger.js';
 import mongoose from 'mongoose';
 import axios, { AxiosError } from 'axios';
 import { getLanguageForState } from '../utils/stateLanguageMapper.js';
+import {
+  fetchEmsActivities,
+  isEmsFfaApiEnabled,
+  resolveActivitiesDateFrom,
+} from './emsFfaClient.js';
 
 interface FFAActivity {
   activityId: string;
@@ -50,8 +55,8 @@ const parseFFADate = (value: string): Date => {
 
   const raw = value.trim();
 
-  // New: DD/MM/YYYY
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
+  // DD/MM/YYYY or D/M/YYYY (EMS may return single-digit day/month)
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) {
     const [ddStr, mmStr, yyyyStr] = raw.split('/');
     const dd = Number(ddStr);
     const mm = Number(mmStr);
@@ -92,7 +97,16 @@ const fetchFFAActivities = async (dateFrom?: Date): Promise<FFAActivity[]> => {
     logger.warn('FFA_API_URL environment variable is not set, using default: http://localhost:4000/api');
   }
 
-  // Build URL with optional dateFrom parameter for incremental sync
+  if (isEmsFfaApiEnabled()) {
+    const emsDateFrom = resolveActivitiesDateFrom(dateFrom);
+    logger.info('[FFA SYNC] Using NACL EMS API (authenticate + /EMS/activities)', {
+      incremental: !!dateFrom,
+      dateFrom: emsDateFrom.toISOString(),
+    });
+    return fetchEmsActivities(FFA_API_URL, emsDateFrom);
+  }
+
+  // Build URL with optional dateFrom parameter for incremental sync (mock / vendor spec)
   // Handle trailing slash in FFA_API_URL to avoid double slashes
   const baseUrl = FFA_API_URL.endsWith('/') ? FFA_API_URL.slice(0, -1) : FFA_API_URL;
   let url = `${baseUrl}/activities?limit=100`;

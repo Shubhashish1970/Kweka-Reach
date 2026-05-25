@@ -11,7 +11,9 @@ This guide walks you through setting up the **Mock FFA API** (which fetches crop
 | **EMS Backend** | Calls FFA API (mock or real) using `FFA_API_URL`. Optionally sends auth via `FFA_API_TOKEN` or `FFA_API_KEY`. Exposes `GET /api/ffa/master-data` protected by `FFA_MASTER_KEY`. |
 | **Mock FFA API** | At startup, calls EMS `GET /api/ffa/master-data` with `X-FFA-Master-Key` to load crops/products. Needs `EMS_API_URL` (set by deploy workflow from backend URL) and `FFA_MASTER_KEY` (from GitHub secret). |
 
-**Switch to real API:** Set GitHub secret `FFA_API_URL` to the real FFA API base URL (e.g. `https://real-ffa.example.com/api`) and set `FFA_API_TOKEN` or `FFA_API_KEY`. Redeploy backend.
+**Switch to NACL EMS API (UAT):** Set `FFA_API_URL` to `https://emsapiuat.naclind.com/api`, plus `FFA_EMS_CTID`, `FFA_EMS_SECTKEY`, and optionally `FFA_EMS_TOKEN` / `FFA_EMS_DEFAULT_DATE_FROM`. Backend authenticates via `POST /EMS/authenticate` and fetches `GET /EMS/activities` with Bearer token. Redeploy backend.
+
+**Switch to generic vendor API (Bearer/API key):** Set `FFA_API_URL` to the vendor base URL (e.g. `https://real-ffa.example.com/api`) and set `FFA_API_TOKEN` or `FFA_API_KEY` (do not set `FFA_EMS_CTID`). Redeploy backend.
 
 ---
 
@@ -98,9 +100,13 @@ When you switch to the **real** FFA API, you set the URL and (if required) auth.
 | Secret | Used by | When to set | Purpose |
 |--------|---------|-------------|---------|
 | `FFA_MASTER_KEY` | Backend + Mock FFA API | Always for Option A mock | Shared key: FFA (mock or real) calls EMS `/api/ffa/master-data` with `X-FFA-Master-Key`; backend validates it. |
-| `FFA_API_URL` | Backend only | Optional for mock; **required** for real API | Backend calls this URL for FFA (activities, etc.). If unset, backend deploy uses deployed mock URL. |
-| `FFA_API_TOKEN` | Backend only | When real FFA API uses Bearer auth | Sent as `Authorization: Bearer <token>`. |
-| `FFA_API_KEY` | Backend only | When real FFA API uses API key | Sent as `X-API-Key: <key>`. |
+| `FFA_API_URL` | Backend only | Optional for mock; **required** for real API | Base `.../api` for EMS, or mock/vendor URL. If unset, backend deploy uses deployed mock URL. |
+| `FFA_EMS_CTID` | Backend only | NACL EMS API | With `FFA_EMS_SECTKEY`, enables EMS authenticate + activities flow. |
+| `FFA_EMS_SECTKEY` | Backend only | NACL EMS API | Secret key for authenticate body. |
+| `FFA_EMS_TOKEN` | Backend only | Optional | Optional `token` field in authenticate POST body. |
+| `FFA_EMS_DEFAULT_DATE_FROM` | Backend only | Optional | Full sync cutoff `DD/MM/YYYY` (default `01/01/2020`). EMS requires `dateFrom`. |
+| `FFA_API_TOKEN` | Backend only | Vendor Bearer (non-EMS) | Sent as `Authorization: Bearer <token>`. |
+| `FFA_API_KEY` | Backend only | Vendor API key (non-EMS) | Sent as `X-API-Key: <key>`. |
 
 ---
 

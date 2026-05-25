@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/rbac.js';
-import { syncFFAData, getSyncStatus, getSyncProgress } from '../services/ffaSync.js';
+import { syncFFAData, getSyncStatus, getSyncProgress, beginSyncProgress } from '../services/ffaSync.js';
 import { Activity } from '../models/Activity.js';
 import { Farmer } from '../models/Farmer.js';
 import { CallTask } from '../models/CallTask.js';
@@ -193,7 +193,7 @@ router.post(
         fullSync,
       });
 
-      // Run sync in background so client can poll progress
+      beginSyncProgress(fullSync ? 'full' : 'incremental');
       syncFFAData(fullSync).catch((err) => {
         logger.error('[FFA SYNC] Background sync error:', err);
       });

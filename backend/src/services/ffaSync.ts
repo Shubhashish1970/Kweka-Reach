@@ -363,6 +363,19 @@ export function getSyncProgress(): SyncProgressState {
   return { ...syncProgress };
 }
 
+/** Reset progress when a new sync is queued (avoids stale lastResult on first poll). */
+export const beginSyncProgress = (syncType: 'full' | 'incremental'): void => {
+  syncProgress = {
+    running: true,
+    activitiesSynced: 0,
+    totalActivities: 0,
+    farmersSynced: 0,
+    errorCount: 0,
+    syncType,
+    message: syncType === 'full' ? 'Full sync in progress…' : 'Incremental sync in progress…',
+  };
+};
+
 // Minimum time between syncs (in milliseconds) - default 10 minutes
 const MIN_SYNC_INTERVAL = parseInt(process.env.MIN_SYNC_INTERVAL || '600000', 10); // 10 minutes default
 
@@ -416,8 +429,9 @@ export const syncFFAData = async (fullSync: boolean = false): Promise<{
       };
     }
 
-    // Set sync lock
+    // Set sync lock and mark progress running (may already be set by POST /sync handler)
     isSyncing = true;
+    beginSyncProgress(fullSync ? 'full' : 'incremental');
 
     // Determine sync type and get last sync date for incremental sync
     if (!fullSync) {

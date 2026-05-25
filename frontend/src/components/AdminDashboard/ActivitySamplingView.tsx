@@ -129,6 +129,8 @@ const ActivitySamplingView: React.FC = () => {
     };
   } | null>(null);
   const syncProgressPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncPollSawRunningRef = useRef(false);
+  const requestedSyncTypeRef = useRef<'full' | 'incremental' | null>(null);
   const [syncStatus, setSyncStatus] = useState<{ lastSyncAt: string | null; totalActivities: number; totalFarmers: number } | null>(null);
   const [dataSource, setDataSource] = useState<'api' | 'excel'>(() => {
     const v = localStorage.getItem('admin.activitySampling.dataSource');
@@ -409,6 +411,8 @@ const ActivitySamplingView: React.FC = () => {
       setIsIncrementalSyncing(true);
     }
     setSyncProgress({ running: true, activitiesSynced: 0, totalActivities: 0, farmersSynced: 0, errorCount: 0, syncType: fullSync ? 'full' : 'incremental', message: 'Starting sync...' });
+    syncPollSawRunningRef.current = false;
+    requestedSyncTypeRef.current = fullSync ? 'full' : 'incremental';
 
     try {
       const response = (await ffaAPI.syncFFAData(fullSync)) as any;
@@ -446,12 +450,19 @@ const ActivitySamplingView: React.FC = () => {
             message: data.message ?? '',
             lastResult: data.lastResult,
           });
+          if (data.running) {
+            syncPollSawRunningRef.current = true;
+          }
           if (!data.running) {
+            const result = data.lastResult;
+            const matchesRequestedType = result?.syncType === requestedSyncTypeRef.current;
+            if (!syncPollSawRunningRef.current && !matchesRequestedType) {
+              return;
+            }
             if (syncProgressPollRef.current) {
               clearInterval(syncProgressPollRef.current);
               syncProgressPollRef.current = null;
             }
-            const result = data.lastResult;
             if (result?.skipped) {
               showSuccess(result.skipReason || 'Sync skipped');
             } else if (result?.infoMessage && (result.errors?.length ?? 0) === 0) {
@@ -776,7 +787,7 @@ const ActivitySamplingView: React.FC = () => {
               title="Incremental sync: Only syncs new activities since last sync"
             >
               <Download size={16} className={isIncrementalSyncing ? 'animate-spin' : ''} />
-              {isIncrementalSyncing ? 'Syncing...' : 'Sync FFA'}
+              {isIncrementalSyncing ? 'Syncing...' : 'Sync FFA (Incremental)'}
             </Button>
             <Button
               variant="secondary"
@@ -786,7 +797,7 @@ const ActivitySamplingView: React.FC = () => {
               title="Full sync: Syncs all activities (takes longer)"
             >
               <Download size={16} className={isFullSyncing ? 'animate-spin' : ''} />
-              {isFullSyncing ? 'Full Syncing...' : 'Full Sync'}
+              {isFullSyncing ? 'Full syncing...' : 'Sync FFA (Full)'}
             </Button>
           </div>
         </div>
@@ -1842,7 +1853,7 @@ const ActivitySamplingView: React.FC = () => {
                                       className="mt-2"
                                     >
                                       <Download size={14} className={isIncrementalSyncing ? 'animate-spin' : ''} />
-                                      {isIncrementalSyncing ? 'Syncing...' : 'Sync FFA Data'}
+                                      {isIncrementalSyncing ? 'Syncing...' : 'Sync FFA (Incremental)'}
                                     </Button>
                                   </div>
                                 )}

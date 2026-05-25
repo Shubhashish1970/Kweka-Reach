@@ -737,9 +737,9 @@ const ActivitySamplingView: React.FC = () => {
               </p>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-3 min-w-0">
+          <div className="flex flex-nowrap items-center gap-2 sm:gap-3 shrink-0 overflow-x-auto max-w-full pb-0.5">
             {/* iPhone-style toggle */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2 shrink-0">
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2 shrink-0 whitespace-nowrap">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data Source</span>
               <div className="flex items-center gap-2">
                 <span className={`text-xs font-black ${dataSource === 'api' ? 'text-slate-900' : 'text-slate-400'}`}>API</span>
@@ -782,6 +782,7 @@ const ActivitySamplingView: React.FC = () => {
             <Button
               variant="primary"
               size="sm"
+              className="shrink-0 whitespace-nowrap"
               onClick={() => handleSyncFFA(false)}
               disabled={dataSource !== 'api' || isIncrementalSyncing || isFullSyncing}
               title="Incremental sync: Only syncs new activities since last sync"
@@ -792,9 +793,10 @@ const ActivitySamplingView: React.FC = () => {
             <Button
               variant="secondary"
               size="sm"
+              className="shrink-0 whitespace-nowrap"
               onClick={() => handleSyncFFA(true)}
               disabled={dataSource !== 'api' || isIncrementalSyncing || isFullSyncing}
-              title="Full sync: Syncs all activities (takes longer)"
+              title="Full sync: Syncs all activities from FFA_EMS_DEFAULT_DATE_FROM (takes longer)"
             >
               <Download size={16} className={isFullSyncing ? 'animate-spin' : ''} />
               {isFullSyncing ? 'Full syncing...' : 'Sync FFA (Full)'}

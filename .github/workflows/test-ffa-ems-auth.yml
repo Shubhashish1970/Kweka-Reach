@@ -103,17 +103,34 @@ jobs:
           if [[ "$BASE" != */api ]]; then
             BASE="${BASE}/api"
           fi
-          DATE_FROM="${FFA_EMS_DEFAULT_DATE_FROM:-01/05/2025}"
-          DATE_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DATE_FROM', safe=''))")
-          ACTIVITIES_URL="${BASE}/EMS/activities?limit=100&dateFrom=${DATE_ENC}"
-          echo "dateFrom param: $DATE_FROM"
-          echo "Target: $ACTIVITIES_URL"
-          HTTP_CODE=$(curl -sS -o /tmp/ems_activities_response.json -w "%{http_code}" \
-            -X GET "$ACTIVITIES_URL" \
-            -H "Authorization: Bearer $SESSION_TOKEN" \
-            -H "Content-Type: application/json")
-          echo "HTTP status: $HTTP_CODE"
-          jq -r 'if .Success != null then "Success: \(.Success), message: \(.message // "n/a")" elif .success != null then "success: \(.success)" else empty end' /tmp/ems_activities_response.json 2>/dev/null || true
+          FOUND=0
+          for DATE_FROM in "${FFA_EMS_DEFAULT_DATE_FROM:-01/05/2025}" "01/01/2026" "01/04/2026" "20/05/2026" "26/05/2026"; do
+            DATE_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DATE_FROM', safe=''))")
+            ACTIVITIES_URL="${BASE}/EMS/activities?limit=100&dateFrom=${DATE_ENC}"
+            echo "--- dateFrom: $DATE_FROM ---"
+            HTTP_CODE=$(curl -sS -o /tmp/ems_activities_response.json -w "%{http_code}" \
+              -X GET "$ACTIVITIES_URL" \
+              -H "Authorization: Bearer $SESSION_TOKEN" \
+              -H "Content-Type: application/json")
+            echo "HTTP status: $HTTP_CODE"
+            jq -r 'if .Success != null then "Success: \(.Success), message: \(.message // "n/a")" elif .success != null then "success: \(.success)" else empty end' /tmp/ems_activities_response.json 2>/dev/null || true
+            COUNT=$(jq -r 'if .data.activities then (.data.activities | length) elif .activities then (.activities | length) else 0 end' /tmp/ems_activities_response.json 2>/dev/null || echo "0")
+            if [ "${COUNT:-0}" -gt 0 ] 2>/dev/null; then
+              echo "✅ Activities found: $COUNT (dateFrom=$DATE_FROM)"
+              FOUND=1
+              cp /tmp/ems_activities_response.json /tmp/ems_activities_hit.json
+              break
+            fi
+            if jq -e '.Success == true or .success == true' /tmp/ems_activities_response.json >/dev/null 2>&1; then
+              echo "✅ Success true (dateFrom=$DATE_FROM) — inspect body"
+              FOUND=1
+              cp /tmp/ems_activities_response.json /tmp/ems_activities_hit.json
+              break
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            cp /tmp/ems_activities_hit.json /tmp/ems_activities_response.json
+          fi
           echo "--- Response summary ---"
           if [ ! -s /tmp/ems_activities_response.json ]; then
             echo "(empty body)"

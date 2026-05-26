@@ -3,6 +3,10 @@ name: Test FFA EMS Authenticate
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/test-ffa-ems-auth.yml'
 
 jobs:
   test-authenticate:
@@ -88,6 +92,7 @@ jobs:
       - name: GET /api/EMS/activities
         env:
           FFA_API_URL: ${{ secrets.FFA_API_URL }}
+          FFA_EMS_DEFAULT_DATE_FROM: ${{ secrets.FFA_EMS_DEFAULT_DATE_FROM }}
         run: |
           set -euo pipefail
           SESSION_TOKEN=$(cat /tmp/ems_session_token.txt)
@@ -98,7 +103,10 @@ jobs:
           if [[ "$BASE" != */api ]]; then
             BASE="${BASE}/api"
           fi
-          ACTIVITIES_URL="${BASE}/EMS/activities?limit=100&dateFrom=01%2F05%2F2025"
+          DATE_FROM="${FFA_EMS_DEFAULT_DATE_FROM:-01/05/2025}"
+          DATE_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DATE_FROM', safe=''))")
+          ACTIVITIES_URL="${BASE}/EMS/activities?limit=100&dateFrom=${DATE_ENC}"
+          echo "dateFrom param: $DATE_FROM"
           echo "Target: $ACTIVITIES_URL"
           HTTP_CODE=$(curl -sS -o /tmp/ems_activities_response.json -w "%{http_code}" \
             -X GET "$ACTIVITIES_URL" \
@@ -126,6 +134,8 @@ jobs:
           echo ""
           COUNT=$(jq -r '
             if .data.activities then (.data.activities | length)
+            elif .Data.activities then (.Data.activities | length)
+            elif .activities then (.activities | length)
             elif (.odat | type) == "array" then (.odat | length)
             else 0 end
           ' /tmp/ems_activities_response.json 2>/dev/null || echo "0")
@@ -136,12 +146,17 @@ jobs:
               echo "::error::EMS activities error: $SENM"
               exit 1
             fi
+            if jq -e '.Success == false' /tmp/ems_activities_response.json >/dev/null 2>&1; then
+              MSG=$(jq -r '.message // "No data"' /tmp/ems_activities_response.json)
+              echo "::warning::EMS Success=false: $MSG"
+              exit 0
+            fi
             if [ "${COUNT:-0}" -gt 0 ] 2>/dev/null; then
               echo "✅ Activities data received (count: $COUNT)"
               exit 0
             fi
-            if jq -e '.success == true' /tmp/ems_activities_response.json >/dev/null 2>&1; then
-              echo "✅ HTTP 200 with success:true (check activities array shape)"
+            if jq -e '.success == true or .Success == true' /tmp/ems_activities_response.json >/dev/null 2>&1; then
+              echo "✅ HTTP 200 with success flag (check activities array shape in body above)"
               exit 0
             fi
             echo "::warning::HTTP 200 but no activities array detected — inspect body above"

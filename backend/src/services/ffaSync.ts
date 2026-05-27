@@ -59,17 +59,35 @@ const parseFFADate = (value: string): Date => {
 
   const raw = value.trim();
 
-  // DD/MM/YYYY or D/M/YYYY (EMS may return single-digit day/month)
+  // EMS UAT often returns "6/17/2025 12:00:00 AM" — use date portion only
+  const dateOnly = raw.split(/\s+/)[0];
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateOnly) && dateOnly !== raw) {
+    return parseFFADate(dateOnly);
+  }
+
+  // Slash dates: DD/MM/YYYY (query params, India) or M/D/YYYY (EMS activity body, e.g. 6/17/2025)
   if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) {
-    const [ddStr, mmStr, yyyyStr] = raw.split('/');
-    const dd = Number(ddStr);
-    const mm = Number(mmStr);
-    const yyyy = Number(yyyyStr);
+    const parts = raw.split('/').map((p) => Number(p));
+    const [a, b, yyyy] = parts;
+    let dd: number;
+    let mm: number;
+    if (b > 12) {
+      // M/D/YYYY — month in first segment
+      mm = a;
+      dd = b;
+    } else if (a > 12) {
+      // D/M/YYYY
+      dd = a;
+      mm = b;
+    } else {
+      // Ambiguous (e.g. 11/05/2025): prefer DD/MM/YYYY for this integration
+      dd = a;
+      mm = b;
+    }
 
     const d = new Date(yyyy, mm - 1, dd);
-    // Validate round-trip (catches invalid dates like 32/13/2026)
     if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) {
-      throw new Error(`Invalid activity date (DD/MM/YYYY): ${raw}`);
+      throw new Error(`Invalid activity date: ${raw}`);
     }
     return d;
   }

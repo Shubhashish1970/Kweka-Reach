@@ -115,18 +115,60 @@ const normalizeActivity = (raw: Record<string, unknown>): EmsFfaActivity => ({
   officerId: String(raw.officerId ?? raw.OfficerId ?? ''),
   officerName: String(raw.officerName ?? raw.OfficerName ?? ''),
   location: String(raw.location ?? raw.Location ?? ''),
-  territory: String(raw.territory ?? raw.Territory ?? raw.territoryName ?? ''),
-  territoryName: raw.territoryName != null ? String(raw.territoryName) : undefined,
-  zoneName: raw.zoneName != null ? String(raw.zoneName) : undefined,
-  buName: raw.buName != null ? String(raw.buName) : undefined,
-  tmEmpCode: raw.tmEmpCode != null ? String(raw.tmEmpCode) : undefined,
-  tmName: raw.tmName != null ? String(raw.tmName) : undefined,
-  state: raw.state != null ? String(raw.state) : undefined,
-  crops: Array.isArray(raw.crops) ? (raw.crops as string[]) : undefined,
-  products: Array.isArray(raw.products) ? (raw.products as string[]) : undefined,
+  territory: String(
+    raw.territory ?? raw.Territory ?? raw.territoryName ?? raw.TerritoryName ?? ''
+  ),
+  territoryName:
+    raw.territoryName != null
+      ? String(raw.territoryName)
+      : raw.TerritoryName != null
+        ? String(raw.TerritoryName)
+        : undefined,
+  zoneName:
+    raw.zoneName != null
+      ? String(raw.zoneName)
+      : raw.ZoneName != null
+        ? String(raw.ZoneName)
+        : undefined,
+  buName:
+    raw.buName != null
+      ? String(raw.buName)
+      : raw.BuName != null
+        ? String(raw.BuName)
+        : undefined,
+  tmEmpCode:
+    raw.tmEmpCode != null
+      ? String(raw.tmEmpCode)
+      : raw.TmEmpCode != null
+        ? String(raw.TmEmpCode)
+        : undefined,
+  tmName:
+    raw.tmName != null
+      ? String(raw.tmName)
+      : raw.TmName != null
+        ? String(raw.TmName)
+        : undefined,
+  state:
+    raw.state != null
+      ? String(raw.state)
+      : raw.State != null
+        ? String(raw.State)
+        : undefined,
+  crops: Array.isArray(raw.crops)
+    ? (raw.crops as string[])
+    : Array.isArray(raw.Crops)
+      ? (raw.Crops as string[])
+      : undefined,
+  products: Array.isArray(raw.products)
+    ? (raw.products as string[])
+    : Array.isArray(raw.Products)
+      ? (raw.Products as string[])
+      : undefined,
   farmers: Array.isArray(raw.farmers)
     ? (raw.farmers as Record<string, unknown>[]).map(normalizeFarmer)
-    : [],
+    : Array.isArray(raw.Farmers)
+      ? (raw.Farmers as Record<string, unknown>[]).map(normalizeFarmer)
+      : [],
 });
 
 const extractActivitiesFromPayload = (data: Record<string, unknown>): EmsFfaActivity[] => {
@@ -135,22 +177,30 @@ const extractActivitiesFromPayload = (data: Record<string, unknown>): EmsFfaActi
     data.Success === true ||
     (data.styp === 'S' || data.styp === 's');
 
-  const noDataMsg = String(data.message ?? data.senm ?? '').toLowerCase();
+  const noDataMsg = String(data.message ?? data.Message ?? data.senm ?? '').toLowerCase();
   if (
     data.Success === false ||
     (data.success === false && noDataMsg.includes('no data'))
   ) {
-    logger.info('[FFA SYNC][EMS] No activities returned from EMS', { message: data.message ?? data.senm });
+    logger.info('[FFA SYNC][EMS] No activities returned from EMS', {
+      message: data.message ?? data.Message ?? data.senm,
+    });
     return [];
   }
 
   let rawList: unknown[] | undefined;
-  const nested = data.data as Record<string, unknown> | undefined;
-  if (nested && Array.isArray(nested.activities)) {
-    rawList = nested.activities;
-  } else if (Array.isArray(data.activities)) {
+  const nested = (data.data ?? data.Data) as Record<string, unknown> | undefined;
+  if (nested) {
+    if (Array.isArray(nested.activities)) rawList = nested.activities;
+    else if (Array.isArray(nested.Activities)) rawList = nested.Activities;
+  }
+  if (!rawList && Array.isArray(data.activities)) {
     rawList = data.activities;
-  } else if (Array.isArray(data.odat)) {
+  }
+  if (!rawList && Array.isArray(data.Activities)) {
+    rawList = data.Activities;
+  }
+  if (!rawList && Array.isArray(data.odat)) {
     rawList = data.odat;
   }
 

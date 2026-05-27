@@ -90,6 +90,57 @@ describe('emsFfaClient', () => {
     );
   });
 
+  test('fetchEmsActivities maps NACL PascalCase Data.Activities (Postman shape)', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      status: 200,
+      data: { styp: 'S', odat: [{ token: 'tok' }] },
+    });
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: {
+        Success: true,
+        Data: {
+          Activities: [
+            {
+              ActivityId: '5245',
+              Type: 'Dealer Activity',
+              Date: '6/17/2025 12:00:00 AM',
+              OfficerId: '22532',
+              OfficerName: 'A Gopal',
+              Location: '',
+              Territory: 'Manvi',
+              TerritoryName: 'Manvi',
+              ZoneName: 'BELLARY',
+              BuName: 'INK BU',
+              State: 'KARNATAKA',
+              Crops: [],
+              Products: [],
+              Farmers: [
+                {
+                  FarmerId: 'F-1',
+                  Name: 'Test Farmer',
+                  MobileNumber: '9876543210',
+                  Location: 'Village',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 11));
+    expect(activities).toHaveLength(1);
+    expect(activities[0].activityId).toBe('5245');
+    expect(activities[0].type).toBe('Dealer Activity');
+    expect(activities[0].state).toBe('KARNATAKA');
+    expect(activities[0].farmers[0].name).toBe('Test Farmer');
+    expect(axios.get).toHaveBeenCalledWith(
+      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=11%2F05%2F2025`,
+      expect.any(Object)
+    );
+  });
+
   test('fetchEmsActivities maps vendor-shaped activities', async () => {
     jest.spyOn(axios, 'post').mockResolvedValueOnce({
       status: 200,

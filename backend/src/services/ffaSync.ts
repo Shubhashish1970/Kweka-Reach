@@ -7,6 +7,8 @@ import { getLanguageForState } from '../utils/stateLanguageMapper.js';
 import {
   fetchEmsActivities,
   formatDateFromParam,
+  formatEmsDateTimeFromParam,
+  parseEmsActivityDate,
   resolveEmsActivitiesLimit,
   isEmsFfaApiEnabled,
   resolveActivitiesDateFrom,
@@ -48,70 +50,6 @@ export const FFA_SYNC_NO_ACTIVITIES_MESSAGE =
   'Sync completed successfully, but there are no new activities to update from FFA.';
 
 /**
- * Parse FFA activity date string into a Date.
- * Supports:
- * - DD/MM/YYYY (new contract)
- * - YYYY-MM-DD (legacy contract)
- * - ISO strings (fallback)
- */
-const parseFFADate = (value: string): Date => {
-  if (!value || typeof value !== 'string') {
-    throw new Error('Invalid activity date (missing)');
-  }
-
-  const raw = value.trim();
-
-  // EMS UAT often returns "6/17/2025 12:00:00 AM" — use date portion only
-  const dateOnly = raw.split(/\s+/)[0];
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateOnly) && dateOnly !== raw) {
-    return parseFFADate(dateOnly);
-  }
-
-  // Slash dates: DD/MM/YYYY (query params, India) or M/D/YYYY (EMS activity body, e.g. 6/17/2025)
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) {
-    const parts = raw.split('/').map((p) => Number(p));
-    const [a, b, yyyy] = parts;
-    let dd: number;
-    let mm: number;
-    if (b > 12) {
-      // M/D/YYYY — month in first segment
-      mm = a;
-      dd = b;
-    } else if (a > 12) {
-      // D/M/YYYY
-      dd = a;
-      mm = b;
-    } else {
-      // Ambiguous (e.g. 11/05/2025): prefer DD/MM/YYYY for this integration
-      dd = a;
-      mm = b;
-    }
-
-    const d = new Date(yyyy, mm - 1, dd);
-    if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) {
-      throw new Error(`Invalid activity date: ${raw}`);
-    }
-    return d;
-  }
-
-  // Legacy: YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const d = new Date(`${raw}T00:00:00.000Z`);
-    if (isNaN(d.getTime())) {
-      throw new Error(`Invalid activity date (YYYY-MM-DD): ${raw}`);
-    }
-    return d;
-  }
-
-  // Fallback: ISO or other parseable formats
-  const d = new Date(raw);
-  if (isNaN(d.getTime())) {
-    throw new Error(`Invalid activity date: ${raw}`);
-  }
-  return d;
-};
-
-/**
  * Fetch activities from FFA API with timeout and better error handling
  * @param dateFrom - Optional date to fetch activities after (for incremental sync)
  * @param fullSync - When true, uses full-sync limit (default 0 = all eligible from default dateFrom)
@@ -126,13 +64,18 @@ const fetchFFAActivities = async (dateFrom?: Date, fullSync = false): Promise<FF
     const emsDateFrom = resolveActivitiesDateFrom(dateFrom);
     const emsMode = fullSync ? 'full' : 'incremental';
     const emsLimit = resolveEmsActivitiesLimit(emsMode);
+    const useDateTimeFrom = emsMode === 'incremental' && !!dateFrom;
+    const dateFromParam = useDateTimeFrom
+      ? formatEmsDateTimeFromParam(emsDateFrom)
+      : formatDateFromParam(emsDateFrom);
     logger.info('[FFA SYNC] Using NACL EMS API (authenticate + /EMS/activities)', {
       syncMode: emsMode,
       limit: emsLimit,
       dateFrom: emsDateFrom.toISOString(),
-      dateFromParam: formatDateFromParam(emsDateFrom),
+      dateFromParam,
+      useDateTimeFrom,
     });
-    return fetchEmsActivities(FFA_API_URL, emsDateFrom, emsLimit);
+    return fetchEmsActivities(FFA_API_URL, emsDateFrom, emsLimit, useDateTimeFrom);
   }
 
   // Build URL with optional dateFrom parameter for incremental sync (mock / vendor spec)
@@ -281,7 +224,7 @@ const syncActivity = async (ffaActivity: FFAActivity, dataBatchId: string): Prom
         $set: {
         activityId: ffaActivity.activityId,
         type: ffaActivity.type,
-          date: parseFFADate(ffaActivity.date),
+          date: parseEmsActivityDate(ffaActivity.date),
         officerId: ffaActivity.officerId,
         officerName: ffaActivity.officerName,
         location: ffaActivity.location,
@@ -461,15 +404,13 @@ export const syncFFAData = async (fullSync: boolean = false): Promise<{
     // Determine sync type and get last sync date for incremental sync
     if (!fullSync) {
       try {
-        // Get the most recently synced activity to determine the cutoff date
+        // Use latest syncedAt so EMS dateFrom can be sent as DD-MM-YYYY HH:mm:ss
         const lastActivity = await Activity.findOne().sort({ syncedAt: -1 });
         if (lastActivity && lastActivity.syncedAt) {
-          // Use syncedAt timestamp (when activity was last synced) instead of date
-          // This is more accurate for incremental sync as it reflects actual sync time
-          // Subtract 1 hour as a buffer to account for API delays and timezone differences
           lastSyncDate = new Date(lastActivity.syncedAt);
-          lastSyncDate.setHours(lastSyncDate.getHours() - 1);
-          logger.info(`[FFA SYNC] Incremental sync: last activity synced at ${lastActivity.syncedAt.toISOString()}, fetching activities after ${lastSyncDate.toISOString()}`);
+          logger.info(
+            `[FFA SYNC] Incremental sync: cutoff syncedAt=${lastActivity.syncedAt.toISOString()}, EMS dateFrom=${formatEmsDateTimeFromParam(lastSyncDate)}`
+          );
           
           // Additional check: if last sync was very recent (within last 5 minutes), skip
           const timeSinceLastSync = Date.now() - lastActivity.syncedAt.getTime();

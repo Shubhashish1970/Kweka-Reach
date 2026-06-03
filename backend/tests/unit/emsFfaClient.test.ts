@@ -3,6 +3,8 @@ import {
   authenticateEms,
   fetchEmsActivities,
   formatDateFromParam,
+  formatEmsDateTimeFromParam,
+  parseEmsActivityDate,
   getFfaEmsDefaultDateFromDisplay,
   getFfaEmsDefaultDateFromIso,
   isEmsFfaApiEnabled,
@@ -43,6 +45,25 @@ describe('emsFfaClient', () => {
 
   test('formatDateFromParam uses DD/MM/YYYY', () => {
     expect(formatDateFromParam(new Date(2025, 4, 1))).toBe('01/05/2025');
+  });
+
+  test('formatEmsDateTimeFromParam uses DD-MM-YYYY HH:mm:ss', () => {
+    expect(formatEmsDateTimeFromParam(new Date(2026, 4, 8, 22, 28, 44))).toBe(
+      '08-05-2026 22:28:44'
+    );
+  });
+
+  test('parseEmsActivityDate parses NACL prod datetime and slash legacy', () => {
+    const prod = parseEmsActivityDate('08-05-2026 22:28:44');
+    expect(prod.getFullYear()).toBe(2026);
+    expect(prod.getMonth()).toBe(4);
+    expect(prod.getDate()).toBe(8);
+    expect(prod.getHours()).toBe(22);
+    expect(prod.getMinutes()).toBe(28);
+
+    const legacy = parseEmsActivityDate('01/05/2025');
+    expect(legacy.getMonth()).toBe(4);
+    expect(legacy.getDate()).toBe(1);
   });
 
   test('resolveEmsActivitiesLimit defaults to 0 for full and incremental', () => {
@@ -114,7 +135,7 @@ describe('emsFfaClient', () => {
             {
               ActivityId: '5245',
               Type: 'Dealer Activity',
-              Date: '6/17/2025 12:00:00 AM',
+              Date: '17-06-2025 12:00:00',
               OfficerId: '22532',
               OfficerName: 'A Gopal',
               Location: '',
@@ -147,6 +168,23 @@ describe('emsFfaClient', () => {
     expect(activities[0].farmers[0].name).toBe('Test Farmer');
     expect(axios.get).toHaveBeenCalledWith(
       `${EMS_BASE}/EMS/activities?limit=0&dateFrom=11%2F05%2F2025`,
+      expect.any(Object)
+    );
+  });
+
+  test('fetchEmsActivities uses datetime dateFrom for incremental', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      status: 200,
+      data: { styp: 'S', odat: [{ token: 'tok' }] },
+    });
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: { Success: true, Data: { Activities: [] } },
+    });
+
+    await fetchEmsActivities(EMS_BASE, new Date(2026, 5, 3, 15, 6, 7), 0, true);
+    expect(axios.get).toHaveBeenCalledWith(
+      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=03-06-2026%2015%3A06%3A07`,
       expect.any(Object)
     );
   });

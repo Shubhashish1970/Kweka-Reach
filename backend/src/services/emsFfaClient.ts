@@ -57,11 +57,121 @@ export const resolveEmsApiBase = (ffaApiUrl: string): string => {
   return base;
 };
 
+/** Full sync / legacy: DD/MM/YYYY */
 export const formatDateFromParam = (date: Date): string => {
   const dd = String(date.getDate()).padStart(2, '0');
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yyyy = String(date.getFullYear());
   return `${dd}/${mm}/${yyyy}`;
+};
+
+/**
+ * NACL EMS dateFrom for incremental sync: DD-MM-YYYY HH:mm:ss (matches activity `Date` in prod).
+ * Full sync uses date-only DD/MM/YYYY via formatDateFromParam.
+ */
+export const formatEmsDateTimeFromParam = (date: Date): string => {
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getFullYear());
+  const hh = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${dd}-${mm}-${yyyy} ${hh}:${min}:${ss}`;
+};
+
+const validateLocalDateTime = (
+  d: Date,
+  yyyy: number,
+  mm: number,
+  dd: number,
+  h = 0,
+  min = 0,
+  sec = 0
+): void => {
+  if (
+    d.getFullYear() !== yyyy ||
+    d.getMonth() !== mm - 1 ||
+    d.getDate() !== dd ||
+    d.getHours() !== h ||
+    d.getMinutes() !== min ||
+    d.getSeconds() !== sec
+  ) {
+    throw new Error('Invalid activity date/time');
+  }
+};
+
+/**
+ * Parse NACL activity `Date` and related strings into local Date.
+ * Supports DD-MM-YYYY HH:mm:ss (prod), slash variants, and legacy formats.
+ */
+export const parseEmsActivityDate = (value: string): Date => {
+  if (!value || typeof value !== 'string') {
+    throw new Error('Invalid activity date (missing)');
+  }
+
+  const raw = value.trim();
+
+  const dashDateTime = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$/);
+  if (dashDateTime) {
+    const dd = Number(dashDateTime[1]);
+    const mm = Number(dashDateTime[2]);
+    const yyyy = Number(dashDateTime[3]);
+    const h = Number(dashDateTime[4]);
+    const min = Number(dashDateTime[5]);
+    const sec = Number(dashDateTime[6]);
+    const d = new Date(yyyy, mm - 1, dd, h, min, sec);
+    validateLocalDateTime(d, yyyy, mm, dd, h, min, sec);
+    return d;
+  }
+
+  const dashDateOnly = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dashDateOnly) {
+    const dd = Number(dashDateOnly[1]);
+    const mm = Number(dashDateOnly[2]);
+    const yyyy = Number(dashDateOnly[3]);
+    const d = new Date(yyyy, mm - 1, dd);
+    validateLocalDateTime(d, yyyy, mm, dd);
+    return d;
+  }
+
+  const slashDateTime = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(.+)$/);
+  if (slashDateTime) {
+    return parseEmsActivityDate(`${slashDateTime[1]}/${slashDateTime[2]}/${slashDateTime[3]}`);
+  }
+
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) {
+    const parts = raw.split('/').map((p) => Number(p));
+    const [a, b, yyyy] = parts;
+    let dd: number;
+    let mm: number;
+    if (b > 12) {
+      mm = a;
+      dd = b;
+    } else if (a > 12) {
+      dd = a;
+      mm = b;
+    } else {
+      dd = a;
+      mm = b;
+    }
+    const d = new Date(yyyy, mm - 1, dd);
+    validateLocalDateTime(d, yyyy, mm, dd);
+    return d;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const d = new Date(`${raw}T00:00:00.000Z`);
+    if (isNaN(d.getTime())) {
+      throw new Error(`Invalid activity date (YYYY-MM-DD): ${raw}`);
+    }
+    return d;
+  }
+
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) {
+    throw new Error(`Invalid activity date: ${raw}`);
+  }
+  return d;
 };
 
 /** Parse DD/MM/YYYY from FFA_EMS_DEFAULT_DATE_FROM (or fallback for full FFA sync). */
@@ -307,16 +417,20 @@ export const authenticateEms = async (ffaApiUrl: string): Promise<string> => {
 };
 
 /**
- * GET /api/EMS/activities?limit=N&dateFrom=DD/MM/YYYY (dateFrom required by EMS).
+ * GET /api/EMS/activities?limit=N&dateFrom=... (dateFrom required by EMS).
+ * Full sync: dateFrom as DD/MM/YYYY. Incremental: DD-MM-YYYY HH:mm:ss from last syncedAt.
  * limit=0 returns all eligible undelivered activities for that dateFrom (per NACL contract).
  */
 export const fetchEmsActivities = async (
   ffaApiUrl: string,
   dateFrom: Date,
-  limit: number
+  limit: number,
+  useDateTimeFrom = false
 ): Promise<EmsFfaActivity[]> => {
   const base = resolveEmsApiBase(ffaApiUrl);
-  const dateFromParam = formatDateFromParam(dateFrom);
+  const dateFromParam = useDateTimeFrom
+    ? formatEmsDateTimeFromParam(dateFrom)
+    : formatDateFromParam(dateFrom);
   const safeLimit = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : 0;
   const url = `${base}/EMS/activities?limit=${safeLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
   const timeoutMs = resolveActivitiesRequestTimeoutMs(safeLimit);

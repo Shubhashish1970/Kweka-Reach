@@ -465,7 +465,30 @@ export const fetchEmsActivities = async (
       throw new Error('EMS activities returned invalid response format');
     }
 
-    const activities = extractActivitiesFromPayload(data as Record<string, unknown>);
+    let activities = extractActivitiesFromPayload(data as Record<string, unknown>);
+
+    // NACL: limit=0 should return all eligible; some environments return empty — retry with a high cap
+    if (activities.length === 0 && safeLimit === 0) {
+      const fallbackLimit = 10_000;
+      const fallbackUrl = `${base}/EMS/activities?limit=${fallbackLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
+      logger.warn('[FFA SYNC][EMS] limit=0 returned no activities; retrying with high limit', {
+        fallbackLimit,
+        dateFromParam,
+      });
+      const fallbackRes = await axios.get(fallbackUrl, {
+        timeout: resolveActivitiesRequestTimeoutMs(fallbackLimit),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+        validateStatus: (status) => status < 500,
+      });
+      if (fallbackRes.status < 400 && fallbackRes.data && typeof fallbackRes.data === 'object') {
+        activities = extractActivitiesFromPayload(fallbackRes.data as Record<string, unknown>);
+        logger.info(`[FFA SYNC][EMS] Fallback limit=${fallbackLimit} fetched ${activities.length} activities`);
+      }
+    }
+
     logger.info(`[FFA SYNC][EMS] Fetched ${activities.length} activities`);
     return activities;
   } catch (error) {

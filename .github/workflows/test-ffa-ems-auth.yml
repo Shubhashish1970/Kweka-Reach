@@ -103,6 +103,17 @@ jobs:
           if [[ "$BASE" != */api ]]; then
             BASE="${BASE}/api"
           fi
+          # Probe limit=0 (same as deployed full sync) vs limit=100
+          DATE_ENC0=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${FFA_EMS_DEFAULT_DATE_FROM:-01/04/2026}', safe=''))")
+          for LIM in 0 100; do
+            URL0="${BASE}/EMS/activities?limit=${LIM}&dateFrom=${DATE_ENC0}"
+            echo "--- limit=${LIM} dateFrom=${FFA_EMS_DEFAULT_DATE_FROM:-01/04/2026} ---"
+            curl -sS -o /tmp/ems_lim.json -w "HTTP %{http_code}\n" \
+              -X GET "$URL0" -H "Authorization: Bearer $SESSION_TOKEN" -H "Content-Type: application/json"
+            jq -r 'if .Success != null then "Success: \(.Success), message: \(.message // "n/a")" else empty end' /tmp/ems_lim.json 2>/dev/null || true
+            jq -r 'if .Data.Activities then (.Data.Activities | length) else 0 end' /tmp/ems_lim.json 2>/dev/null | xargs -I{} echo "count: {}"
+          done
+
           FOUND=0
           for DATE_FROM in "${FFA_EMS_DEFAULT_DATE_FROM:-01/05/2025}" "11/05/2025" "01/01/2026" "01/04/2026" "20/05/2026" "26/05/2026"; do
             DATE_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DATE_FROM', safe=''))")

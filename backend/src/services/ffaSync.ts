@@ -6,6 +6,8 @@ import axios, { AxiosError } from 'axios';
 import { getLanguageForState } from '../utils/stateLanguageMapper.js';
 import {
   fetchEmsActivities,
+  formatDateFromParam,
+  resolveEmsActivitiesLimit,
   isEmsFfaApiEnabled,
   resolveActivitiesDateFrom,
 } from './emsFfaClient.js';
@@ -112,8 +114,9 @@ const parseFFADate = (value: string): Date => {
 /**
  * Fetch activities from FFA API with timeout and better error handling
  * @param dateFrom - Optional date to fetch activities after (for incremental sync)
+ * @param fullSync - When true, uses full-sync limit (default 0 = all eligible from default dateFrom)
  */
-const fetchFFAActivities = async (dateFrom?: Date): Promise<FFAActivity[]> => {
+const fetchFFAActivities = async (dateFrom?: Date, fullSync = false): Promise<FFAActivity[]> => {
   // Validate FFA_API_URL is set
   if (!process.env.FFA_API_URL) {
     logger.warn('FFA_API_URL environment variable is not set, using default: http://localhost:4000/api');
@@ -121,11 +124,15 @@ const fetchFFAActivities = async (dateFrom?: Date): Promise<FFAActivity[]> => {
 
   if (isEmsFfaApiEnabled()) {
     const emsDateFrom = resolveActivitiesDateFrom(dateFrom);
+    const emsMode = fullSync ? 'full' : 'incremental';
+    const emsLimit = resolveEmsActivitiesLimit(emsMode);
     logger.info('[FFA SYNC] Using NACL EMS API (authenticate + /EMS/activities)', {
-      incremental: !!dateFrom,
+      syncMode: emsMode,
+      limit: emsLimit,
       dateFrom: emsDateFrom.toISOString(),
+      dateFromParam: formatDateFromParam(emsDateFrom),
     });
-    return fetchEmsActivities(FFA_API_URL, emsDateFrom);
+    return fetchEmsActivities(FFA_API_URL, emsDateFrom, emsLimit);
   }
 
   // Build URL with optional dateFrom parameter for incremental sync (mock / vendor spec)
@@ -500,7 +507,7 @@ export const syncFFAData = async (fullSync: boolean = false): Promise<{
 
     let ffaActivities: FFAActivity[];
     try {
-      ffaActivities = await fetchFFAActivities(fullSync ? undefined : lastSyncDate);
+      ffaActivities = await fetchFFAActivities(fullSync ? undefined : lastSyncDate, fullSync);
       logger.info(`[FFA SYNC] Fetched ${ffaActivities.length} activities from FFA API`);
     } catch (fetchError) {
       const errorMsg = fetchError instanceof Error ? fetchError.message : 'Failed to fetch activities from FFA API';

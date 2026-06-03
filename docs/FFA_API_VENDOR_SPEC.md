@@ -51,14 +51,15 @@ Notes:
 ### `GET /activities`
 
 EMS calls:
-- Full sync: `GET /activities?limit=100`
-- Incremental sync: `GET /activities?limit=100&dateFrom=DD/MM/YYYY`
+- Full sync: `GET /activities?limit=0&dateFrom=DD/MM/YYYY` (limit `0` = all eligible from dateFrom)
+- Incremental sync: `GET /activities?limit=0&dateFrom=DD/MM/YYYY` (dateFrom = last sync; limit `0` = all undelivered since then)
 
 #### Query parameters
 
 - **limit** *(required by EMS)*: integer  
-  - EMS currently uses `100`.
-  - Vendor may ignore or respect it, but must not fail because of it.
+  - `0` = return all eligible activities for the given `dateFrom` (no cap).
+  - Any positive integer caps the response to that many activities.
+  - EMS defaults: full and incremental sync use `limit=0` unless overridden by env.
 - **dateFrom** *(optional)*: string in **DD/MM/YYYY**  
   - When provided, return activities whose **activity date is >= dateFrom** OR whose **updatedAt/syncedAt >= dateFrom** (vendor choice).  
   - EMS expects that subsequent incremental syncs return *newly added or newly updated* activities since the last cutoff.
@@ -167,8 +168,7 @@ Implications:
 
 ## Performance and limits
 
-- EMS calls with `limit=100`. Vendor can return more or fewer, but should aim to respect it.
-- Vendor should support responses with **100 activities**, each with multiple farmers, within a practical latency target (e.g. < 30 seconds).
+- EMS may call with `limit=0` (full eligible set) or a positive cap. Large responses should complete within a practical latency target (EMS uses up to 120s timeout when `limit=0`).
 
 ## Testing checklist (vendor)
 

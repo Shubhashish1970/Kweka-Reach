@@ -8,6 +8,7 @@ import {
   isEmsFfaApiEnabled,
   parseFfaEmsDefaultDateFrom,
   resolveEmsApiBase,
+  resolveEmsActivitiesLimit,
 } from '../../src/services/emsFfaClient.js';
 
 const EMS_BASE = 'https://emsapiuat.naclind.com/api';
@@ -42,6 +43,15 @@ describe('emsFfaClient', () => {
 
   test('formatDateFromParam uses DD/MM/YYYY', () => {
     expect(formatDateFromParam(new Date(2025, 4, 1))).toBe('01/05/2025');
+  });
+
+  test('resolveEmsActivitiesLimit defaults to 0 for full and incremental', () => {
+    delete process.env.FFA_EMS_ACTIVITIES_LIMIT_FULL;
+    delete process.env.FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL;
+    expect(resolveEmsActivitiesLimit('full')).toBe(0);
+    expect(resolveEmsActivitiesLimit('incremental')).toBe(0);
+    process.env.FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL = '250';
+    expect(resolveEmsActivitiesLimit('incremental')).toBe(250);
   });
 
   test('getFfaEmsDefaultDateFromDisplay and ISO conversion', () => {
@@ -80,10 +90,10 @@ describe('emsFfaClient', () => {
       data: { Success: false, message: 'No data available' },
     });
 
-    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1));
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 0);
     expect(activities).toEqual([]);
     expect(axios.get).toHaveBeenCalledWith(
-      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=01%2F05%2F2025`,
+      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=01%2F05%2F2025`,
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer tok' }),
       })
@@ -129,14 +139,14 @@ describe('emsFfaClient', () => {
       },
     });
 
-    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 11));
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 11), 0);
     expect(activities).toHaveLength(1);
     expect(activities[0].activityId).toBe('5245');
     expect(activities[0].type).toBe('Dealer Activity');
     expect(activities[0].state).toBe('KARNATAKA');
     expect(activities[0].farmers[0].name).toBe('Test Farmer');
     expect(axios.get).toHaveBeenCalledWith(
-      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=11%2F05%2F2025`,
+      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=11%2F05%2F2025`,
       expect.any(Object)
     );
   });
@@ -170,9 +180,13 @@ describe('emsFfaClient', () => {
       },
     });
 
-    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1));
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 100);
     expect(activities).toHaveLength(1);
     expect(activities[0].activityId).toBe('A-1');
+    expect(axios.get).toHaveBeenCalledWith(
+      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=01%2F05%2F2025`,
+      expect.any(Object)
+    );
     expect(activities[0].farmers[0].mobileNumber).toBe('9876543210');
   });
 });

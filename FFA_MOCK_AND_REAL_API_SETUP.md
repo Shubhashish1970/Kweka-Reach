@@ -105,6 +105,9 @@ When you switch to the **real** FFA API, you set the URL and (if required) auth.
 | `FFA_EMS_SECTKEY` | Backend only | NACL EMS API | Secret key for authenticate body. |
 | `FFA_EMS_TOKEN` | Backend only | Optional | Optional `token` field in authenticate POST body. |
 | `FFA_EMS_DEFAULT_DATE_FROM` | Backend only | Optional | Full sync cutoff `DD/MM/YYYY` (default `01/01/2020`). EMS requires `dateFrom`. |
+| `FFA_EMS_ACTIVITIES_LIMIT_FULL` | Backend only | Optional | NACL activities `limit` for **Sync FFA (Full)**. Default `0` = all eligible from `FFA_EMS_DEFAULT_DATE_FROM`. |
+| `FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL` | Backend only | Optional | NACL activities `limit` for **Sync FFA (Incremental)**. Default `0` = all undelivered since last sync `dateFrom`. |
+| `FFA_EMS_ACTIVITIES_TIMEOUT_MS` | Backend only | Optional | HTTP timeout for activities GET (default 120s when `limit=0`, else 30s). |
 | `FFA_API_TOKEN` | Backend only | Vendor Bearer (non-EMS) | Sent as `Authorization: Bearer <token>`. |
 | `FFA_API_KEY` | Backend only | Vendor API key (non-EMS) | Sent as `X-API-Key: <key>`. |
 

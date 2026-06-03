@@ -99,6 +99,37 @@ export const resolveActivitiesDateFrom = (dateFrom?: Date): Date => {
   return parseFfaEmsDefaultDateFrom();
 };
 
+export type EmsActivitiesFetchMode = 'full' | 'incremental';
+
+/**
+ * NACL EMS `limit` query param: 0 = all eligible activities for the given dateFrom.
+ * Full sync: default 0 (entire backlog from FFA_EMS_DEFAULT_DATE_FROM).
+ * Incremental: default 0 with dateFrom = last sync (EMS undelivered queue since that date).
+ * Override via FFA_EMS_ACTIVITIES_LIMIT_FULL / FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL.
+ */
+export const resolveEmsActivitiesLimit = (mode: EmsActivitiesFetchMode): number => {
+  const parseLimit = (raw: string | undefined, fallback: number): number => {
+    if (raw === undefined || raw.trim() === '') return fallback;
+    const n = Number.parseInt(raw.trim(), 10);
+    if (!Number.isFinite(n) || n < 0) return fallback;
+    return n;
+  };
+  if (mode === 'full') {
+    return parseLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT_FULL, 0);
+  }
+  return parseLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL, 0);
+};
+
+const resolveActivitiesRequestTimeoutMs = (limit: number): number => {
+  const envRaw = process.env.FFA_EMS_ACTIVITIES_TIMEOUT_MS?.trim();
+  if (envRaw) {
+    const n = Number.parseInt(envRaw, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  // Large pulls (limit=0) may return many activities + farmers
+  return limit === 0 ? 120_000 : REQUEST_TIMEOUT_MS;
+};
+
 const normalizeFarmer = (raw: Record<string, unknown>): EmsFfaFarmer => ({
   farmerId: String(raw.farmerId ?? raw.FarmerId ?? ''),
   name: String(raw.name ?? raw.Name ?? ''),
@@ -276,23 +307,32 @@ export const authenticateEms = async (ffaApiUrl: string): Promise<string> => {
 };
 
 /**
- * GET /api/EMS/activities?limit=100&dateFrom=DD/MM/YYYY (dateFrom required by EMS).
+ * GET /api/EMS/activities?limit=N&dateFrom=DD/MM/YYYY (dateFrom required by EMS).
+ * limit=0 returns all eligible undelivered activities for that dateFrom (per NACL contract).
  */
 export const fetchEmsActivities = async (
   ffaApiUrl: string,
-  dateFrom: Date
+  dateFrom: Date,
+  limit: number
 ): Promise<EmsFfaActivity[]> => {
   const base = resolveEmsApiBase(ffaApiUrl);
   const dateFromParam = formatDateFromParam(dateFrom);
-  const url = `${base}/EMS/activities?limit=100&dateFrom=${encodeURIComponent(dateFromParam)}`;
+  const safeLimit = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : 0;
+  const url = `${base}/EMS/activities?limit=${safeLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
+  const timeoutMs = resolveActivitiesRequestTimeoutMs(safeLimit);
 
   const sessionToken = await authenticateEms(ffaApiUrl);
 
-  logger.info('[FFA SYNC][EMS] Fetching activities', { url, dateFrom: dateFromParam });
+  logger.info('[FFA SYNC][EMS] Fetching activities', {
+    url,
+    dateFrom: dateFromParam,
+    limit: safeLimit,
+    timeoutMs,
+  });
 
   try {
     const response = await axios.get(url, {
-      timeout: REQUEST_TIMEOUT_MS,
+      timeout: timeoutMs,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
@@ -330,7 +370,8 @@ const formatAxiosError = (error: AxiosError, context: string): string => {
     return `Cannot connect for ${context}: ${error.message}`;
   }
   if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
-    return `${context} timed out after ${REQUEST_TIMEOUT_MS / 1000}s`;
+    const timeoutSec = (error.config?.timeout ?? REQUEST_TIMEOUT_MS) / 1000;
+    return `${context} timed out after ${timeoutSec}s`;
   }
   if (error.response) {
     const detail = error.response.data ? ` - ${JSON.stringify(error.response.data)}` : '';

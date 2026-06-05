@@ -148,17 +148,6 @@ const ActivitySamplingView: React.FC = () => {
   const [ffaPullLimitInput, setFfaPullLimitInput] = useState(() => {
     return localStorage.getItem('admin.activitySampling.ffaPullLimit') ?? '';
   });
-  /** Minutes between automatic incremental syncs; empty/0 = off (while this page is open). */
-  const [autoIncrementalSyncMinsInput, setAutoIncrementalSyncMinsInput] = useState(() => {
-    return localStorage.getItem('admin.activitySampling.autoIncrementalSyncMins') ?? '';
-  });
-  const [autoSyncNextAt, setAutoSyncNextAt] = useState<number | null>(null);
-  const [autoSyncCountdownSec, setAutoSyncCountdownSec] = useState<number | null>(null);
-  const autoIncrementalSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const syncBusyRef = useRef(false);
-  const handleSyncFFARef = useRef<(fullSync: boolean, opts?: { silent?: boolean; autoTriggered?: boolean }) => Promise<void>>(
-    async () => {}
-  );
   const [dataSource, setDataSource] = useState<'api' | 'excel'>(() => {
     const v = localStorage.getItem('admin.activitySampling.dataSource');
     return v === 'excel' ? 'excel' : 'api';
@@ -372,64 +361,6 @@ const ActivitySamplingView: React.FC = () => {
     localStorage.setItem('admin.activitySampling.dataSource', dataSource);
   }, [dataSource]);
 
-  const resolveAutoIncrementalSyncMins = (): number | null => {
-    const raw = autoIncrementalSyncMinsInput.trim();
-    if (raw === '') return null;
-    const n = Number.parseInt(raw, 10);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    return n;
-  };
-
-  useEffect(() => {
-    localStorage.setItem('admin.activitySampling.autoIncrementalSyncMins', autoIncrementalSyncMinsInput);
-  }, [autoIncrementalSyncMinsInput]);
-
-  useEffect(() => {
-    if (autoIncrementalSyncTimerRef.current) {
-      clearInterval(autoIncrementalSyncTimerRef.current);
-      autoIncrementalSyncTimerRef.current = null;
-    }
-    setAutoSyncNextAt(null);
-    setAutoSyncCountdownSec(null);
-
-    const mins = resolveAutoIncrementalSyncMins();
-    if (dataSource !== 'api' || mins === null) return;
-
-    const ms = mins * 60 * 1000;
-    const scheduleNext = () => setAutoSyncNextAt(Date.now() + ms);
-
-    const runAutoSync = () => {
-      scheduleNext();
-      if (syncBusyRef.current) return;
-      void handleSyncFFARef.current(false, { silent: true, autoTriggered: true });
-    };
-
-    scheduleNext();
-    autoIncrementalSyncTimerRef.current = setInterval(runAutoSync, ms);
-
-    return () => {
-      if (autoIncrementalSyncTimerRef.current) {
-        clearInterval(autoIncrementalSyncTimerRef.current);
-        autoIncrementalSyncTimerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoIncrementalSyncMinsInput, dataSource]);
-
-  useEffect(() => {
-    if (!autoSyncNextAt) {
-      setAutoSyncCountdownSec(null);
-      return;
-    }
-    const tick = () => {
-      const sec = Math.max(0, Math.ceil((autoSyncNextAt - Date.now()) / 1000));
-      setAutoSyncCountdownSec(sec);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [autoSyncNextAt]);
-
   useEffect(() => {
     localStorage.setItem('admin.activitySampling.ffaPullLimit', ffaPullLimitInput);
   }, [ffaPullLimitInput]);
@@ -519,20 +450,11 @@ const ActivitySamplingView: React.FC = () => {
     ]);
   };
 
-  const handleSyncFFA = async (
-    fullSync: boolean = false,
-    opts?: { silent?: boolean; autoTriggered?: boolean }
-  ) => {
+  const handleSyncFFA = async (fullSync: boolean = false) => {
     if (dataSource !== 'api') {
-      if (!opts?.silent) showError('Data source is Excel. Switch to API to use Sync options.');
+      showError('Data source is Excel. Switch to API to use Sync options.');
       return;
     }
-    if (syncBusyRef.current) {
-      if (opts?.autoTriggered) return;
-      showError('Another FFA sync is already in progress.');
-      return;
-    }
-    syncBusyRef.current = true;
     if (fullSync) {
       setIsFullSyncing(true);
     } else {
@@ -546,21 +468,16 @@ const ActivitySamplingView: React.FC = () => {
       const pullLimit = resolveFfaPullLimitForSync();
       const response = (await ffaAPI.syncFFAData(fullSync, pullLimit)) as any;
       if (!response?.success) {
-        if (!opts?.silent) showError(response?.message || 'FFA sync failed to start');
+        showError(response?.message || 'FFA sync failed to start');
         setSyncProgress(null);
         if (fullSync) setIsFullSyncing(false);
         else setIsIncrementalSyncing(false);
-        syncBusyRef.current = false;
         return;
       }
       if (!response.started) {
         // Legacy path: server returned result inline
         const d = response.data || {};
-        if (!opts?.silent) {
-          showSuccess(`FFA sync completed: ${d.activitiesSynced ?? 0} activities, ${d.farmersSynced ?? 0} farmers synced`);
-        } else if ((d.activitiesSynced ?? 0) > 0) {
-          showSuccess(`Auto incremental sync: ${d.activitiesSynced} activities, ${d.farmersSynced ?? 0} farmers`);
-        }
+        showSuccess(`FFA sync completed: ${d.activitiesSynced ?? 0} activities, ${d.farmersSynced ?? 0} farmers synced`);
         setSyncProgress(null);
         if ((d.activitiesSynced ?? 0) > 0) {
           widenDateFilterAfterSync();
@@ -572,7 +489,6 @@ const ActivitySamplingView: React.FC = () => {
         await fetchDataBatches();
         if (fullSync) setIsFullSyncing(false);
         else setIsIncrementalSyncing(false);
-        syncBusyRef.current = false;
         return;
       }
 
@@ -604,16 +520,11 @@ const ActivitySamplingView: React.FC = () => {
               syncProgressPollRef.current = null;
             }
             if (result?.skipped) {
-              if (!opts?.silent) showSuccess(result.skipReason || 'Sync skipped');
+              showSuccess(result.skipReason || 'Sync skipped');
             } else if (result?.infoMessage && (result.errors?.length ?? 0) === 0) {
-              if (!opts?.silent) showSuccess(result.infoMessage);
+              showSuccess(result.infoMessage);
             } else if (result) {
-              const msg = `FFA sync completed (${result.syncType}): ${result.activitiesSynced} activities, ${result.farmersSynced} farmers synced${(result.errors?.length ?? 0) > 0 ? `, ${result.errors.length} errors` : ''}`;
-              if (!opts?.silent) {
-                showSuccess(msg);
-              } else if ((result.activitiesSynced ?? 0) > 0) {
-                showSuccess(`Auto incremental sync: ${result.activitiesSynced} activities, ${result.farmersSynced} farmers`);
-              }
+              showSuccess(`FFA sync completed (${result.syncType}): ${result.activitiesSynced} activities, ${result.farmersSynced} farmers synced${(result.errors?.length ?? 0) > 0 ? `, ${result.errors.length} errors` : ''}`);
             }
             if ((result?.activitiesSynced ?? 0) > 0) {
               widenDateFilterAfterSync();
@@ -625,7 +536,6 @@ const ActivitySamplingView: React.FC = () => {
             await fetchDataBatches();
             if (fullSync) setIsFullSyncing(false);
             else setIsIncrementalSyncing(false);
-            syncBusyRef.current = false;
           }
         } catch (e) {
           console.error('FFA sync progress poll error:', e);
@@ -635,15 +545,12 @@ const ActivitySamplingView: React.FC = () => {
       syncProgressPollRef.current = setInterval(poll, 1500);
       await poll();
     } catch (err: any) {
-      if (!opts?.silent) showError(err?.message || 'Failed to sync FFA data');
+      showError(err?.message || 'Failed to sync FFA data');
       setSyncProgress(null);
       if (fullSync) setIsFullSyncing(false);
       else setIsIncrementalSyncing(false);
-      syncBusyRef.current = false;
     }
   };
-
-  handleSyncFFARef.current = handleSyncFFA;
 
   const confirmDeleteDataBatch = async () => {
     if (!batchDeleteConfirm) return;
@@ -891,13 +798,6 @@ const ActivitySamplingView: React.FC = () => {
                 {syncStatus.emsPullLimit?.enabled && (
                   <> • Server pull limit: {serverDefaultPullLimit} (0 = all eligible)</>
                 )}
-                {resolveAutoIncrementalSyncMins() !== null && dataSource === 'api' && (
-                  <>
-                    {' '}
-                    • Auto incremental: every {resolveAutoIncrementalSyncMins()} min
-                    {autoSyncCountdownSec != null ? ` (next in ${Math.floor(autoSyncCountdownSec / 60)}:${String(autoSyncCountdownSec % 60).padStart(2, '0')})` : ''}
-                  </>
-                )}
               </p>
             )}
           </div>
@@ -961,27 +861,6 @@ const ActivitySamplingView: React.FC = () => {
                   onChange={(e) => setFfaPullLimitInput(e.target.value)}
                   disabled={isIncrementalSyncing || isFullSyncing}
                   className="w-16 text-sm font-semibold text-slate-900 bg-white border border-slate-200 rounded-lg px-2 py-1"
-                />
-              </div>
-            )}
-            {dataSource === 'api' && (
-              <div
-                className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-2xl px-2.5 py-1.5 shrink-0"
-                title="Automatic incremental FFA sync interval while this page stays open. Empty = off. Server may skip runs within 10 min of the last sync."
-              >
-                <label htmlFor="ffa-auto-sync-mins" className="text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">
-                  Auto (mins)
-                </label>
-                <input
-                  id="ffa-auto-sync-mins"
-                  type="number"
-                  min={1}
-                  step={1}
-                  placeholder="Off"
-                  value={autoIncrementalSyncMinsInput}
-                  onChange={(e) => setAutoIncrementalSyncMinsInput(e.target.value)}
-                  disabled={isIncrementalSyncing || isFullSyncing}
-                  className="w-14 text-sm font-semibold text-slate-900 bg-white border border-slate-200 rounded-lg px-2 py-1"
                 />
               </div>
             )}

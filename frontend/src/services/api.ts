@@ -1207,11 +1207,14 @@ export const reportsAPI = {
 
 // FFA Sync API
 export const ffaAPI = {
-  syncFFAData: async (fullSync: boolean = false) => {
-    // FFA sync can take 200+ seconds for full sync, but incremental sync is much faster
-    // Use 300 second (5 minute) timeout to handle full syncs in production
-    const params = fullSync ? '?fullSync=true' : '';
-    return apiRequest(`/ffa/sync${params}`, { method: 'POST' }, undefined, 300000);
+  syncFFAData: async (fullSync: boolean = false, activitiesLimit?: number | null) => {
+    const params = new URLSearchParams();
+    if (fullSync) params.set('fullSync', 'true');
+    if (activitiesLimit !== undefined && activitiesLimit !== null && String(activitiesLimit).trim() !== '') {
+      params.set('limit', String(activitiesLimit));
+    }
+    const q = params.toString() ? `?${params.toString()}` : '';
+    return apiRequest(`/ffa/sync${q}`, { method: 'POST' }, undefined, 300000);
   },
 
   getFFASyncStatus: async () => {

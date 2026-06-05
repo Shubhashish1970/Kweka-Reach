@@ -131,7 +131,23 @@ const ActivitySamplingView: React.FC = () => {
   const syncProgressPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollSawRunningRef = useRef(false);
   const requestedSyncTypeRef = useRef<'full' | 'incremental' | null>(null);
-  const [syncStatus, setSyncStatus] = useState<{ lastSyncAt: string | null; totalActivities: number; totalFarmers: number } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<{
+    lastSyncAt: string | null;
+    totalActivities: number;
+    totalFarmers: number;
+    emsPullLimit?: {
+      enabled: boolean;
+      globalLimit: number;
+      fullLimit: number;
+      incrementalLimit: number;
+      fallbackLimit: number;
+      hint: string;
+    };
+  } | null>(null);
+  /** Empty = use server default (env). 0 = all eligible per NACL EMS. */
+  const [ffaPullLimitInput, setFfaPullLimitInput] = useState(() => {
+    return localStorage.getItem('admin.activitySampling.ffaPullLimit') ?? '';
+  });
   const [dataSource, setDataSource] = useState<'api' | 'excel'>(() => {
     const v = localStorage.getItem('admin.activitySampling.dataSource');
     return v === 'excel' ? 'excel' : 'api';
@@ -344,8 +360,19 @@ const ActivitySamplingView: React.FC = () => {
   }, [dataSource]);
 
   useEffect(() => {
-    localStorage.setItem('admin.activitySampling.pageSize', String(pageSize));
-  }, [pageSize]);
+    localStorage.setItem('admin.activitySampling.ffaPullLimit', ffaPullLimitInput);
+  }, [ffaPullLimitInput]);
+
+  const resolveFfaPullLimitForSync = (): number | undefined => {
+    const raw = ffaPullLimitInput.trim();
+    if (raw === '') return undefined;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 0) return undefined;
+    return n;
+  };
+
+  const serverDefaultPullLimit =
+    syncStatus?.emsPullLimit?.globalLimit ?? syncStatus?.emsPullLimit?.fullLimit ?? 0;
 
   useEffect(() => {
     localStorage.setItem('admin.activitySampling.tableSort', JSON.stringify(tableSort));
@@ -415,7 +442,8 @@ const ActivitySamplingView: React.FC = () => {
     requestedSyncTypeRef.current = fullSync ? 'full' : 'incremental';
 
     try {
-      const response = (await ffaAPI.syncFFAData(fullSync)) as any;
+      const pullLimit = resolveFfaPullLimitForSync();
+      const response = (await ffaAPI.syncFFAData(fullSync, pullLimit)) as any;
       if (!response?.success) {
         showError(response?.message || 'FFA sync failed to start');
         setSyncProgress(null);
@@ -734,6 +762,9 @@ const ActivitySamplingView: React.FC = () => {
               <p className="text-xs text-slate-500 mt-1">
                 Last sync: {syncStatus.lastSyncAt ? new Date(syncStatus.lastSyncAt).toLocaleString() : 'Never'} • 
                 {syncStatus.totalActivities} activities • {syncStatus.totalFarmers} farmers
+                {syncStatus.emsPullLimit?.enabled && (
+                  <> • Server pull limit: {serverDefaultPullLimit} (0 = all eligible)</>
+                )}
               </p>
             )}
           </div>
@@ -779,6 +810,27 @@ const ActivitySamplingView: React.FC = () => {
               <RefreshCw size={16} className={isLoading || isStatsLoading ? 'animate-spin' : ''} />
               Refresh
             </Button>
+            {dataSource === 'api' && (
+              <div
+                className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-2xl px-2.5 py-1.5 shrink-0"
+                title="NACL EMS limit per pull. 0 = all eligible. Blank = server default."
+              >
+                <label htmlFor="ffa-pull-limit" className="text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">
+                  Pull limit
+                </label>
+                <input
+                  id="ffa-pull-limit"
+                  type="number"
+                  min={0}
+                  step={1}
+                  placeholder={String(serverDefaultPullLimit)}
+                  value={ffaPullLimitInput}
+                  onChange={(e) => setFfaPullLimitInput(e.target.value)}
+                  disabled={isIncrementalSyncing || isFullSyncing}
+                  className="w-16 text-sm font-semibold text-slate-900 bg-white border border-slate-200 rounded-lg px-2 py-1"
+                />
+              </div>
+            )}
             <Button
               variant="primary"
               size="sm"

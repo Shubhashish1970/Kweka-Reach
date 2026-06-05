@@ -211,24 +211,60 @@ export const resolveActivitiesDateFrom = (dateFrom?: Date): Date => {
 
 export type EmsActivitiesFetchMode = 'full' | 'incremental';
 
-/**
- * NACL EMS `limit` query param: 0 = all eligible activities for the given dateFrom.
- * Full sync: default 0 (entire backlog from FFA_EMS_DEFAULT_DATE_FROM).
- * Incremental: default 0 with dateFrom = last sync (EMS undelivered queue since that date).
- * Override via FFA_EMS_ACTIVITIES_LIMIT_FULL / FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL.
- */
-export const resolveEmsActivitiesLimit = (mode: EmsActivitiesFetchMode): number => {
-  const parseLimit = (raw: string | undefined, fallback: number): number => {
-    if (raw === undefined || raw.trim() === '') return fallback;
-    const n = Number.parseInt(raw.trim(), 10);
-    if (!Number.isFinite(n) || n < 0) return fallback;
-    return n;
-  };
-  if (mode === 'full') {
-    return parseLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT_FULL, 0);
-  }
-  return parseLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL, 0);
+const DEFAULT_EMS_LIMIT = 0;
+const DEFAULT_EMS_LIMIT_FALLBACK = 10_000;
+
+/** Parse non-negative integer limit; undefined if unset/invalid. */
+export const parseEmsActivitiesLimit = (raw: string | undefined | null): number | undefined => {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return undefined;
+  const n = Number.parseInt(String(raw).trim(), 10);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
 };
+
+/**
+ * NACL EMS `limit` query param: **0 = all eligible** activities for the given dateFrom.
+ * Resolution order: per-request override → mode env → global `FFA_EMS_ACTIVITIES_LIMIT` → 0.
+ */
+export const resolveEmsActivitiesLimit = (
+  mode: EmsActivitiesFetchMode,
+  requestOverride?: number | null
+): number => {
+  if (requestOverride !== undefined && requestOverride !== null) {
+    const parsed = parseEmsActivitiesLimit(String(requestOverride));
+    if (parsed !== undefined) return parsed;
+  }
+  const modeEnv =
+    mode === 'full'
+      ? process.env.FFA_EMS_ACTIVITIES_LIMIT_FULL
+      : process.env.FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL;
+  const modeLimit = parseEmsActivitiesLimit(modeEnv);
+  if (modeLimit !== undefined) return modeLimit;
+  const globalLimit = parseEmsActivitiesLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT);
+  if (globalLimit !== undefined) return globalLimit;
+  return DEFAULT_EMS_LIMIT;
+};
+
+/** When limit=0 returns empty on prod, retry with this cap (env override). */
+export const resolveEmsActivitiesLimitFallback = (): number => {
+  return parseEmsActivitiesLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT_FALLBACK) ?? DEFAULT_EMS_LIMIT_FALLBACK;
+};
+
+export const getEmsPullLimitConfig = (): {
+  enabled: boolean;
+  globalLimit: number;
+  fullLimit: number;
+  incrementalLimit: number;
+  fallbackLimit: number;
+  hint: string;
+} => ({
+  enabled: isEmsFfaApiEnabled(),
+  globalLimit: parseEmsActivitiesLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT) ?? DEFAULT_EMS_LIMIT,
+  fullLimit: resolveEmsActivitiesLimit('full'),
+  incrementalLimit: resolveEmsActivitiesLimit('incremental'),
+  fallbackLimit: resolveEmsActivitiesLimitFallback(),
+  hint: '0 = all eligible activities for the dateFrom window (NACL EMS). Positive = max rows per pull.',
+});
 
 const resolveActivitiesRequestTimeoutMs = (limit: number): number => {
   const envRaw = process.env.FFA_EMS_ACTIVITIES_TIMEOUT_MS?.trim();
@@ -469,7 +505,7 @@ export const fetchEmsActivities = async (
 
     // NACL: limit=0 should return all eligible; some environments return empty — retry with a high cap
     if (activities.length === 0 && safeLimit === 0) {
-      const fallbackLimit = 10_000;
+      const fallbackLimit = resolveEmsActivitiesLimitFallback();
       const fallbackUrl = `${base}/EMS/activities?limit=${fallbackLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
       logger.warn('[FFA SYNC][EMS] limit=0 returned no activities; retrying with high limit', {
         fallbackLimit,

@@ -9,6 +9,8 @@ import {
   formatDateFromParam,
   formatEmsDateTimeFromParam,
   parseEmsActivityDate,
+  getEmsPullLimitConfig,
+  parseEmsActivitiesLimit,
   resolveEmsActivitiesLimit,
   isEmsFfaApiEnabled,
   resolveActivitiesDateFrom,
@@ -53,8 +55,13 @@ export const FFA_SYNC_NO_ACTIVITIES_MESSAGE =
  * Fetch activities from FFA API with timeout and better error handling
  * @param dateFrom - Optional date to fetch activities after (for incremental sync)
  * @param fullSync - When true, uses full-sync limit (default 0 = all eligible from default dateFrom)
+ * @param activitiesLimit - Optional per-request EMS `limit` override (0 = all eligible)
  */
-const fetchFFAActivities = async (dateFrom?: Date, fullSync = false): Promise<FFAActivity[]> => {
+const fetchFFAActivities = async (
+  dateFrom?: Date,
+  fullSync = false,
+  activitiesLimit?: number | null
+): Promise<FFAActivity[]> => {
   // Validate FFA_API_URL is set
   if (!process.env.FFA_API_URL) {
     logger.warn('FFA_API_URL environment variable is not set, using default: http://localhost:4000/api');
@@ -63,7 +70,7 @@ const fetchFFAActivities = async (dateFrom?: Date, fullSync = false): Promise<FF
   if (isEmsFfaApiEnabled()) {
     const emsDateFrom = resolveActivitiesDateFrom(dateFrom);
     const emsMode = fullSync ? 'full' : 'incremental';
-    const emsLimit = resolveEmsActivitiesLimit(emsMode);
+    const emsLimit = resolveEmsActivitiesLimit(emsMode, activitiesLimit);
     const useDateTimeFrom = emsMode === 'incremental' && !!dateFrom;
     const dateFromParam = useDateTimeFrom
       ? formatEmsDateTimeFromParam(emsDateFrom)
@@ -347,7 +354,15 @@ export const beginSyncProgress = (syncType: 'full' | 'incremental'): void => {
 // Minimum time between syncs (in milliseconds) - default 10 minutes
 const MIN_SYNC_INTERVAL = parseInt(process.env.MIN_SYNC_INTERVAL || '600000', 10); // 10 minutes default
 
-export const syncFFAData = async (fullSync: boolean = false): Promise<{
+export type FfaSyncOptions = {
+  /** NACL EMS activities `limit` for this run only (0 = all eligible). */
+  activitiesLimit?: number | null;
+};
+
+export const syncFFAData = async (
+  fullSync: boolean = false,
+  options?: FfaSyncOptions
+): Promise<{
   activitiesSynced: number;
   farmersSynced: number;
   errors: string[];
@@ -448,7 +463,11 @@ export const syncFFAData = async (fullSync: boolean = false): Promise<{
 
     let ffaActivities: FFAActivity[];
     try {
-      ffaActivities = await fetchFFAActivities(fullSync ? undefined : lastSyncDate, fullSync);
+      ffaActivities = await fetchFFAActivities(
+        fullSync ? undefined : lastSyncDate,
+        fullSync,
+        options?.activitiesLimit
+      );
       logger.info(`[FFA SYNC] Fetched ${ffaActivities.length} activities from FFA API`);
     } catch (fetchError) {
       const errorMsg = fetchError instanceof Error ? fetchError.message : 'Failed to fetch activities from FFA API';
@@ -607,6 +626,7 @@ export const getSyncStatus = async () => {
       lastSyncAt: lastActivity?.syncedAt || null,
       totalActivities,
       totalFarmers,
+      emsPullLimit: getEmsPullLimitConfig(),
     };
   } catch (error) {
     logger.error('Error getting sync status:', error);

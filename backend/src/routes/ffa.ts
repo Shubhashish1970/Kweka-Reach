@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/rbac.js';
 import { syncFFAData, getSyncStatus, getSyncProgress, beginSyncProgress } from '../services/ffaSync.js';
+import { parseEmsActivitiesLimit } from '../services/emsFfaClient.js';
 import { Activity } from '../models/Activity.js';
 import { Farmer } from '../models/Farmer.js';
 import { CallTask } from '../models/CallTask.js';
@@ -184,6 +185,11 @@ router.post(
     try {
       const ffaApiUrl = process.env.FFA_API_URL || 'http://localhost:4000/api';
       const fullSync = req.query.fullSync === 'true' || req.body?.fullSync === true;
+      const limitRaw = req.query.limit ?? req.body?.limit ?? req.body?.activitiesLimit;
+      const activitiesLimit =
+        limitRaw !== undefined && limitRaw !== null && String(limitRaw).trim() !== ''
+          ? parseEmsActivitiesLimit(String(limitRaw))
+          : undefined;
 
       logger.info(`[FFA SYNC] Manual FFA sync triggered (${fullSync ? 'full' : 'incremental'})`, {
         userId: (req as any).user?.id,
@@ -191,10 +197,11 @@ router.post(
         ffaApiUrl: ffaApiUrl,
         hasEnvVar: !!process.env.FFA_API_URL,
         fullSync,
+        activitiesLimit: activitiesLimit ?? 'server-default',
       });
 
       beginSyncProgress(fullSync ? 'full' : 'incremental');
-      syncFFAData(fullSync).catch((err) => {
+      syncFFAData(fullSync, { activitiesLimit }).catch((err) => {
         logger.error('[FFA SYNC] Background sync error:', err);
       });
 
@@ -202,7 +209,7 @@ router.post(
         success: true,
         started: true,
         message: 'FFA sync started. Poll /api/ffa/sync-progress for progress.',
-        data: { fullSync },
+        data: { fullSync, activitiesLimit: activitiesLimit ?? null },
       });
     } catch (error) {
       const ffaApiUrl = process.env.FFA_API_URL || 'http://localhost:4000/api';

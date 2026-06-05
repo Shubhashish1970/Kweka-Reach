@@ -67,12 +67,16 @@ describe('emsFfaClient', () => {
   });
 
   test('resolveEmsActivitiesLimit defaults to 0 for full and incremental', () => {
+    delete process.env.FFA_EMS_ACTIVITIES_LIMIT;
     delete process.env.FFA_EMS_ACTIVITIES_LIMIT_FULL;
     delete process.env.FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL;
     expect(resolveEmsActivitiesLimit('full')).toBe(0);
     expect(resolveEmsActivitiesLimit('incremental')).toBe(0);
-    process.env.FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL = '250';
-    expect(resolveEmsActivitiesLimit('incremental')).toBe(250);
+    process.env.FFA_EMS_ACTIVITIES_LIMIT = '500';
+    expect(resolveEmsActivitiesLimit('full')).toBe(500);
+    process.env.FFA_EMS_ACTIVITIES_LIMIT_FULL = '100';
+    expect(resolveEmsActivitiesLimit('full')).toBe(100);
+    expect(resolveEmsActivitiesLimit('incremental', 250)).toBe(250);
   });
 
   test('getFfaEmsDefaultDateFromDisplay and ISO conversion', () => {

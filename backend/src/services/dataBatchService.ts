@@ -9,6 +9,10 @@ export type DataBatchSummary = {
   batchId: string;
   activityCount: number;
   lastSyncedAt: string | null;
+  /** Earliest activity.date in batch (ISO) */
+  minActivityDate: string | null;
+  /** Latest activity.date in batch (ISO) */
+  maxActivityDate: string | null;
   source: 'excel' | 'sync' | 'unknown';
   canDelete: boolean;
   blockReason?: string;
@@ -48,13 +52,21 @@ async function batchCanDelete(
 }
 
 export async function listDataBatches(limit = 25): Promise<DataBatchSummary[]> {
-  const rows = await Activity.aggregate<{ _id: string; activityCount: number; lastSyncedAt: Date | null }>([
+  const rows = await Activity.aggregate<{
+    _id: string;
+    activityCount: number;
+    lastSyncedAt: Date | null;
+    minActivityDate: Date | null;
+    maxActivityDate: Date | null;
+  }>([
     { $match: { dataBatchId: { $exists: true, $nin: [null, ''] } } },
     {
       $group: {
         _id: '$dataBatchId',
         activityCount: { $sum: 1 },
         lastSyncedAt: { $max: '$syncedAt' },
+        minActivityDate: { $min: '$date' },
+        maxActivityDate: { $max: '$date' },
       },
     },
     { $sort: { lastSyncedAt: -1 } },
@@ -71,6 +83,8 @@ export async function listDataBatches(limit = 25): Promise<DataBatchSummary[]> {
       batchId,
       activityCount: r.activityCount,
       lastSyncedAt: r.lastSyncedAt ? new Date(r.lastSyncedAt).toISOString() : null,
+      minActivityDate: r.minActivityDate ? new Date(r.minActivityDate).toISOString() : null,
+      maxActivityDate: r.maxActivityDate ? new Date(r.maxActivityDate).toISOString() : null,
       source: inferSource(batchId),
       canDelete: gate.ok,
       blockReason: gate.ok ? undefined : gate.reason,

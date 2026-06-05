@@ -172,6 +172,8 @@ const ActivitySamplingView: React.FC = () => {
       batchId: string;
       activityCount: number;
       lastSyncedAt: string | null;
+      minActivityDate?: string | null;
+      maxActivityDate?: string | null;
       source: 'excel' | 'sync' | 'unknown';
       canDelete: boolean;
       blockReason?: string;
@@ -374,6 +376,27 @@ const ActivitySamplingView: React.FC = () => {
   const serverDefaultPullLimit =
     syncStatus?.emsPullLimit?.globalLimit ?? syncStatus?.emsPullLimit?.fullLimit ?? 0;
 
+  /** After FFA sync, widen grid filter so imported activity dates (often older) are visible. */
+  const widenDateFilterAfterSync = () => {
+    const range = getPresetRange('Last 90 days');
+    setSelectedPreset('Last 90 days');
+    setDraftStart(range.start);
+    setDraftEnd(range.end);
+    setFilters((prev) => ({ ...prev, dateFrom: range.start, dateTo: range.end }));
+  };
+
+  const formatBatchActivityDateRange = (min?: string | null, max?: string | null) => {
+    if (!min && !max) return '—';
+    const a = min ? formatPretty(min.slice(0, 10)) : '';
+    const b = max ? formatPretty(max.slice(0, 10)) : '';
+    if (a && b) return a === b ? a : `${a} – ${b}`;
+    return a || b || '—';
+  };
+
+  useEffect(() => {
+    localStorage.setItem('admin.activitySampling.pageSize', String(pageSize));
+  }, [pageSize]);
+
   useEffect(() => {
     localStorage.setItem('admin.activitySampling.tableSort', JSON.stringify(tableSort));
   }, [tableSort]);
@@ -456,7 +479,12 @@ const ActivitySamplingView: React.FC = () => {
         const d = response.data || {};
         showSuccess(`FFA sync completed: ${d.activitiesSynced ?? 0} activities, ${d.farmersSynced ?? 0} farmers synced`);
         setSyncProgress(null);
-        await fetchActivities(pagination.page);
+        if ((d.activitiesSynced ?? 0) > 0) {
+          widenDateFilterAfterSync();
+        } else {
+          await fetchActivities(pagination.page);
+        }
+        await fetchStats();
         await fetchSyncStatus();
         await fetchDataBatches();
         if (fullSync) setIsFullSyncing(false);
@@ -498,7 +526,12 @@ const ActivitySamplingView: React.FC = () => {
             } else if (result) {
               showSuccess(`FFA sync completed (${result.syncType}): ${result.activitiesSynced} activities, ${result.farmersSynced} farmers synced${(result.errors?.length ?? 0) > 0 ? `, ${result.errors.length} errors` : ''}`);
             }
-            await fetchActivities(pagination.page);
+            if ((result?.activitiesSynced ?? 0) > 0) {
+              widenDateFilterAfterSync();
+            } else {
+              await fetchActivities(pagination.page);
+            }
+            await fetchStats();
             await fetchSyncStatus();
             await fetchDataBatches();
             if (fullSync) setIsFullSyncing(false);
@@ -1323,6 +1356,7 @@ const ActivitySamplingView: React.FC = () => {
                     <tr>
                       <th className="px-3 py-2">Source</th>
                       <th className="px-3 py-2">Activities</th>
+                      <th className="px-3 py-2">Activity dates</th>
                       <th className="px-3 py-2">Last synced</th>
                       <th className="px-3 py-2">Batch ID</th>
                       <th className="px-3 py-2 text-right">Action</th>
@@ -1333,6 +1367,9 @@ const ActivitySamplingView: React.FC = () => {
                       <tr key={b.batchId} className="text-slate-800">
                         <td className="px-3 py-2 font-medium capitalize">{b.source}</td>
                         <td className="px-3 py-2">{b.activityCount}</td>
+                        <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">
+                          {formatBatchActivityDateRange(b.minActivityDate, b.maxActivityDate)}
+                        </td>
                         <td className="px-3 py-2 text-xs text-slate-600">
                           {b.lastSyncedAt ? new Date(b.lastSyncedAt).toLocaleString() : '—'}
                         </td>
@@ -1475,6 +1512,21 @@ const ActivitySamplingView: React.FC = () => {
       ) : activities.length === 0 ? (
         <div className="bg-white rounded-3xl p-12 border border-slate-200 shadow-sm text-center">
           <p className="text-sm text-slate-600 font-medium">No activities found</p>
+          {(syncStatus?.totalActivities ?? 0) > 0 && (
+            <div className="mt-4 max-w-lg mx-auto text-left bg-slate-50 border border-slate-200 rounded-2xl p-4">
+              <p className="text-sm text-slate-700">
+                There are <strong>{syncStatus?.totalActivities}</strong> activities in the database, but none match the
+                current date filter
+                {filters.dateFrom && filters.dateTo
+                  ? ` (${formatPretty(filters.dateFrom)} – ${formatPretty(filters.dateTo)})`
+                  : ''}
+                . FFA activity dates are often earlier than the default &quot;Last 7 days&quot; window.
+              </p>
+              <Button variant="primary" size="sm" className="mt-3" onClick={widenDateFilterAfterSync}>
+                Show Last 90 days
+              </Button>
+            </div>
+          )}
         </div>
       ) : (
         <>

@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import { parseQueryDateFrom, parseQueryDateTo } from '../utils/dateRangeQuery.js';
 import { query, param, validationResult } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
@@ -61,8 +62,8 @@ router.get(
       } = req.query;
 
       // Convert date strings to Date objects if provided
-      const dateFromParsed = dateFrom ? new Date(dateFrom as string) : undefined;
-      const dateToParsed = dateTo ? new Date(dateTo as string) : undefined;
+      const dateFromParsed = parseQueryDateFrom(dateFrom as string | undefined);
+      const dateToParsed = parseQueryDateTo(dateTo as string | undefined);
 
       const result = await getActivitiesWithSampling({
         activityType: activityType as string,
@@ -122,8 +123,8 @@ router.get(
         dateTo,
       } = req.query;
 
-      const dateFromParsed = dateFrom ? new Date(dateFrom as string) : undefined;
-      const dateToParsed = dateTo ? new Date(dateTo as string) : undefined;
+      const dateFromParsed = parseQueryDateFrom(dateFrom as string | undefined);
+      const dateToParsed = parseQueryDateTo(dateTo as string | undefined);
 
       const stats = await getActivitiesSamplingStats({
         activityType: activityType as string,
@@ -178,8 +179,8 @@ router.get(
         dateTo,
       } = req.query;
 
-      const dateFromParsed = dateFrom ? new Date(dateFrom as string) : undefined;
-      const dateToParsed = dateTo ? new Date(dateTo as string) : undefined;
+      const dateFromParsed = parseQueryDateFrom(dateFrom as string | undefined);
+      const dateToParsed = parseQueryDateTo(dateTo as string | undefined);
 
       const options = await getActivitiesSamplingFilterOptions({
         activityType: activityType as string,
@@ -238,8 +239,8 @@ router.get(
         limit,
       } = req.query;
 
-      const dateFromParsed = dateFrom ? new Date(dateFrom as string) : undefined;
-      const dateToParsed = dateTo ? new Date(dateTo as string) : undefined;
+      const dateFromParsed = parseQueryDateFrom(dateFrom as string | undefined);
+      const dateToParsed = parseQueryDateTo(dateTo as string | undefined);
 
       const rows = await getActivitiesSamplingExportRows({
         activityType: activityType as string,

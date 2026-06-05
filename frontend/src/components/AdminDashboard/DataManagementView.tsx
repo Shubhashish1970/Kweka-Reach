@@ -175,12 +175,18 @@ const DataManagementView: React.FC = () => {
         return;
       }
 
+      const intervalMins = Math.max(10, scheduleIntervalMinutes);
+      if (scheduleEnabled && scheduleMode === 'interval' && scheduleIntervalMinutes < 10) {
+        showToast('Interval must be at least 10 minutes', 'error');
+        return;
+      }
+
       const res = (await ffaAPI.updateFfaAdminConfig({
         dataSource: ffaDataSource,
         activitiesPullLimit,
         scheduleEnabled: scheduleEnabled && ffaDataSource === 'api',
         scheduleMode: scheduleEnabled && ffaDataSource === 'api' ? scheduleMode : 'off',
-        scheduleIntervalMinutes: Math.max(10, scheduleIntervalMinutes),
+        scheduleIntervalMinutes: intervalMins,
         scheduleDailyHour: Number.isFinite(scheduleDailyHour) ? scheduleDailyHour : 6,
         scheduleDailyMinute: Number.isFinite(scheduleDailyMinute) ? scheduleDailyMinute : 0,
       })) as any;

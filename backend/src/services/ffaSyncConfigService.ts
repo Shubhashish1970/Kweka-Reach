@@ -197,8 +197,8 @@ export const updateFfaSyncConfig = async (
 
   const config = await FfaSyncConfig.findOneAndUpdate(
     { key: 'default' },
-    { $set: update, $setOnInsert: DEFAULT_SEED },
-    { upsert: true, new: true }
+    { $set: update, $setOnInsert: { key: 'default' } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
   return config;

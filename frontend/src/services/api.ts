@@ -1221,6 +1221,26 @@ export const ffaAPI = {
     return apiRequest('/ffa/status');
   },
 
+  getFfaAdminConfig: async () => {
+    return apiRequest('/ffa/admin-config');
+  },
+
+  updateFfaAdminConfig: async (payload: {
+    dataSource?: 'api' | 'excel';
+    activitiesPullLimit?: number | null;
+    scheduleEnabled?: boolean;
+    scheduleMode?: 'off' | 'hourly' | 'daily' | 'interval';
+    scheduleIntervalMinutes?: number;
+    scheduleDailyHour?: number;
+    scheduleDailyMinute?: number;
+    scheduleTimezone?: string;
+  }) => {
+    return apiRequest('/ffa/admin-config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
   getFFASyncProgress: async () => {
     return apiRequest('/ffa/sync-progress');
   },

@@ -1,7 +1,13 @@
 import express, { Request, Response, NextFunction } from 'express';
+import { body, validationResult } from 'express-validator';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/rbac.js';
 import { syncFFAData, getSyncStatus, getSyncProgress, beginSyncProgress } from '../services/ffaSync.js';
+import {
+  getOrCreateFfaSyncConfig,
+  formatFfaSyncConfigResponse,
+  updateFfaSyncConfig,
+} from '../services/ffaSyncConfigService.js';
 import { parseEmsActivitiesLimit } from '../services/emsFfaClient.js';
 import { Activity } from '../models/Activity.js';
 import { Farmer } from '../models/Farmer.js';
@@ -476,6 +482,89 @@ router.post('/delete-data-batch', requirePermission('config.ffa'), async (req: R
   }
 });
 
+// @route   GET /api/ffa/admin-config
+// @desc    FFA data source, pull limit, and scheduled sync settings (Admin → Data Management)
+// @access  Private (MIS Admin)
+router.get(
+  '/admin-config',
+  requirePermission('config.ffa'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const config = await getOrCreateFfaSyncConfig();
+      res.json({
+        success: true,
+        data: { config: formatFfaSyncConfigResponse(config) },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// @route   PUT /api/ffa/admin-config
+// @desc    Update FFA admin settings
+// @access  Private (MIS Admin)
+router.put(
+  '/admin-config',
+  requirePermission('config.ffa'),
+  [
+    body('dataSource').optional().isIn(['api', 'excel']),
+    body('scheduleEnabled').optional().isBoolean(),
+    body('scheduleMode').optional().isIn(['off', 'hourly', 'daily', 'interval']),
+    body('scheduleIntervalMinutes').optional().isInt({ min: 10, max: 10080 }),
+    body('scheduleDailyHour').optional().isInt({ min: 0, max: 23 }),
+    body('scheduleDailyMinute').optional().isInt({ min: 0, max: 59 }),
+    body('scheduleTimezone').optional().isString().isLength({ min: 1, max: 64 }),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const authUserId = (req as any).user?._id?.toString?.() ?? (req as any).user?.id;
+      const bodyPayload = req.body as Record<string, unknown>;
+
+      if ('activitiesPullLimit' in bodyPayload) {
+        const raw = bodyPayload.activitiesPullLimit;
+        if (raw === '' || raw === null || raw === undefined) {
+          bodyPayload.activitiesPullLimit = null;
+        } else {
+          const n = Number.parseInt(String(raw), 10);
+          if (!Number.isFinite(n) || n < 0) {
+            return res.status(400).json({
+              success: false,
+              error: { message: 'activitiesPullLimit must be a non-negative integer or empty for server default' },
+            });
+          }
+          bodyPayload.activitiesPullLimit = n;
+        }
+      }
+
+      if (bodyPayload.scheduleEnabled === true && !bodyPayload.scheduleMode) {
+        const existing = await getOrCreateFfaSyncConfig();
+        if (existing.scheduleMode === 'off') {
+          bodyPayload.scheduleMode = 'daily';
+        }
+      }
+
+      const config = await updateFfaSyncConfig(bodyPayload as any, authUserId);
+
+      res.json({
+        success: true,
+        message: 'FFA settings updated',
+        data: { config: formatFfaSyncConfigResponse(config) },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // @route   GET /api/ffa/status
 // @desc    Get FFA sync status
 // @access  Private (MIS Admin)
@@ -485,10 +574,11 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const status = await getSyncStatus();
+      const adminConfig = formatFfaSyncConfigResponse(await getOrCreateFfaSyncConfig());
 
       res.json({
         success: true,
-        data: status,
+        data: { ...status, adminConfig },
       });
     } catch (error) {
       next(error);

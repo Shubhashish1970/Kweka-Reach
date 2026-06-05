@@ -143,15 +143,21 @@ const ActivitySamplingView: React.FC = () => {
       fallbackLimit: number;
       hint: string;
     };
+    adminConfig?: {
+      dataSource: 'api' | 'excel';
+      activitiesPullLimit: number | null;
+      scheduleEnabled: boolean;
+      scheduleMode: 'off' | 'hourly' | 'daily' | 'interval';
+      scheduleIntervalMinutes: number;
+      scheduleDailyHour: number;
+      scheduleDailyMinute: number;
+      scheduleTimezone: string;
+      cronEnabledOnServer: boolean;
+      serverDefaultPullLimit: number;
+      lastScheduledRunAt: string | null;
+      lastScheduledRunMessage: string | null;
+    };
   } | null>(null);
-  /** Empty = use server default (env). 0 = all eligible per NACL EMS. */
-  const [ffaPullLimitInput, setFfaPullLimitInput] = useState(() => {
-    return localStorage.getItem('admin.activitySampling.ffaPullLimit') ?? '';
-  });
-  const [dataSource, setDataSource] = useState<'api' | 'excel'>(() => {
-    const v = localStorage.getItem('admin.activitySampling.dataSource');
-    return v === 'excel' ? 'excel' : 'api';
-  });
   const [isImportingExcel, setIsImportingExcel] = useState(false);
   const [importProgress, setImportProgress] = useState<{
     running: boolean;
@@ -357,24 +363,22 @@ const ActivitySamplingView: React.FC = () => {
     fetchDataBatches();
   }, [filters.activityType, filters.territory, filters.zone, filters.bu, filters.samplingStatus, filters.dateFrom, filters.dateTo, pageSize]);
 
-  useEffect(() => {
-    localStorage.setItem('admin.activitySampling.dataSource', dataSource);
-  }, [dataSource]);
-
-  useEffect(() => {
-    localStorage.setItem('admin.activitySampling.ffaPullLimit', ffaPullLimitInput);
-  }, [ffaPullLimitInput]);
+  const dataSource = syncStatus?.adminConfig?.dataSource ?? 'api';
 
   const resolveFfaPullLimitForSync = (): number | undefined => {
-    const raw = ffaPullLimitInput.trim();
-    if (raw === '') return undefined;
-    const n = Number.parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 0) return undefined;
-    return n;
+    const limit = syncStatus?.adminConfig?.activitiesPullLimit;
+    if (limit === null || limit === undefined) return undefined;
+    return limit;
   };
 
   const serverDefaultPullLimit =
-    syncStatus?.emsPullLimit?.globalLimit ?? syncStatus?.emsPullLimit?.fullLimit ?? 0;
+    syncStatus?.adminConfig?.serverDefaultPullLimit ??
+    syncStatus?.emsPullLimit?.globalLimit ??
+    syncStatus?.emsPullLimit?.fullLimit ??
+    0;
+
+  const effectivePullLimit =
+    syncStatus?.adminConfig?.activitiesPullLimit ?? serverDefaultPullLimit;
 
   /** After FFA sync, widen grid filter so imported activity dates (often older) are visible. */
   const widenDateFilterAfterSync = () => {
@@ -795,37 +799,15 @@ const ActivitySamplingView: React.FC = () => {
               <p className="text-xs text-slate-500 mt-1">
                 Last sync: {syncStatus.lastSyncAt ? new Date(syncStatus.lastSyncAt).toLocaleString() : 'Never'} • 
                 {syncStatus.totalActivities} activities • {syncStatus.totalFarmers} farmers
-                {syncStatus.emsPullLimit?.enabled && (
-                  <> • Server pull limit: {serverDefaultPullLimit} (0 = all eligible)</>
+                {' • '}
+                Data source: {dataSource === 'api' ? 'API' : 'Excel'}
+                {dataSource === 'api' && (
+                  <> • Pull limit: {effectivePullLimit} (0 = all eligible; set in Data Management)</>
                 )}
               </p>
             )}
           </div>
           <div className="flex flex-nowrap items-center gap-2 sm:gap-3 shrink-0 overflow-x-auto max-w-full pb-0.5">
-            {/* iPhone-style toggle */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2 shrink-0 whitespace-nowrap">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data Source</span>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-black ${dataSource === 'api' ? 'text-slate-900' : 'text-slate-400'}`}>API</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={dataSource === 'excel'}
-                  onClick={() => setDataSource((p) => (p === 'api' ? 'excel' : 'api'))}
-                  className={`relative inline-flex h-7 w-12 items-center rounded-full border transition-colors ${
-                    dataSource === 'excel' ? 'bg-green-700 border-green-700' : 'bg-slate-200 border-slate-300'
-                  }`}
-                  title="Toggle data source"
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                      dataSource === 'excel' ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-                <span className={`text-xs font-black ${dataSource === 'excel' ? 'text-slate-900' : 'text-slate-400'}`}>Excel</span>
-              </div>
-            </div>
             <Button
               variant="secondary"
               size="sm"
@@ -843,27 +825,6 @@ const ActivitySamplingView: React.FC = () => {
               <RefreshCw size={16} className={isLoading || isStatsLoading ? 'animate-spin' : ''} />
               Refresh
             </Button>
-            {dataSource === 'api' && (
-              <div
-                className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-2xl px-2.5 py-1.5 shrink-0"
-                title="NACL EMS limit per pull. 0 = all eligible. Blank = server default."
-              >
-                <label htmlFor="ffa-pull-limit" className="text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">
-                  Pull limit
-                </label>
-                <input
-                  id="ffa-pull-limit"
-                  type="number"
-                  min={0}
-                  step={1}
-                  placeholder={String(serverDefaultPullLimit)}
-                  value={ffaPullLimitInput}
-                  onChange={(e) => setFfaPullLimitInput(e.target.value)}
-                  disabled={isIncrementalSyncing || isFullSyncing}
-                  className="w-16 text-sm font-semibold text-slate-900 bg-white border border-slate-200 rounded-lg px-2 py-1"
-                />
-              </div>
-            )}
             <Button
               variant="primary"
               size="sm"

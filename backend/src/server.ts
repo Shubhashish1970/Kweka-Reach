@@ -832,12 +832,9 @@ const startServer = async (): Promise<void> => {
     // Connect to MongoDB
     await connectDB();
 
-    // Setup cron jobs ONLY when explicitly enabled.
-    // This prevents unexpected background syncs (e.g., scheduled FFA sync) in production environments.
-    if (process.env.ENABLE_CRON === 'true') {
-      const { setupCronJobs } = await import('./config/cron.js');
-      setupCronJobs();
-    }
+    // FFA scheduled sync: always start the scheduler; on/off is controlled via Admin → Data Management (MongoDB config).
+    const { setupCronJobs } = await import('./config/cron.js');
+    setupCronJobs();
 
     // Start Express server
     app.listen(PORT, () => {

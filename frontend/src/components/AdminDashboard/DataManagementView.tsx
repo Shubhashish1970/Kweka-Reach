@@ -16,7 +16,7 @@ type FfaAdminConfig = {
   scheduleDailyHour: number;
   scheduleDailyMinute: number;
   scheduleTimezone: string;
-  cronEnabledOnServer: boolean;
+  scheduledSyncActive: boolean;
   serverDefaultPullLimit: number;
   lastScheduledRunAt: string | null;
   lastScheduledRunActivitiesSynced: number | null;
@@ -108,7 +108,7 @@ const DataManagementView: React.FC = () => {
   const [scheduleIntervalMinutes, setScheduleIntervalMinutes] = useState(60);
   const [ffaConfigMeta, setFfaConfigMeta] = useState<Pick<
     FfaAdminConfig,
-    | 'cronEnabledOnServer'
+    | 'scheduledSyncActive'
     | 'serverDefaultPullLimit'
     | 'lastScheduledRunAt'
     | 'lastScheduledRunActivitiesSynced'
@@ -129,7 +129,7 @@ const DataManagementView: React.FC = () => {
     setScheduleDailyTime(`${pad2(cfg.scheduleDailyHour)}:${pad2(cfg.scheduleDailyMinute)}`);
     setScheduleIntervalMinutes(cfg.scheduleIntervalMinutes);
     setFfaConfigMeta({
-      cronEnabledOnServer: cfg.cronEnabledOnServer,
+      scheduledSyncActive: cfg.scheduledSyncActive,
       serverDefaultPullLimit: cfg.serverDefaultPullLimit,
       lastScheduledRunAt: cfg.lastScheduledRunAt,
       lastScheduledRunActivitiesSynced: cfg.lastScheduledRunActivitiesSynced,
@@ -406,9 +406,16 @@ const DataManagementView: React.FC = () => {
                     </div>
                   )}
 
-                  {ffaConfigMeta && !ffaConfigMeta.cronEnabledOnServer && (
+                  {ffaConfigMeta?.scheduledSyncActive && (
+                    <div className="text-xs text-green-800 bg-green-50 border border-green-200 rounded-xl px-3 py-2">
+                      Scheduled sync is active. The server checks every minute and runs incremental sync when due.
+                      Turn off by unchecking above and saving.
+                    </div>
+                  )}
+
+                  {scheduleEnabled && ffaDataSource !== 'api' && (
                     <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                      Server cron is disabled (<code className="text-[11px]">ENABLE_CRON=false</code>). Scheduled sync will not run until enabled on Cloud Run.
+                      Scheduled sync only runs when data source is API. Switch to API or disable scheduled sync.
                     </div>
                   )}
 

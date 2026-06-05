@@ -60,12 +60,12 @@ export const getOrCreateFfaSyncConfig = async (): Promise<IFfaSyncConfig> => {
   return FfaSyncConfig.create(DEFAULT_SEED);
 };
 
-export const isCronEnabledOnServer = (): boolean => process.env.ENABLE_CRON === 'true';
-
 export const formatFfaSyncConfigResponse = (config: IFfaSyncConfig | Record<string, unknown> | null) => {
   const c = config as IFfaSyncConfig | null;
   const emsPullLimit = getEmsPullLimitConfig();
   const serverDefaultPullLimit = emsPullLimit.globalLimit ?? emsPullLimit.fullLimit ?? 0;
+  const scheduledSyncActive =
+    c?.scheduleEnabled === true && c?.dataSource === 'api' && c?.scheduleMode !== 'off';
 
   return {
     dataSource: c?.dataSource ?? 'api',
@@ -81,9 +81,9 @@ export const formatFfaSyncConfigResponse = (config: IFfaSyncConfig | Record<stri
     lastScheduledRunFarmersSynced: c?.lastScheduledRunFarmersSynced ?? null,
     lastScheduledRunSkipped: c?.lastScheduledRunSkipped ?? false,
     lastScheduledRunMessage: c?.lastScheduledRunMessage ?? null,
-    cronEnabledOnServer: isCronEnabledOnServer(),
+    scheduledSyncActive,
     serverDefaultPullLimit,
-    nextScheduledRunAt: c ? computeNextScheduledRunAt(c) : null,
+    nextScheduledRunAt: c && scheduledSyncActive ? computeNextScheduledRunAt(c) : null,
     updatedAt: c?.updatedAt ?? null,
   };
 };
@@ -234,8 +234,6 @@ export const recordScheduledRunResult = async (
 };
 
 export const runScheduledFfaSyncIfDue = async (): Promise<void> => {
-  if (!isCronEnabledOnServer()) return;
-
   const config = await getOrCreateFfaSyncConfig();
   if (!isScheduledFfaSyncDue(config)) return;
 

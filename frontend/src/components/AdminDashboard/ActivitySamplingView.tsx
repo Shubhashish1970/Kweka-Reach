@@ -152,7 +152,7 @@ const ActivitySamplingView: React.FC = () => {
       scheduleDailyHour: number;
       scheduleDailyMinute: number;
       scheduleTimezone: string;
-      cronEnabledOnServer: boolean;
+      scheduledSyncActive: boolean;
       serverDefaultPullLimit: number;
       lastScheduledRunAt: string | null;
       lastScheduledRunMessage: string | null;

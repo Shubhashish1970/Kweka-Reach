@@ -5,6 +5,7 @@ import { runScheduledFfaSyncIfDue } from '../services/ffaSyncConfigService.js';
 /**
  * Setup cron jobs for scheduled tasks.
  * FFA sync schedule is read from MongoDB (Admin → Data Management) each minute.
+ * Enabled/disabled via the admin panel — not ENABLE_CRON env.
  */
 export const setupCronJobs = (): void => {
   cron.schedule(

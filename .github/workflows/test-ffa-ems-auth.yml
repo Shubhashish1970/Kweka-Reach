@@ -192,3 +192,39 @@ jobs:
           fi
           echo "::error::Activities request failed with HTTP $HTTP_CODE"
           exit 1
+
+      - name: Probe dateFrom format acceptance (DD/MM/YYYY vs datetime)
+        env:
+          FFA_API_URL: ${{ secrets.FFA_API_URL }}
+          FFA_EMS_DEFAULT_DATE_FROM: ${{ secrets.FFA_EMS_DEFAULT_DATE_FROM }}
+        run: |
+          set -euo pipefail
+          SESSION_TOKEN=$(cat /tmp/ems_session_token.txt)
+          BASE="${FFA_API_URL%/}"
+          if [[ "$BASE" == */authenticate ]]; then BASE="${BASE%/EMS/authenticate}"; fi
+          if [[ "$BASE" != */api ]]; then BASE="${BASE}/api"; fi
+          BASE_DATE="${FFA_EMS_DEFAULT_DATE_FROM:-01/01/2020}"
+          # Convert 01/01/2020 -> 01-01-2020 for dash datetime variants
+          D="${BASE_DATE:0:2}"
+          M="${BASE_DATE:3:2}"
+          Y="${BASE_DATE:6:4}"
+          probe() {
+            local LABEL="$1"
+            local DF="$2"
+            local ENC
+            ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DF', safe=''))")
+            local URL="${BASE}/EMS/activities?limit=5&dateFrom=${ENC}"
+            echo "=== $LABEL: $DF ==="
+            local CODE
+            CODE=$(curl -sS -o /tmp/fmt_probe.json -w "%{http_code}" \
+              -X GET "$URL" -H "Authorization: Bearer $SESSION_TOKEN" -H "Content-Type: application/json")
+            echo "HTTP $CODE"
+            jq -r 'if .Success != null then "Success: \(.Success) message: \(.message // "n/a")" else "no Success field" end' /tmp/fmt_probe.json 2>/dev/null || cat /tmp/fmt_probe.json | head -c 500
+            echo ""
+            jq -r 'if .Data.Activities then "count: \(.Data.Activities | length)" else "count: 0" end' /tmp/fmt_probe.json 2>/dev/null || true
+            echo ""
+          }
+          probe "date-only DD/MM/YYYY" "$BASE_DATE"
+          probe "datetime DD-MM-YYYY HH:mm:ss (NACL activity Date style)" "${D}-${M}-${Y} 00:00:00"
+          probe "datetime DD/MM/YYYY HH:mm:ss (slash + time)" "${BASE_DATE} 00:00:00"
+          probe "datetime DD/MM/YYYY HH:MM:SS uppercase" "${BASE_DATE} 00:00:00"

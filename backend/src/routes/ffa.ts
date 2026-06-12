@@ -440,7 +440,7 @@ router.get('/import-excel-progress', requirePermission('config.ffa'), (req: Requ
 // @access  Private (MIS Admin)
 router.get('/data-batches', requirePermission('config.ffa'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const batches = await listDataBatches(25);
+    const batches = await listDataBatches(3);
     res.json({ success: true, data: { batches } });
   } catch (error) {
     next(error);

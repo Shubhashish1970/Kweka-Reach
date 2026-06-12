@@ -1301,9 +1301,9 @@ const ActivitySamplingView: React.FC = () => {
           <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div>
-                <label className="block text-xs font-black text-amber-900 uppercase tracking-widest">Recent ingest batches</label>
+                <label className="block text-xs font-black text-amber-900 uppercase tracking-widest">Recent ingest batches (last 3)</label>
                 <p className="text-xs text-amber-800/90 mt-0.5">
-                  Each Excel import or FFA sync run tags activities with a batch ID. You can remove a whole batch only if sampling has not created audits or call tasks for those activities yet.
+                  The 3 most recent Excel imports or FFA sync runs. You can remove a whole batch only if sampling has not created audits or call tasks for those activities yet.
                 </p>
               </div>
               <Button variant="secondary" size="sm" onClick={() => fetchDataBatches()} disabled={dataBatchesLoading}>

@@ -297,7 +297,7 @@ const DataManagementView: React.FC = () => {
           <div>
             <h3 className="text-lg font-black text-slate-900">FFA data source & sync</h3>
             <p className="text-xs text-slate-600">
-              Applies to Activity Monitoring for all admins. Scheduled sync runs on the server (incremental API pull).
+              FFA (NACL field force) sends activities via API; Kweka Reach EMS pulls them in. Scheduled sync runs on the server.
             </p>
           </div>
         </div>
@@ -335,7 +335,7 @@ const DataManagementView: React.FC = () => {
                       <span className={`text-sm font-black ${ffaDataSource === 'excel' ? 'text-slate-900' : 'text-slate-400'}`}>Excel</span>
                     </div>
                     <p className="text-xs text-slate-500 mt-2">
-                      API = NACL EMS sync buttons on Activity Monitoring. Excel = upload workbook there instead.
+                      API = pull from NACL FFA API (Sync buttons on Activity Monitoring). Excel = upload workbook instead.
                     </p>
                   </div>
 
@@ -355,14 +355,14 @@ const DataManagementView: React.FC = () => {
                       className="w-full max-w-xs min-h-12 px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 disabled:bg-slate-100"
                     />
                     <p className="text-xs text-slate-500 mt-2">
-                      Blank = server default ({ffaConfigMeta?.serverDefaultPullLimit ?? 0}). 0 = all eligible per NACL EMS.
+                      Blank = server default ({ffaConfigMeta?.serverDefaultPullLimit ?? 0}). 0 = all eligible per FFA API pull.
                       Used for manual and scheduled incremental syncs.
                     </p>
                   </div>
 
                   <div>
                     <label htmlFor="ffa-activity-date-from" className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Activity date from (EMS dateFrom)
+                      Activity date from (FFA API dateFrom)
                     </label>
                     <input
                       id="ffa-activity-date-from"
@@ -373,12 +373,13 @@ const DataManagementView: React.FC = () => {
                       className="w-full max-w-xs min-h-12 px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 disabled:bg-slate-100"
                     />
                     <p className="text-xs text-slate-500 mt-2">
-                      FFA <strong>activity date</strong> cutoff sent to NACL EMS as{' '}
+                      FFA <strong>activity date</strong> cutoff sent to the NACL FFA API as{' '}
                       <code className="text-[11px]">dateFrom</code> in <strong>DD-MM-YYYY HH:mm:ss</strong> (e.g.{' '}
-                      {ffaConfigMeta?.emsActivitiesDateFromDisplay ?? '01-01-2020 00:00:00'}) for both incremental and full sync.
-                      EMS returns undelivered activities on or after this date, in batches per pull limit.
-                      Note: prod rejects <code className="text-[11px]">DD/MM/YYYY HH:mm:ss</code> (slash + time).
-                      Default if unset: {ffaConfigMeta?.serverDefaultActivitiesDateFrom ?? '01/01/2020'}.
+                      {ffaConfigMeta?.emsActivitiesDateFromDisplay ?? '01-04-2026 00:00:00'}) for both incremental and full pull.
+                      FFA sends undelivered activities on or after this date; Kweka Reach EMS receives up to the pull limit per sync.
+                      Once pulled, FFA marks them delivered and will not send again. Prod rejects{' '}
+                      <code className="text-[11px]">DD/MM/YYYY HH:mm:ss</code> (slash + time).
+                      Default if unset: {ffaConfigMeta?.serverDefaultActivitiesDateFrom ?? '01/04/2026'}.
                     </p>
                   </div>
                 </div>
@@ -395,7 +396,7 @@ const DataManagementView: React.FC = () => {
                     <div>
                       <div className="text-sm font-black text-slate-900">Scheduled incremental sync</div>
                       <div className="text-xs text-slate-500">
-                        Server runs incremental FFA API sync automatically ({ffaConfigMeta?.scheduleTimezone ?? 'Asia/Kolkata'}).
+                        Server pulls incremental batches from FFA API automatically ({ffaConfigMeta?.scheduleTimezone ?? 'Asia/Kolkata'}).
                       </div>
                     </div>
                   </label>

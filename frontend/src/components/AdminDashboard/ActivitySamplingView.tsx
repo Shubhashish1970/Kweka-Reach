@@ -146,6 +146,7 @@ const ActivitySamplingView: React.FC = () => {
     adminConfig?: {
       dataSource: 'api' | 'excel';
       activitiesPullLimit: number | null;
+      emsActivitiesDateFromDisplay?: string;
       scheduleEnabled: boolean;
       scheduleMode: 'off' | 'hourly' | 'daily' | 'interval';
       scheduleIntervalMinutes: number;
@@ -802,7 +803,13 @@ const ActivitySamplingView: React.FC = () => {
                 {' • '}
                 Data source: {dataSource === 'api' ? 'API' : 'Excel'}
                 {dataSource === 'api' && (
-                  <> • Pull limit: {effectivePullLimit} (0 = all eligible; set in Data Management)</>
+                  <>
+                    {' '}
+                    • Pull limit: {effectivePullLimit} (0 = all eligible)
+                    {syncStatus.adminConfig?.emsActivitiesDateFromDisplay && (
+                      <> • Activity date from: {syncStatus.adminConfig.emsActivitiesDateFromDisplay}</>
+                    )}
+                  </>
                 )}
               </p>
             )}

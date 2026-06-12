@@ -9,6 +9,8 @@ export interface IFfaSyncConfig extends Document {
   dataSource: FfaDataSource;
   /** EMS pull limit per sync; null = server env default (0 = all eligible) */
   activitiesPullLimit: number | null;
+  /** FFA activity date cutoff sent as EMS dateFrom (activities on/after this date, not yet delivered by EMS) */
+  emsActivitiesDateFrom: Date | null;
   scheduleEnabled: boolean;
   scheduleMode: FfaScheduleMode;
   /** Used when scheduleMode = interval (minutes, min 10) */
@@ -46,6 +48,10 @@ const FfaSyncConfigSchema = new Schema<IFfaSyncConfig>(
       type: Number,
       default: null,
       min: 0,
+    },
+    emsActivitiesDateFrom: {
+      type: Date,
+      default: null,
     },
     scheduleEnabled: {
       type: Boolean,

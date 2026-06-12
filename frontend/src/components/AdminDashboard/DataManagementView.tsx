@@ -10,6 +10,10 @@ import { HIERARCHY_MAP_FIELDS } from '../../constants/excelUploadFields';
 type FfaAdminConfig = {
   dataSource: 'api' | 'excel';
   activitiesPullLimit: number | null;
+  emsActivitiesDateFrom: string | null;
+  emsActivitiesDateFromDisplay: string;
+  serverDefaultActivitiesDateFrom: string;
+  serverDefaultActivitiesDateFromIso: string;
   scheduleEnabled: boolean;
   scheduleMode: 'off' | 'hourly' | 'daily' | 'interval';
   scheduleIntervalMinutes: number;
@@ -102,6 +106,7 @@ const DataManagementView: React.FC = () => {
   const [ffaConfigSaving, setFfaConfigSaving] = useState(false);
   const [ffaDataSource, setFfaDataSource] = useState<'api' | 'excel'>('api');
   const [ffaPullLimitInput, setFfaPullLimitInput] = useState('');
+  const [emsActivitiesDateFromInput, setEmsActivitiesDateFromInput] = useState('');
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<'hourly' | 'daily' | 'interval'>('daily');
   const [scheduleDailyTime, setScheduleDailyTime] = useState('06:00');
@@ -110,6 +115,8 @@ const DataManagementView: React.FC = () => {
     FfaAdminConfig,
     | 'scheduledSyncActive'
     | 'serverDefaultPullLimit'
+    | 'serverDefaultActivitiesDateFrom'
+    | 'emsActivitiesDateFromDisplay'
     | 'lastScheduledRunAt'
     | 'lastScheduledRunActivitiesSynced'
     | 'lastScheduledRunFarmersSynced'
@@ -122,6 +129,9 @@ const DataManagementView: React.FC = () => {
   const applyFfaConfigToForm = (cfg: FfaAdminConfig) => {
     setFfaDataSource(cfg.dataSource);
     setFfaPullLimitInput(cfg.activitiesPullLimit === null ? '' : String(cfg.activitiesPullLimit));
+    setEmsActivitiesDateFromInput(
+      cfg.emsActivitiesDateFrom ?? cfg.serverDefaultActivitiesDateFromIso ?? ''
+    );
     setScheduleEnabled(cfg.scheduleEnabled);
     setScheduleMode(
       cfg.scheduleMode === 'hourly' || cfg.scheduleMode === 'interval' ? cfg.scheduleMode : 'daily'
@@ -131,6 +141,8 @@ const DataManagementView: React.FC = () => {
     setFfaConfigMeta({
       scheduledSyncActive: cfg.scheduledSyncActive,
       serverDefaultPullLimit: cfg.serverDefaultPullLimit,
+      serverDefaultActivitiesDateFrom: cfg.serverDefaultActivitiesDateFrom,
+      emsActivitiesDateFromDisplay: cfg.emsActivitiesDateFromDisplay,
       lastScheduledRunAt: cfg.lastScheduledRunAt,
       lastScheduledRunActivitiesSynced: cfg.lastScheduledRunActivitiesSynced,
       lastScheduledRunFarmersSynced: cfg.lastScheduledRunFarmersSynced,
@@ -184,6 +196,7 @@ const DataManagementView: React.FC = () => {
       const res = (await ffaAPI.updateFfaAdminConfig({
         dataSource: ffaDataSource,
         activitiesPullLimit,
+        emsActivitiesDateFrom: emsActivitiesDateFromInput.trim() || null,
         scheduleEnabled: scheduleEnabled && ffaDataSource === 'api',
         scheduleMode: scheduleEnabled && ffaDataSource === 'api' ? scheduleMode : 'off',
         scheduleIntervalMinutes: intervalMins,
@@ -344,6 +357,28 @@ const DataManagementView: React.FC = () => {
                     <p className="text-xs text-slate-500 mt-2">
                       Blank = server default ({ffaConfigMeta?.serverDefaultPullLimit ?? 0}). 0 = all eligible per NACL EMS.
                       Used for manual and scheduled incremental syncs.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label htmlFor="ffa-activity-date-from" className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Activity date from (EMS dateFrom)
+                    </label>
+                    <input
+                      id="ffa-activity-date-from"
+                      type="date"
+                      value={emsActivitiesDateFromInput}
+                      onChange={(e) => setEmsActivitiesDateFromInput(e.target.value)}
+                      disabled={ffaDataSource !== 'api'}
+                      className="w-full max-w-xs min-h-12 px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 disabled:bg-slate-100"
+                    />
+                    <p className="text-xs text-slate-500 mt-2">
+                      FFA <strong>activity date</strong> cutoff sent to NACL EMS as{' '}
+                      <code className="text-[11px]">dateFrom</code> in <strong>DD-MM-YYYY HH:mm:ss</strong> (e.g.{' '}
+                      {ffaConfigMeta?.emsActivitiesDateFromDisplay ?? '01-01-2020 00:00:00'}) for both incremental and full sync.
+                      EMS returns undelivered activities on or after this date, in batches per pull limit.
+                      Note: prod rejects <code className="text-[11px]">DD/MM/YYYY HH:mm:ss</code> (slash + time).
+                      Default if unset: {ffaConfigMeta?.serverDefaultActivitiesDateFrom ?? '01/01/2020'}.
                     </p>
                   </div>
                 </div>

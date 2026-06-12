@@ -1228,6 +1228,7 @@ export const ffaAPI = {
   updateFfaAdminConfig: async (payload: {
     dataSource?: 'api' | 'excel';
     activitiesPullLimit?: number | null;
+    emsActivitiesDateFrom?: string | null;
     scheduleEnabled?: boolean;
     scheduleMode?: 'off' | 'hourly' | 'daily' | 'interval';
     scheduleIntervalMinutes?: number;

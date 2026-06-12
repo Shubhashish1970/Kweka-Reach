@@ -66,8 +66,9 @@ export const formatDateFromParam = (date: Date): string => {
 };
 
 /**
- * NACL EMS dateFrom for incremental sync: DD-MM-YYYY HH:mm:ss (matches activity `Date` in prod).
- * Full sync uses date-only DD/MM/YYYY via formatDateFromParam.
+ * NACL EMS dateFrom query param: DD-MM-YYYY HH:mm:ss (matches activity `Date` in prod).
+ * Prod rejects DD/MM/YYYY HH:mm:ss ("Error converting data type varchar to date").
+ * DD/MM/YYYY date-only also works; this formatter is used for a consistent datetime cutoff.
  */
 export const formatEmsDateTimeFromParam = (date: Date): string => {
   const dd = String(date.getDate()).padStart(2, '0');
@@ -78,6 +79,10 @@ export const formatEmsDateTimeFromParam = (date: Date): string => {
   const ss = String(date.getSeconds()).padStart(2, '0');
   return `${dd}-${mm}-${yyyy} ${hh}:${min}:${ss}`;
 };
+
+/** EMS activities `dateFrom` — always DD-MM-YYYY HH:mm:ss for full and incremental. */
+export const formatEmsActivitiesDateFromParam = (date: Date): string =>
+  formatEmsDateTimeFromParam(date);
 
 const validateLocalDateTime = (
   d: Date,
@@ -454,19 +459,17 @@ export const authenticateEms = async (ffaApiUrl: string): Promise<string> => {
 
 /**
  * GET /api/EMS/activities?limit=N&dateFrom=... (dateFrom required by EMS).
- * Full sync: dateFrom as DD/MM/YYYY. Incremental: DD-MM-YYYY HH:mm:ss from last syncedAt.
- * limit=0 returns all eligible undelivered activities for that dateFrom (per NACL contract).
+ * dateFrom as DD-MM-YYYY HH:mm:ss for full and incremental (NACL activity date format).
+ * DD/MM/YYYY date-only is also accepted by EMS; DD/MM/YYYY HH:mm:ss is rejected by prod.
  */
 export const fetchEmsActivities = async (
   ffaApiUrl: string,
   dateFrom: Date,
   limit: number,
-  useDateTimeFrom = false
+  _useDateTimeFrom = true
 ): Promise<EmsFfaActivity[]> => {
   const base = resolveEmsApiBase(ffaApiUrl);
-  const dateFromParam = useDateTimeFrom
-    ? formatEmsDateTimeFromParam(dateFrom)
-    : formatDateFromParam(dateFrom);
+  const dateFromParam = formatEmsActivitiesDateFromParam(dateFrom);
   const safeLimit = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : 0;
   const url = `${base}/EMS/activities?limit=${safeLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
   const timeoutMs = resolveActivitiesRequestTimeoutMs(safeLimit);

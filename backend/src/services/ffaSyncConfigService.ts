@@ -1,6 +1,13 @@
 import { FfaSyncConfig, IFfaSyncConfig, FfaDataSource, FfaScheduleMode } from '../models/FfaSyncConfig.js';
 import { syncFFAData } from './ffaSync.js';
-import { getEmsPullLimitConfig } from './emsFfaClient.js';
+import {
+  getEmsPullLimitConfig,
+  parseFfaEmsDefaultDateFrom,
+  getFfaEmsDefaultDateFromDisplay,
+  getFfaEmsDefaultDateFromIso,
+  formatDateFromParam,
+  formatEmsActivitiesDateFromParam,
+} from './emsFfaClient.js';
 import logger from '../config/logger.js';
 
 const DEFAULT_SEED = {
@@ -57,19 +64,49 @@ const zonedHourKey = (date: Date, timeZone: string) => {
 export const getOrCreateFfaSyncConfig = async (): Promise<IFfaSyncConfig> => {
   const existing = await FfaSyncConfig.findOne({ key: 'default' });
   if (existing) return existing;
-  return FfaSyncConfig.create(DEFAULT_SEED);
+  const seedDate = parseFfaEmsDefaultDateFrom();
+  return FfaSyncConfig.create({
+    ...DEFAULT_SEED,
+    emsActivitiesDateFrom: seedDate,
+  });
+};
+
+/** Activity date sent to EMS as dateFrom (admin config → env FFA_EMS_DEFAULT_DATE_FROM → 01/01/2020). */
+export const resolveEmsActivitiesDateFrom = async (): Promise<Date> => {
+  const config = await getOrCreateFfaSyncConfig();
+  if (config.emsActivitiesDateFrom) {
+    return new Date(config.emsActivitiesDateFrom);
+  }
+  return parseFfaEmsDefaultDateFrom();
+};
+
+const toIsoDateOnly = (d: Date | null | undefined): string | null => {
+  if (!d) return null;
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return null;
+  return x.toISOString().slice(0, 10);
 };
 
 export const formatFfaSyncConfigResponse = (config: IFfaSyncConfig | Record<string, unknown> | null) => {
   const c = config as IFfaSyncConfig | null;
   const emsPullLimit = getEmsPullLimitConfig();
   const serverDefaultPullLimit = emsPullLimit.globalLimit ?? emsPullLimit.fullLimit ?? 0;
+  const serverDefaultActivitiesDateFrom = getFfaEmsDefaultDateFromDisplay() ?? '01/01/2020';
+  const serverDefaultActivitiesDateFromIso = getFfaEmsDefaultDateFromIso() ?? '2020-01-01';
+  const effectiveActivityDate = c?.emsActivitiesDateFrom
+    ? new Date(c.emsActivitiesDateFrom)
+    : parseFfaEmsDefaultDateFrom();
   const scheduledSyncActive =
     c?.scheduleEnabled === true && c?.dataSource === 'api' && c?.scheduleMode !== 'off';
 
   return {
     dataSource: c?.dataSource ?? 'api',
     activitiesPullLimit: c?.activitiesPullLimit ?? null,
+    emsActivitiesDateFrom: toIsoDateOnly(c?.emsActivitiesDateFrom ?? null),
+    emsActivitiesDateFromDisplay: formatEmsActivitiesDateFromParam(effectiveActivityDate),
+    emsActivitiesDateFromDisplayShort: formatDateFromParam(effectiveActivityDate),
+    serverDefaultActivitiesDateFrom,
+    serverDefaultActivitiesDateFromIso,
     scheduleEnabled: c?.scheduleEnabled === true,
     scheduleMode: c?.scheduleMode ?? 'daily',
     scheduleIntervalMinutes: c?.scheduleIntervalMinutes ?? 60,
@@ -172,6 +209,7 @@ export const updateFfaSyncConfig = async (
   body: Partial<{
     dataSource: FfaDataSource;
     activitiesPullLimit: number | null;
+    emsActivitiesDateFrom: string | Date | null;
     scheduleEnabled: boolean;
     scheduleMode: FfaScheduleMode;
     scheduleIntervalMinutes: number;
@@ -182,6 +220,22 @@ export const updateFfaSyncConfig = async (
   userId?: string
 ) => {
   const update: Record<string, unknown> = { ...body, updatedByUserId: userId || null };
+
+  if ('emsActivitiesDateFrom' in body) {
+    const raw = body.emsActivitiesDateFrom;
+    if (raw === null || raw === undefined || raw === '') {
+      update.emsActivitiesDateFrom = null;
+    } else if (typeof raw === 'string') {
+      const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (iso) {
+        update.emsActivitiesDateFrom = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+      } else {
+        update.emsActivitiesDateFrom = parseFfaEmsDefaultDateFrom(raw);
+      }
+    } else {
+      update.emsActivitiesDateFrom = raw;
+    }
+  }
 
   if (body.activitiesPullLimit === undefined) {
     // keep existing

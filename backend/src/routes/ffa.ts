@@ -515,6 +515,7 @@ router.put(
     body('scheduleDailyHour').optional().isInt({ min: 0, max: 23 }),
     body('scheduleDailyMinute').optional().isInt({ min: 0, max: 59 }),
     body('scheduleTimezone').optional().isString().isLength({ min: 1, max: 64 }),
+    body('emsActivitiesDateFrom').optional({ nullable: true }).isString(),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {

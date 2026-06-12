@@ -7,7 +7,7 @@ import { getLanguageForState } from '../utils/stateLanguageMapper.js';
 import {
   fetchEmsActivities,
   formatDateFromParam,
-  formatEmsDateTimeFromParam,
+  formatEmsActivitiesDateFromParam,
   parseEmsActivityDate,
   getEmsPullLimitConfig,
   parseEmsActivitiesLimit,
@@ -15,6 +15,7 @@ import {
   isEmsFfaApiEnabled,
   resolveActivitiesDateFrom,
 } from './emsFfaClient.js';
+import { resolveEmsActivitiesDateFrom } from './ffaSyncConfigService.js';
 
 interface FFAActivity {
   activityId: string;
@@ -71,18 +72,15 @@ const fetchFFAActivities = async (
     const emsDateFrom = resolveActivitiesDateFrom(dateFrom);
     const emsMode = fullSync ? 'full' : 'incremental';
     const emsLimit = resolveEmsActivitiesLimit(emsMode, activitiesLimit);
-    const useDateTimeFrom = emsMode === 'incremental' && !!dateFrom;
-    const dateFromParam = useDateTimeFrom
-      ? formatEmsDateTimeFromParam(emsDateFrom)
-      : formatDateFromParam(emsDateFrom);
+    const dateFromParam = formatEmsActivitiesDateFromParam(emsDateFrom);
     logger.info('[FFA SYNC] Using NACL EMS API (authenticate + /EMS/activities)', {
       syncMode: emsMode,
       limit: emsLimit,
       dateFrom: emsDateFrom.toISOString(),
       dateFromParam,
-      useDateTimeFrom,
+      dateFromMeaning: 'FFA activity date cutoff (DD-MM-YYYY HH:mm:ss)',
     });
-    return fetchEmsActivities(FFA_API_URL, emsDateFrom, emsLimit, useDateTimeFrom);
+    return fetchEmsActivities(FFA_API_URL, emsDateFrom, emsLimit);
   }
 
   // Build URL with optional dateFrom parameter for incremental sync (mock / vendor spec)
@@ -416,55 +414,24 @@ export const syncFFAData = async (
     isSyncing = true;
     beginSyncProgress(fullSync ? 'full' : 'incremental');
 
-    // Determine sync type and get last sync date for incremental sync
-    if (!fullSync) {
-      try {
-        // Use latest syncedAt so EMS dateFrom can be sent as DD-MM-YYYY HH:mm:ss
-        const lastActivity = await Activity.findOne().sort({ syncedAt: -1 });
-        if (lastActivity && lastActivity.syncedAt) {
-          lastSyncDate = new Date(lastActivity.syncedAt);
-          logger.info(
-            `[FFA SYNC] Incremental sync: cutoff syncedAt=${lastActivity.syncedAt.toISOString()}, EMS dateFrom=${formatEmsDateTimeFromParam(lastSyncDate)}`
-          );
-          
-          // Additional check: if last sync was very recent (within last 5 minutes), skip
-          const timeSinceLastSync = Date.now() - lastActivity.syncedAt.getTime();
-          if (timeSinceLastSync < 5 * 60 * 1000) { // 5 minutes
-            const skipReason = `Last sync completed ${Math.round(timeSinceLastSync / 1000)} seconds ago. No new data expected.`;
-            logger.info(`[FFA SYNC] ${skipReason}`);
-            isSyncing = false;
-            syncProgress.running = false;
-            syncProgress.lastResult = { activitiesSynced: 0, farmersSynced: 0, errors: [], syncType: 'incremental', skipped: true, skipReason };
-            return {
-              activitiesSynced: 0,
-              farmersSynced: 0,
-              errors: [],
-              syncType: 'incremental',
-              skipped: true,
-              skipReason,
-            };
-          }
-        } else {
-          logger.info(`[FFA SYNC] No previous sync found, performing full sync`);
-          fullSync = true; // Fall back to full sync if no previous sync exists
-        }
-      } catch (error) {
-        logger.error('[FFA SYNC] Error determining last sync date, falling back to full sync:', error);
-        fullSync = true; // Fall back to full sync on error
-      }
-    }
+    const activityDateFrom = await resolveEmsActivitiesDateFrom();
+    lastSyncDate = activityDateFrom;
+    logger.info(
+      `[FFA SYNC] EMS activity dateFrom=${formatEmsActivitiesDateFromParam(activityDateFrom)} (full and incremental; DD-MM-YYYY HH:mm:ss)`
+    );
 
     logger.info(`[FFA SYNC] Starting FFA data sync (${fullSync ? 'full' : 'incremental'})...`, {
       ffaApiUrl: FFA_API_URL,
       hasEnvVar: !!process.env.FFA_API_URL,
       fullSync,
-      lastSyncDate: lastSyncDate?.toISOString(),
+      activityDateFrom: activityDateFrom.toISOString(),
+      emsDateFromParam: formatDateFromParam(activityDateFrom),
     });
 
     let ffaActivities: FFAActivity[];
     try {
       ffaActivities = await fetchFFAActivities(
-        fullSync ? undefined : lastSyncDate,
+        activityDateFrom,
         fullSync,
         options?.activitiesLimit
       );

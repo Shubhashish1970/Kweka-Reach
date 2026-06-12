@@ -1396,68 +1396,64 @@ const ActivitySamplingView: React.FC = () => {
             </button>
           </div>
           
-          {/* Compact Statistics Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-            {/* Activities + Total Farmers */}
-            <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 min-w-0 overflow-visible text-left">
-              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-0.5 h-[2.5rem] flex items-end leading-tight line-clamp-2 overflow-hidden">Activities & Farmers</p>
-              <p className="text-xl font-black text-slate-900">{statistics.totalActivities}</p>
-              <p className="text-xs text-slate-500 mt-0.5 text-left">activities</p>
-              <p className="text-xl font-black text-slate-900 mt-1">{statistics.totalFarmers}</p>
-              <p className="text-xs text-slate-500 mt-0.5 text-left">unique farmers (by mobile)</p>
-            </div>
-            {/* With Sampling + Farmers Sampled */}
-            <div className="bg-green-50 rounded-xl p-3 border border-green-200 min-w-0 overflow-visible">
-              <p className="text-xs font-black text-green-600 uppercase tracking-widest mb-0.5 h-[2.5rem] flex items-end leading-tight line-clamp-2 overflow-hidden">Sampled</p>
-              <p className="text-xl font-black text-green-800 text-left mt-0.5">{statistics.activitiesWithSampling}</p>
-              <p className="text-xs text-green-600 text-left break-words leading-tight" title="Full = farmers selected as per norms; Partial = no farmers selected">
-                activity sampled ({statistics.activitiesFullySampled} full, {statistics.activitiesPartiallySampled} partial)
+          {/* Compact statistics — single row, scroll on narrow screens */}
+          <div className="flex flex-nowrap items-stretch gap-2 overflow-x-auto pb-0.5">
+            <div className="shrink-0 w-[118px] bg-slate-50 rounded-lg px-2.5 py-2 border border-slate-200 text-left" title="Activities and unique farmers (by mobile) in filtered range">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-wide leading-tight">Act. / Farmers</p>
+              <p className="text-base font-black text-slate-900 leading-tight mt-0.5">
+                {statistics.totalActivities}
+                <span className="text-slate-400 font-bold"> / </span>
+                {statistics.totalFarmers}
               </p>
-              <p className="text-xl font-black text-green-800 text-left mt-1">{statistics.farmersSampled}</p>
-              <p className="text-xs text-green-600 text-left break-words leading-tight">
-                farmers sampled{statistics.totalFarmerLinks > 0 ? ` (${Math.round((statistics.farmersSampled / statistics.totalFarmerLinks) * 100)}% of farmer-links)` : ''}
+              <p className="text-[10px] text-slate-500 leading-tight mt-0.5 line-clamp-2">activities · unique mobile</p>
+            </div>
+            <div
+              className="shrink-0 w-[130px] bg-green-50 rounded-lg px-2.5 py-2 border border-green-200 text-left"
+              title={`${statistics.activitiesFullySampled} full, ${statistics.activitiesPartiallySampled} partial · ${statistics.farmersSampled} farmers sampled`}
+            >
+              <p className="text-[9px] font-black text-green-600 uppercase tracking-wide leading-tight">Sampled</p>
+              <p className="text-base font-black text-green-800 leading-tight mt-0.5">{statistics.activitiesWithSampling}</p>
+              <p className="text-[10px] text-green-600 leading-tight mt-0.5 line-clamp-2">
+                {statistics.activitiesFullySampled}F · {statistics.activitiesPartiallySampled}P · {statistics.farmersSampled} farmers
               </p>
-              {((statistics.activitiesWithSamplingAdhoc ?? 0) > 0 || (statistics.farmersSampledAdhoc ?? 0) > 0) && (
-                <p className="text-xs text-green-600/80 mt-0.5 text-left break-words leading-tight">
-                  ({statistics.activitiesWithSamplingAdhoc ?? 0} activities, {statistics.farmersSampledAdhoc ?? 0} farmers adhoc)
+            </div>
+            <div
+              className="shrink-0 w-[100px] bg-slate-50 rounded-lg px-2.5 py-2 border border-slate-200 text-left"
+              title={
+                statistics.totalTasks > 0
+                  ? `Sampling run: ${(statistics.totalTasks ?? 0) - (statistics.tasksAdhoc ?? 0)}, Adhoc: ${statistics.tasksAdhoc ?? 0}`
+                  : undefined
+              }
+            >
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-wide leading-tight">Total tasks</p>
+              <p className="text-base font-black text-slate-900 leading-tight mt-0.5">{statistics.totalTasks}</p>
+              {(statistics.totalTasks > 0 || (statistics.callbackTasks || 0) > 0) && (
+                <p className="text-[10px] text-slate-500 leading-tight mt-0.5 line-clamp-2">
+                  {statistics.totalTasks > 0 && `SR ${(statistics.totalTasks ?? 0) - (statistics.tasksAdhoc ?? 0)} · Ad ${statistics.tasksAdhoc ?? 0}`}
+                  {(statistics.callbackTasks || 0) > 0 && ` · CB ${statistics.callbackTasks}`}
                 </p>
               )}
             </div>
-            {/* Total Tasks: number only + Sampling Run / Adhoc breakup */}
-            <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 min-w-0 overflow-visible text-left">
-              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-0.5 h-[2.5rem] flex items-end leading-tight line-clamp-2 overflow-hidden">Total Tasks</p>
-              <p className="text-xl font-black text-slate-900">{statistics.totalTasks}</p>
-              {(statistics.totalTasks > 0) && (
-                <p className="text-xs text-slate-500 mt-1 text-left break-words leading-tight">
-                  Sampling run: {(statistics.totalTasks ?? 0) - (statistics.tasksAdhoc ?? 0)}, Adhoc: {statistics.tasksAdhoc ?? 0}
-                </p>
-              )}
-              {(statistics.callbackTasks || 0) > 0 && (
-                <p className="text-xs text-purple-600 font-bold mt-0.5 text-left break-words leading-tight">
-                  incl. {statistics.callbackTasks} callback{statistics.callbackTasks !== 1 ? 's' : ''}
-                </p>
-              )}
-            </div>
-            <div className="bg-amber-50 rounded-xl p-3 border border-amber-200 min-w-0 overflow-visible text-left">
-              <p className="text-xs font-black text-amber-700 uppercase tracking-widest mb-0.5 h-[2.5rem] flex items-end leading-tight line-clamp-2 overflow-hidden">Other</p>
-              <p className="text-xl font-black text-amber-800">
+            <div
+              className="shrink-0 w-[88px] bg-amber-50 rounded-lg px-2.5 py-2 border border-amber-200 text-left"
+              title="Unassigned / not reachable / invalid"
+            >
+              <p className="text-[9px] font-black text-amber-700 uppercase tracking-wide leading-tight">Other</p>
+              <p className="text-base font-black text-amber-800 leading-tight mt-0.5">
                 {(statistics.tasksUnassigned ?? 0) + (statistics.tasksNotReachable ?? 0) + (statistics.tasksInvalidNumber ?? 0)}
               </p>
-              <p className="text-xs text-amber-600 mt-1 text-left break-words leading-tight">
-                (unassigned / not reachable / invalid)
-              </p>
             </div>
-            <div className="bg-yellow-50 rounded-xl p-3 border border-yellow-200 min-w-0 overflow-visible text-left">
-              <p className="text-xs font-black text-yellow-600 uppercase tracking-widest mb-0.5 h-[2.5rem] flex items-end leading-tight line-clamp-2 overflow-hidden">In Queue</p>
-              <p className="text-xl font-black text-yellow-800">{statistics.tasksSampledInQueue}</p>
+            <div className="shrink-0 w-[82px] bg-yellow-50 rounded-lg px-2.5 py-2 border border-yellow-200 text-left">
+              <p className="text-[9px] font-black text-yellow-600 uppercase tracking-wide leading-tight">In queue</p>
+              <p className="text-base font-black text-yellow-800 leading-tight mt-0.5">{statistics.tasksSampledInQueue}</p>
             </div>
-            <div className="bg-blue-50 rounded-xl p-3 border border-blue-200 min-w-0 overflow-visible text-left">
-              <p className="text-xs font-black text-blue-600 uppercase tracking-widest mb-0.5 h-[2.5rem] flex items-end leading-tight line-clamp-2 overflow-hidden">In Progress</p>
-              <p className="text-xl font-black text-blue-800">{statistics.tasksInProgress}</p>
+            <div className="shrink-0 w-[88px] bg-blue-50 rounded-lg px-2.5 py-2 border border-blue-200 text-left">
+              <p className="text-[9px] font-black text-blue-600 uppercase tracking-wide leading-tight">In progress</p>
+              <p className="text-base font-black text-blue-800 leading-tight mt-0.5">{statistics.tasksInProgress}</p>
             </div>
-            <div className="bg-green-50 rounded-xl p-3 border border-green-200 min-w-0 overflow-visible text-left">
-              <p className="text-xs font-black text-green-600 uppercase tracking-widest mb-0.5 h-[2.5rem] flex items-end leading-tight line-clamp-2 overflow-hidden">Completed</p>
-              <p className="text-xl font-black text-green-800">{statistics.tasksCompleted}</p>
+            <div className="shrink-0 w-[88px] bg-green-50 rounded-lg px-2.5 py-2 border border-green-200 text-left">
+              <p className="text-[9px] font-black text-green-600 uppercase tracking-wide leading-tight">Completed</p>
+              <p className="text-base font-black text-green-800 leading-tight mt-0.5">{statistics.tasksCompleted}</p>
             </div>
           </div>
         </div>

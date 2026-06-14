@@ -258,6 +258,18 @@ export const updateFfaSyncConfig = async (
   return config;
 };
 
+const SYNC_IN_PROGRESS_REASON = 'Another sync is already in progress';
+
+export type ScheduledFfaSyncRunResult = {
+  ran: boolean;
+  reason: 'not_due' | 'sync_in_progress' | 'completed' | 'failed';
+  activitiesSynced?: number;
+  farmersSynced?: number;
+  skipped?: boolean;
+  skipReason?: string;
+  infoMessage?: string;
+};
+
 export const recordScheduledRunResult = async (
   result: {
     activitiesSynced: number;
@@ -287,9 +299,11 @@ export const recordScheduledRunResult = async (
   );
 };
 
-export const runScheduledFfaSyncIfDue = async (): Promise<void> => {
+export const runScheduledFfaSyncIfDue = async (): Promise<ScheduledFfaSyncRunResult> => {
   const config = await getOrCreateFfaSyncConfig();
-  if (!isScheduledFfaSyncDue(config)) return;
+  if (!isScheduledFfaSyncDue(config)) {
+    return { ran: false, reason: 'not_due' };
+  }
 
   try {
     logger.info('[FFA CRON] Starting scheduled incremental FFA sync...');
@@ -298,20 +312,50 @@ export const runScheduledFfaSyncIfDue = async (): Promise<void> => {
         ? config.activitiesPullLimit
         : undefined;
 
-    const result = await syncFFAData(false, { activitiesLimit });
+    const result = await syncFFAData(false, { activitiesLimit, skipMinInterval: true });
+
+    if (result.skipped && result.skipReason === SYNC_IN_PROGRESS_REASON) {
+      logger.info('[FFA CRON] Scheduled sync deferred — another sync is in progress');
+      return {
+        ran: false,
+        reason: 'sync_in_progress',
+        skipped: true,
+        skipReason: result.skipReason,
+      };
+    }
+
     await recordScheduledRunResult(result);
 
     logger.info(
       `[FFA CRON] Scheduled sync finished: ${result.activitiesSynced} activities, ${result.farmersSynced} farmers` +
         (result.skipped ? ` (skipped: ${result.skipReason})` : '')
     );
+
+    return {
+      ran: true,
+      reason: 'completed',
+      activitiesSynced: result.activitiesSynced,
+      farmersSynced: result.farmersSynced,
+      skipped: result.skipped,
+      skipReason: result.skipReason,
+      infoMessage: result.infoMessage,
+    };
   } catch (error) {
     logger.error('[FFA CRON] Scheduled FFA sync failed:', error);
+    const skipReason = error instanceof Error ? error.message : String(error);
     await recordScheduledRunResult({
       activitiesSynced: 0,
       farmersSynced: 0,
       skipped: true,
-      skipReason: error instanceof Error ? error.message : String(error),
+      skipReason,
     });
+    return {
+      ran: true,
+      reason: 'failed',
+      activitiesSynced: 0,
+      farmersSynced: 0,
+      skipped: true,
+      skipReason,
+    };
   }
 };

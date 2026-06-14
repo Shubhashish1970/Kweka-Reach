@@ -130,6 +130,8 @@ const ActivitySamplingView: React.FC = () => {
   } | null>(null);
   const syncProgressPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollSawRunningRef = useRef(false);
+  const syncStartedAtRef = useRef<number | null>(null);
+  const syncPollAttemptsRef = useRef(0);
   const requestedSyncTypeRef = useRef<'full' | 'incremental' | null>(null);
   const [syncStatus, setSyncStatus] = useState<{
     lastSyncAt: string | null;
@@ -467,7 +469,50 @@ const ActivitySamplingView: React.FC = () => {
     }
     setSyncProgress({ running: true, activitiesSynced: 0, totalActivities: 0, farmersSynced: 0, errorCount: 0, syncType: fullSync ? 'full' : 'incremental', message: 'Starting sync...' });
     syncPollSawRunningRef.current = false;
+    syncStartedAtRef.current = Date.now();
+    syncPollAttemptsRef.current = 0;
     requestedSyncTypeRef.current = fullSync ? 'full' : 'incremental';
+
+    const stopSyncPolling = () => {
+      if (syncProgressPollRef.current) {
+        clearInterval(syncProgressPollRef.current);
+        syncProgressPollRef.current = null;
+      }
+      syncStartedAtRef.current = null;
+      syncPollAttemptsRef.current = 0;
+    };
+
+    const finalizeSyncUi = async (result?: {
+      activitiesSynced?: number;
+      farmersSynced?: number;
+      errors?: string[];
+      syncType?: 'full' | 'incremental';
+      skipped?: boolean;
+      skipReason?: string;
+      infoMessage?: string;
+    }) => {
+      stopSyncPolling();
+      setSyncProgress(null);
+      if (result?.skipped) {
+        showSuccess(result.skipReason || 'Sync skipped');
+      } else if (result?.infoMessage && (result.errors?.length ?? 0) === 0) {
+        showSuccess(result.infoMessage);
+      } else if (result) {
+        showSuccess(
+          `FFA sync completed (${result.syncType}): ${result.activitiesSynced ?? 0} activities, ${result.farmersSynced ?? 0} farmers synced${(result.errors?.length ?? 0) > 0 ? `, ${result.errors.length} errors` : ''}`
+        );
+      }
+      if ((result?.activitiesSynced ?? 0) > 0) {
+        widenDateFilterAfterSync();
+      } else {
+        await fetchActivities(pagination.page);
+      }
+      await fetchStats();
+      await fetchSyncStatus();
+      await fetchDataBatches();
+      if (fullSync) setIsFullSyncing(false);
+      else setIsIncrementalSyncing(false);
+    };
 
     try {
       const pullLimit = resolveFfaPullLimitForSync();
@@ -475,6 +520,7 @@ const ActivitySamplingView: React.FC = () => {
       if (!response?.success) {
         showError(response?.message || 'FFA sync failed to start');
         setSyncProgress(null);
+        stopSyncPolling();
         if (fullSync) setIsFullSyncing(false);
         else setIsIncrementalSyncing(false);
         return;
@@ -482,23 +528,19 @@ const ActivitySamplingView: React.FC = () => {
       if (!response.started) {
         // Legacy path: server returned result inline
         const d = response.data || {};
-        showSuccess(`FFA sync completed: ${d.activitiesSynced ?? 0} activities, ${d.farmersSynced ?? 0} farmers synced`);
-        setSyncProgress(null);
-        if ((d.activitiesSynced ?? 0) > 0) {
-          widenDateFilterAfterSync();
-        } else {
-          await fetchActivities(pagination.page);
-        }
-        await fetchStats();
-        await fetchSyncStatus();
-        await fetchDataBatches();
-        if (fullSync) setIsFullSyncing(false);
-        else setIsIncrementalSyncing(false);
+        await finalizeSyncUi({
+          activitiesSynced: d.activitiesSynced,
+          farmersSynced: d.farmersSynced,
+          syncType: fullSync ? 'full' : 'incremental',
+        });
         return;
       }
 
+      const MAX_SYNC_POLL_ATTEMPTS = 200; // ~5 minutes at 1.5s interval
+
       const poll = async () => {
         try {
+          syncPollAttemptsRef.current += 1;
           const pr = (await ffaAPI.getFFASyncProgress()) as any;
           const data = pr?.data ?? pr;
           setSyncProgress({
@@ -514,36 +556,35 @@ const ActivitySamplingView: React.FC = () => {
           if (data.running) {
             syncPollSawRunningRef.current = true;
           }
-          if (!data.running) {
-            const result = data.lastResult;
-            const matchesRequestedType = result?.syncType === requestedSyncTypeRef.current;
-            if (!syncPollSawRunningRef.current && !matchesRequestedType) {
-              return;
-            }
-            if (syncProgressPollRef.current) {
-              clearInterval(syncProgressPollRef.current);
-              syncProgressPollRef.current = null;
-            }
-            if (result?.skipped) {
-              showSuccess(result.skipReason || 'Sync skipped');
-            } else if (result?.infoMessage && (result.errors?.length ?? 0) === 0) {
-              showSuccess(result.infoMessage);
-            } else if (result) {
-              showSuccess(`FFA sync completed (${result.syncType}): ${result.activitiesSynced} activities, ${result.farmersSynced} farmers synced${(result.errors?.length ?? 0) > 0 ? `, ${result.errors.length} errors` : ''}`);
-            }
-            if ((result?.activitiesSynced ?? 0) > 0) {
-              widenDateFilterAfterSync();
-            } else {
-              await fetchActivities(pagination.page);
-            }
-            await fetchStats();
-            await fetchSyncStatus();
-            await fetchDataBatches();
-            if (fullSync) setIsFullSyncing(false);
-            else setIsIncrementalSyncing(false);
+          if (data.running) {
+            return;
           }
+
+          const result = data.lastResult;
+          const matchesRequestedType = result?.syncType === requestedSyncTypeRef.current;
+          const hasObservedThisRun =
+            syncPollSawRunningRef.current ||
+            matchesRequestedType ||
+            syncPollAttemptsRef.current >= 3;
+          const pollTimedOut = syncPollAttemptsRef.current >= MAX_SYNC_POLL_ATTEMPTS;
+
+          if (!hasObservedThisRun && !pollTimedOut) {
+            return;
+          }
+
+          if (pollTimedOut && !hasObservedThisRun) {
+            showSuccess('Sync progress unavailable — refreshed status from server.');
+            await finalizeSyncUi();
+            return;
+          }
+
+          await finalizeSyncUi(result ?? undefined);
         } catch (e) {
           console.error('FFA sync progress poll error:', e);
+          if (syncPollAttemptsRef.current >= MAX_SYNC_POLL_ATTEMPTS) {
+            showSuccess('Sync progress unavailable — refreshed status from server.');
+            await finalizeSyncUi();
+          }
         }
       };
 
@@ -552,6 +593,7 @@ const ActivitySamplingView: React.FC = () => {
     } catch (err: any) {
       showError(err?.message || 'Failed to sync FFA data');
       setSyncProgress(null);
+      stopSyncPolling();
       if (fullSync) setIsFullSyncing(false);
       else setIsIncrementalSyncing(false);
     }

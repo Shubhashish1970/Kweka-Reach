@@ -78,6 +78,53 @@ router.get(
   }
 );
 
+/**
+ * POST /api/ffa/run-scheduled-sync
+ * Triggered by Google Cloud Scheduler (or in-process cron fallback).
+ * Secured via X-FFA-Cron-Secret header (FFA_CRON_SECRET env).
+ */
+router.post(
+  '/run-scheduled-sync',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const expectedSecret = process.env.FFA_CRON_SECRET?.trim();
+      const providedSecret = (req.headers['x-ffa-cron-secret'] as string | undefined)?.trim();
+
+      if (!expectedSecret) {
+        logger.warn('[FFA CRON HTTP] FFA_CRON_SECRET is not set');
+        return res.status(503).json({
+          success: false,
+          error: { message: 'Scheduled sync is not configured (FFA_CRON_SECRET missing).' },
+        });
+      }
+      if (providedSecret !== expectedSecret) {
+        return res.status(401).json({
+          success: false,
+          error: { message: 'Invalid or missing X-FFA-Cron-Secret.' },
+        });
+      }
+
+      const { runScheduledFfaSyncIfDue } = await import('../services/ffaSyncConfigService.js');
+
+      runScheduledFfaSyncIfDue()
+        .then((result) => {
+          logger.info('[FFA CRON HTTP] Scheduled sync tick finished', result);
+        })
+        .catch((err) => {
+          logger.error('[FFA CRON HTTP] Scheduled sync tick error:', err);
+        });
+
+      res.json({
+        success: true,
+        message: 'Scheduled FFA sync tick accepted',
+        data: { triggered: true },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // All other routes require authentication
 router.use(authenticate);
 
@@ -511,7 +558,7 @@ router.put(
     body('dataSource').optional().isIn(['api', 'excel']),
     body('scheduleEnabled').optional().isBoolean(),
     body('scheduleMode').optional().isIn(['off', 'hourly', 'daily', 'interval']),
-    body('scheduleIntervalMinutes').optional().isInt({ min: 10, max: 10080 }),
+    body('scheduleIntervalMinutes').optional().isInt({ min: 3, max: 10080 }),
     body('scheduleDailyHour').optional().isInt({ min: 0, max: 23 }),
     body('scheduleDailyMinute').optional().isInt({ min: 0, max: 59 }),
     body('scheduleTimezone').optional().isString().isLength({ min: 1, max: 64 }),

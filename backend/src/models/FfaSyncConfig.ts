@@ -13,7 +13,7 @@ export interface IFfaSyncConfig extends Document {
   emsActivitiesDateFrom: Date | null;
   scheduleEnabled: boolean;
   scheduleMode: FfaScheduleMode;
-  /** Used when scheduleMode = interval (minutes, min 10) */
+  /** Used when scheduleMode = interval (minutes, min 3) */
   scheduleIntervalMinutes: number;
   /** Used when scheduleMode = daily (0–23 in scheduleTimezone) */
   scheduleDailyHour: number;
@@ -65,7 +65,7 @@ const FfaSyncConfigSchema = new Schema<IFfaSyncConfig>(
     scheduleIntervalMinutes: {
       type: Number,
       default: 60,
-      min: 10,
+      min: 3,
       max: 10080,
     },
     scheduleDailyHour: {

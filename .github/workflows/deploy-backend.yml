@@ -265,8 +265,9 @@ jobs:
             echo "JWT_SECRET: \"${{ secrets.JWT_SECRET }}\""
             echo "NODE_ENV: \"production\""
             echo "CORS_ORIGIN: \"${{ secrets.CORS_ORIGIN }}\""
-            echo "ENABLE_CRON: \"false\""
+            echo "MIN_SYNC_INTERVAL: \"180000\""
             echo "FFA_API_URL: \"$FFA_API_URL_VALUE\""
+            [ -n "${{ secrets.FFA_CRON_SECRET }}" ] && echo "FFA_CRON_SECRET: \"${{ secrets.FFA_CRON_SECRET }}\""
             echo "GEMINI_API_KEY: \"${{ secrets.GEMINI_API_KEY }}\""
             [ -n "${{ secrets.FFA_API_TOKEN }}" ] && echo "FFA_API_TOKEN: \"${{ secrets.FFA_API_TOKEN }}\""
             [ -n "${{ secrets.FFA_API_KEY }}" ] && echo "FFA_API_KEY: \"${{ secrets.FFA_API_KEY }}\""
@@ -297,7 +298,8 @@ jobs:
           echo "  - JWT_SECRET: [REDACTED]"
           echo "  - NODE_ENV: production"
           echo "  - CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}"
-          echo "  - ENABLE_CRON: false"
+          echo "  - MIN_SYNC_INTERVAL: 180000 (3 minutes)"
+          echo "  - FFA_CRON_SECRET: [REDACTED if set]"
           echo "  - FFA_API_URL: $FFA_API_URL_VALUE"
           echo "  - GEMINI_API_KEY: [REDACTED]"
           echo "  - ADMIN_SEED_TOKEN: [REDACTED]"
@@ -350,6 +352,7 @@ jobs:
               --port 8080 \
               --memory 512Mi \
               --cpu 1 \
+              --min-instances 1 \
               --env-vars-file "$ENV_FILE" \
               --project ${{ secrets.GCP_PROJECT_ID }} \
               2>&1) || {
@@ -379,6 +382,7 @@ jobs:
               --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cc-ems-repo/${{ env.SERVICE_NAME }} \
               --platform managed \
               --region ${{ env.REGION }} \
+              --min-instances 1 \
               --env-vars-file "$ENV_FILE" \
               --project ${{ secrets.GCP_PROJECT_ID }} \
               2>&1) || {

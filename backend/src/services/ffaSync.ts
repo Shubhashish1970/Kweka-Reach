@@ -346,15 +346,18 @@ export const beginSyncProgress = (syncType: 'full' | 'incremental'): void => {
     errorCount: 0,
     syncType,
     message: syncType === 'full' ? 'Full sync in progress…' : 'Incremental sync in progress…',
+    lastResult: undefined,
   };
 };
 
-// Minimum time between syncs (in milliseconds) - default 10 minutes
-const MIN_SYNC_INTERVAL = parseInt(process.env.MIN_SYNC_INTERVAL || '600000', 10); // 10 minutes default
+// Minimum time between manual incremental syncs (ms) — default 3 minutes
+const MIN_SYNC_INTERVAL = parseInt(process.env.MIN_SYNC_INTERVAL || '180000', 10);
 
 export type FfaSyncOptions = {
   /** NACL EMS activities `limit` for this run only (0 = all eligible). */
   activitiesLimit?: number | null;
+  /** When true, skip the manual debounce guard (used by scheduled/cron sync). */
+  skipMinInterval?: boolean;
 };
 
 export const syncFFAData = async (
@@ -393,10 +396,16 @@ export const syncFFAData = async (
       };
     }
 
-    // Check if sync was run recently (for incremental sync only)
-    if (!fullSync && lastSyncTime && (Date.now() - lastSyncTime) < MIN_SYNC_INTERVAL) {
-      const timeSinceLastSync = Math.round((Date.now() - lastSyncTime) / 1000 / 60); // minutes
-      const skipReason = `Sync was completed ${timeSinceLastSync} minute(s) ago. Please wait at least ${Math.round(MIN_SYNC_INTERVAL / 1000 / 60)} minutes between syncs.`;
+    // Check if sync was run recently (manual incremental only — scheduled sync passes skipMinInterval)
+    if (
+      !fullSync &&
+      !options?.skipMinInterval &&
+      lastSyncTime &&
+      Date.now() - lastSyncTime < MIN_SYNC_INTERVAL
+    ) {
+      const waitMinutes = Math.max(1, Math.round(MIN_SYNC_INTERVAL / 1000 / 60));
+      const timeSinceLastSync = Math.round((Date.now() - lastSyncTime) / 1000 / 60);
+      const skipReason = `Sync was completed ${timeSinceLastSync} minute(s) ago. Please wait at least ${waitMinutes} minute(s) between syncs.`;
       logger.info(`[FFA SYNC] ${skipReason}`);
       syncProgress.running = false;
       syncProgress.lastResult = { activitiesSynced: 0, farmersSynced: 0, errors: [], syncType: 'incremental', skipped: true, skipReason };

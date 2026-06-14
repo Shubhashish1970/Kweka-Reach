@@ -5,6 +5,7 @@ import { Trash2, Database, Loader2, Settings2, Save } from 'lucide-react';
 import Button from '../shared/Button';
 import ConfirmationModal from '../shared/ConfirmationModal';
 import ExcelUploadFlow from '../shared/ExcelUploadFlow';
+import { HIERARCHY_MAP_FIELDS } from '../../constants/excelUploadFields';
 import { formatDateTimeIST, formatConfigDateTimeDisplay } from '../../utils/dateRangeUtils';
 
 type FfaAdminConfig = {

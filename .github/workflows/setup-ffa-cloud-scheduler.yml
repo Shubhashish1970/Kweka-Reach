@@ -1,0 +1,111 @@
+name: Setup FFA Cloud Scheduler
+
+on:
+  workflow_dispatch:
+
+env:
+  SERVICE_NAME: kweka-reach-backend
+  BACKEND_REGION: us-central1
+  SCHEDULER_REGION: asia-south1
+  JOB_NAME: kweka-reach-ffa-sync
+
+jobs:
+  setup-scheduler:
+    name: Create or update Cloud Scheduler job
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify secrets
+        run: |
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+            echo "❌ GCP_SA_KEY secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
+            echo "❌ GCP_PROJECT_ID secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.FFA_CRON_SECRET }}" ]; then
+            echo "❌ FFA_CRON_SECRET secret is not set"
+            exit 1
+          fi
+          echo "✅ Required secrets present"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Enable Cloud Scheduler API
+        run: |
+          gcloud services enable cloudscheduler.googleapis.com \
+            --project "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Resolve backend URL
+        id: backend
+        run: |
+          BACKEND_URL=$(gcloud run services describe "${{ env.SERVICE_NAME }}" \
+            --region "${{ env.BACKEND_REGION }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --format 'value(status.url)')
+          if [ -z "$BACKEND_URL" ]; then
+            echo "❌ Could not resolve Cloud Run service URL"
+            exit 1
+          fi
+          echo "Backend URL: $BACKEND_URL"
+          echo "url=$BACKEND_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update scheduler job
+        env:
+          FFA_CRON_SECRET: ${{ secrets.FFA_CRON_SECRET }}
+        run: |
+          TARGET_URI="${{ steps.backend.outputs.url }}/api/ffa/run-scheduled-sync"
+          echo "Target URI: $TARGET_URI"
+
+          if gcloud scheduler jobs describe "${{ env.JOB_NAME }}" \
+            --location="${{ env.SCHEDULER_REGION }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" >/dev/null 2>&1; then
+            echo "Updating existing scheduler job..."
+            gcloud scheduler jobs update http "${{ env.JOB_NAME }}" \
+              --location="${{ env.SCHEDULER_REGION }}" \
+              --project="${{ secrets.GCP_PROJECT_ID }}" \
+              --schedule="* * * * *" \
+              --time-zone="Asia/Kolkata" \
+              --uri="$TARGET_URI" \
+              --http-method=POST \
+              --headers="X-FFA-Cron-Secret=${FFA_CRON_SECRET}" \
+              --attempt-deadline=540s
+          else
+            echo "Creating scheduler job..."
+            gcloud scheduler jobs create http "${{ env.JOB_NAME }}" \
+              --location="${{ env.SCHEDULER_REGION }}" \
+              --project="${{ secrets.GCP_PROJECT_ID }}" \
+              --schedule="* * * * *" \
+              --time-zone="Asia/Kolkata" \
+              --uri="$TARGET_URI" \
+              --http-method=POST \
+              --headers="X-FFA-Cron-Secret=${FFA_CRON_SECRET}" \
+              --attempt-deadline=540s
+          fi
+
+      - name: Run test tick
+        env:
+          FFA_CRON_SECRET: ${{ secrets.FFA_CRON_SECRET }}
+        run: |
+          TARGET_URI="${{ steps.backend.outputs.url }}/api/ffa/run-scheduled-sync"
+          HTTP_CODE=$(curl -sS -o /tmp/scheduler-test.json -w "%{http_code}" \
+            -X POST \
+            -H "X-FFA-Cron-Secret: ${FFA_CRON_SECRET}" \
+            "$TARGET_URI")
+          echo "HTTP status: $HTTP_CODE"
+          cat /tmp/scheduler-test.json
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Scheduled sync endpoint test failed"
+            exit 1
+          fi
+          echo "✅ Scheduled sync endpoint responded OK"

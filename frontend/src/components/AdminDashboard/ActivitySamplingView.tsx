@@ -9,7 +9,7 @@ import ExcelUploadFlow from '../shared/ExcelUploadFlow';
 import { FFA_ACTIVITY_MAP_FIELDS, FFA_FARMER_MAP_FIELDS } from '../../constants/excelUploadFields';
 import InfoBanner from '../shared/InfoBanner';
 import { getTaskStatusLabel } from '../../utils/taskStatusLabels';
-import { type DateRangePreset, getPresetRange, formatPretty } from '../../utils/dateRangeUtils';
+import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST, formatDateTimeIST, formatConfigDateTimeDisplay } from '../../utils/dateRangeUtils';
 
 interface ActivitySamplingStatus {
   activity: {
@@ -664,10 +664,7 @@ const ActivitySamplingView: React.FC = () => {
     );
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
+  const formatDate = (dateString: string) => formatDateIST(dateString);
 
   const toggleExpand = (activityId: string) => {
     setExpandedActivity(expandedActivity === activityId ? null : activityId);
@@ -850,7 +847,7 @@ const ActivitySamplingView: React.FC = () => {
               <p className="text-xs text-slate-500 mt-1">
                 Last sync:{' '}
                 {syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt
-                  ? new Date(syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt!).toLocaleString()
+                  ? formatDateTimeIST(syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt!)
                   : 'Never'}
                 {syncStatus.lastSyncRun?.lastSyncRunSource && (
                   <> ({syncStatus.lastSyncRun.lastSyncRunSource === 'scheduled' ? 'scheduled' : 'manual'})</>
@@ -867,7 +864,7 @@ const ActivitySamplingView: React.FC = () => {
                     {' '}
                     • Pull limit: {effectivePullLimit} (0 = all eligible)
                     {syncStatus.adminConfig?.emsActivitiesDateFromDisplay && (
-                      <> • Activity date from: {syncStatus.adminConfig.emsActivitiesDateFromDisplay}</>
+                      <> • Activity date from: {formatConfigDateTimeDisplay(syncStatus.adminConfig.emsActivitiesDateFromDisplay)}</>
                     )}
                   </>
                 )}
@@ -1399,7 +1396,7 @@ const ActivitySamplingView: React.FC = () => {
                           {formatBatchActivityDateRange(b.minActivityDate, b.maxActivityDate)}
                         </td>
                         <td className="px-3 py-2 text-xs text-slate-600">
-                          {b.lastSyncedAt ? new Date(b.lastSyncedAt).toLocaleString() : '—'}
+                          {b.lastSyncedAt ? formatDateTimeIST(b.lastSyncedAt) : '—'}
                         </td>
                         <td className="px-3 py-2 font-mono text-xs text-slate-600 max-w-[200px] truncate" title={b.batchId}>
                           {b.batchId}
@@ -1683,11 +1680,7 @@ const ActivitySamplingView: React.FC = () => {
                             <div>
                               <p className="text-[10px] text-slate-500 font-medium mb-0.5">When</p>
                               <p className="text-xs font-bold text-slate-900">
-                                {item.activity.date ? new Date(item.activity.date).toLocaleDateString('en-IN', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric'
-                                }) : 'N/A'}
+                                {item.activity.date ? formatDateIST(item.activity.date) : 'N/A'}
                               </p>
                             </div>
                           </div>

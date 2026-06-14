@@ -28,13 +28,61 @@ export function toISODateLocal(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Format ISO date string for display (e.g. "31 Mar 2025"). */
+export const APP_TIMEZONE = 'Asia/Kolkata';
+
+function parseDateInput(value: string | Date | null | undefined): Date | null {
+  if (value == null || value === '') return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Date only in IST: dd/mm/yy */
+export function formatDateIST(value: string | Date | null | undefined): string {
+  const d = parseDateInput(value);
+  if (!d) return '';
+  return d.toLocaleDateString('en-GB', {
+    timeZone: APP_TIMEZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+  });
+}
+
+/** Date and time in IST: dd/mm/yy, HH:mm:ss IST */
+export function formatDateTimeIST(value: string | Date | null | undefined): string {
+  const d = parseDateInput(value);
+  if (!d) return '';
+  const date = formatDateIST(d);
+  const time = d.toLocaleTimeString('en-GB', {
+    timeZone: APP_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  return `${date}, ${time} IST`;
+}
+
+/** Backend FFA config dates (DD-MM-YYYY HH:mm:ss) → dd/mm/yy, HH:mm:ss IST */
+export function formatConfigDateTimeDisplay(value: string | null | undefined): string {
+  if (!value) return '';
+  const dash = value.match(/^(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
+  if (dash) {
+    const [, dd, mm, yyyy, hh = '00', min = '00', sec = '00'] = dash;
+    return `${dd}/${mm}/${yyyy.slice(-2)}, ${hh}:${min}:${sec} IST`;
+  }
+  return formatDateTimeIST(value);
+}
+
+/** Format ISO date string for display in IST (dd/mm/yy). */
 export function formatPretty(iso: string): string {
   if (!iso) return '';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    return `${m[3]}/${m[2]}/${m[1].slice(-2)}`;
+  }
   try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    return formatDateIST(iso);
   } catch {
     return iso;
   }

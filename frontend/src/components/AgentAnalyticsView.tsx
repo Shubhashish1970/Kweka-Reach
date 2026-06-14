@@ -3,7 +3,7 @@ import { RefreshCw, TrendingUp, TrendingDown, Clock, Phone, CheckCircle, XCircle
 import Button from './shared/Button';
 import { tasksAPI } from '../services/api';
 import { useToast } from '../context/ToastContext';
-import { type DateRangePreset, getPresetRange, formatPretty } from '../utils/dateRangeUtils';
+import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } from '../utils/dateRangeUtils';
 
 type Bucket = 'daily' | 'weekly' | 'monthly';
 
@@ -19,29 +19,12 @@ const fmtDuration = (secs: number) => {
 // Format period for chart display (short)
 const formatPeriod = (period: string, bucket: Bucket) => {
   if (bucket === 'daily') {
-    try {
-      const d = new Date(period);
-      return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
-    } catch {
-      return period;
-    }
+    return formatDateIST(period) || period;
   }
   return period;
 };
 
-// Format period for table display (dd-mmm-yy)
-const formatPeriodTable = (period: string) => {
-  try {
-    const d = new Date(period);
-    const day = String(d.getDate()).padStart(2, '0');
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const month = months[d.getMonth()];
-    const year = String(d.getFullYear()).slice(-2);
-    return `${day}-${month}-${year}`;
-  } catch {
-    return period;
-  }
-};
+const formatPeriodTable = (period: string) => formatDateIST(period) || period;
 
 const AgentAnalyticsView: React.FC = () => {
   const toast = useToast();

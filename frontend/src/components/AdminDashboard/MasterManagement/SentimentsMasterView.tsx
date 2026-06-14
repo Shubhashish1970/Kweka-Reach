@@ -3,6 +3,7 @@ import { Plus, Edit2, Loader2, Download, Upload, Search, CheckCircle, XCircle, S
 import { useToast } from '../../../context/ToastContext';
 import ConfirmationModal from '../../shared/ConfirmationModal';
 import * as XLSX from 'xlsx';
+import { formatDateIST } from '../../../utils/dateRangeUtils';
 
 interface Sentiment {
   _id: string;
@@ -249,7 +250,7 @@ const SentimentsMasterView: React.FC = () => {
       'Icon': s.icon,
       'Display Order': s.displayOrder,
       'Status': s.isActive ? 'Active' : 'Inactive',
-      'Created At': new Date(s.createdAt).toLocaleDateString(),
+      'Created At': formatDateIST(s.createdAt),
     }));
 
     const wb = XLSX.utils.book_new();
@@ -264,13 +265,7 @@ const SentimentsMasterView: React.FC = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
+  const formatDate = (dateStr: string) => formatDateIST(dateStr);
 
   return (
     <div className="space-y-6">

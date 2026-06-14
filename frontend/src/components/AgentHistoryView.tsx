@@ -4,7 +4,7 @@ import Button from './shared/Button';
 import StyledSelect from './shared/StyledSelect';
 import { tasksAPI } from '../services/api';
 import { useToast } from '../context/ToastContext';
-import { type DateRangePreset, getPresetRange, formatPretty } from '../utils/dateRangeUtils';
+import { type DateRangePreset, getPresetRange, formatPretty, formatDateTimeIST } from '../utils/dateRangeUtils';
 
 type HistoryStatus = '' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number';
 
@@ -51,16 +51,7 @@ const outcomeLabel = (status: string) => {
 const outboundLabel = (raw: string) => raw || '-';
 const safeArr = (v: any) => (Array.isArray(v) ? v : v ? [v] : []);
 
-const formatDateTime = (d: any) => {
-  if (!d) return '';
-  try {
-    const dt = new Date(d);
-    if (Number.isNaN(dt.getTime())) return '';
-    return dt.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-};
+const formatDateTime = (d: unknown) => formatDateTimeIST(d as string);
 
 const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promise<void> }> = ({ onOpenTask }) => {
   const toast = useToast();

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Phone, PhoneCall, MapPin, Loader2, Search, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { tasksAPI } from '../services/api';
+import { formatDateIST } from '../utils/dateRangeUtils';
 
 interface Task {
   taskId: string;
@@ -208,7 +209,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
       return `${diffDays} days ago`;
     }
     
-    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    return formatDateIST(date) || `${diffDays} days ago`;
   };
 
   const getInitials = (name: string) => {

@@ -5,7 +5,7 @@ import { Trash2, Database, Loader2, Settings2, Save } from 'lucide-react';
 import Button from '../shared/Button';
 import ConfirmationModal from '../shared/ConfirmationModal';
 import ExcelUploadFlow from '../shared/ExcelUploadFlow';
-import { HIERARCHY_MAP_FIELDS } from '../../constants/excelUploadFields';
+import { formatDateTimeIST, formatConfigDateTimeDisplay } from '../../utils/dateRangeUtils';
 
 type FfaAdminConfig = {
   dataSource: 'api' | 'excel';
@@ -393,7 +393,7 @@ const DataManagementView: React.FC = () => {
                     <p className="text-xs text-slate-500 mt-2">
                       FFA <strong>activity date</strong> cutoff sent to the NACL FFA API as{' '}
                       <code className="text-[11px]">dateFrom</code> in <strong>DD-MM-YYYY HH:mm:ss</strong> (e.g.{' '}
-                      {ffaConfigMeta?.emsActivitiesDateFromDisplay ?? '01-04-2026 00:00:00'}) for both incremental and full pull.
+                      {formatConfigDateTimeDisplay(ffaConfigMeta?.emsActivitiesDateFromDisplay) || '01/04/26, 00:00:00 IST'}) for both incremental and full pull.
                       FFA sends undelivered activities on or after this date; Kweka Reach EMS receives up to the pull limit per sync.
                       Once pulled, FFA marks them delivered and will not send again. Prod rejects{' '}
                       <code className="text-[11px]">DD/MM/YYYY HH:mm:ss</code> (slash + time).
@@ -475,7 +475,7 @@ const DataManagementView: React.FC = () => {
 
                   {ffaConfigMeta?.lastSyncRunAt && (
                     <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                      Last sync: {new Date(ffaConfigMeta.lastSyncRunAt).toLocaleString()}
+                      Last sync: {formatDateTimeIST(ffaConfigMeta.lastSyncRunAt)}
                       {ffaConfigMeta.lastSyncRunSource && (
                         <> ({ffaConfigMeta.lastSyncRunSource === 'scheduled' ? 'scheduled' : 'manual'})</>
                       )}
@@ -487,7 +487,7 @@ const DataManagementView: React.FC = () => {
 
                   {ffaConfigMeta?.nextScheduledRunAt && scheduleEnabled && ffaDataSource === 'api' && (
                     <div className="text-xs text-slate-500">
-                      Next scheduled run (approx.): {new Date(ffaConfigMeta.nextScheduledRunAt).toLocaleString()}
+                      Next scheduled run (approx.): {formatDateTimeIST(ffaConfigMeta.nextScheduledRunAt)}
                     </div>
                   )}
                 </div>

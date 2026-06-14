@@ -3,6 +3,7 @@ import { Plus, Edit2, Trash2, Loader2, Download, Search, CheckCircle, XCircle, C
 import { useToast } from '../../../context/ToastContext';
 import ConfirmationModal from '../../shared/ConfirmationModal';
 import * as XLSX from 'xlsx';
+import { formatDateIST } from '../../../utils/dateRangeUtils';
 import ExcelUploadFlow from '../../shared/ExcelUploadFlow';
 import { CROPS_MAP_FIELDS } from '../../../constants/excelUploadFields';
 
@@ -209,7 +210,7 @@ const CropsMasterView: React.FC = () => {
     const excelData = crops.map(crop => ({
       'Name': crop.name,
       'Status': crop.isActive ? 'Active' : 'Inactive',
-      'Created At': new Date(crop.createdAt).toLocaleDateString(),
+      'Created At': formatDateIST(crop.createdAt),
     }));
 
     const wb = XLSX.utils.book_new();
@@ -300,13 +301,7 @@ const CropsMasterView: React.FC = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
+  const formatDate = (dateStr: string) => formatDateIST(dateStr);
 
   return (
     <div className="space-y-6">

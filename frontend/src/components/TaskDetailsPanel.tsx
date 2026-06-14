@@ -1,5 +1,6 @@
 import React from 'react';
 import { MapPin, User, Layout, Phone, UserCircle, Clock, CheckCircle, XCircle, MessageSquare, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { formatDateIST, formatDateTimeIST } from '../utils/dateRangeUtils';
 
 interface CallLog {
   timestamp?: string;
@@ -109,20 +110,9 @@ const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({ taskData, isActive 
                 </span>
                 {(() => {
                   try {
-                    const dateObj = new Date(taskData.activity.date);
-                    const dateStr = dateObj.toLocaleDateString('en-US', { 
-                      year: 'numeric', 
-                      month: 'short', 
-                      day: 'numeric' 
-                    });
-                    const timeStr = dateObj.toLocaleTimeString('en-US', { 
-                      hour: '2-digit', 
-                      minute: '2-digit',
-                      hour12: true 
-                    });
                     return (
                       <span className="text-[9px] font-bold text-slate-400">
-                        {dateStr} • {timeStr}
+                        {formatDateTimeIST(taskData.activity.date)}
                       </span>
                     );
                   } catch {
@@ -194,13 +184,7 @@ const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({ taskData, isActive 
                         <span className="text-slate-300">•</span>
                         <Clock size={10} className="text-slate-400" />
                         <span className="text-[10px] text-slate-600">
-                          {new Date(taskData.callStartedAt).toLocaleString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true
-                          })}
+                          {formatDateTimeIST(taskData.callStartedAt)}
                         </span>
                       </>
                     )}
@@ -366,11 +350,7 @@ const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({ taskData, isActive 
                             </span>
                             {taskData.callLog.willingToPurchase === true && taskData.callLog.likelyPurchaseDate && (
                               <span className="text-[10px] text-slate-600">
-                                ({new Date(taskData.callLog.likelyPurchaseDate).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  year: 'numeric'
-                                })})
+                                ({formatDateIST(taskData.callLog.likelyPurchaseDate)})
                               </span>
                             )}
                           </div>

@@ -2,6 +2,7 @@ import React from 'react';
 import { X, ArrowLeft, CheckCircle, Phone, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import Button from './shared/Button';
+import { formatDateIST } from '../utils/dateRangeUtils';
 
 interface CallReviewModalProps {
   isOpen: boolean;
@@ -48,16 +49,7 @@ const CallReviewModal: React.FC<CallReviewModalProps> = ({
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Not specified';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
-      });
-    } catch {
-      return dateString;
-    }
+    return formatDateIST(dateString) || dateString;
   };
 
   const handleSubmit = async () => {

@@ -7,6 +7,7 @@ import Button from './shared/Button';
 import StyledSelect from './shared/StyledSelect';
 import ReassignModal from './ReassignModal';
 import { getTaskStatusLabel } from '../utils/taskStatusLabels';
+import { formatDateIST, formatDateTimeIST } from '../utils/dateRangeUtils';
 
 interface Task {
   _id: string;
@@ -120,22 +121,9 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, onBack, onTaskUpdated }) 
     );
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
+  const formatDate = (dateString: string) => formatDateIST(dateString);
 
-  const formatDateTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
+  const formatDateTime = (dateString: string) => formatDateTimeIST(dateString);
 
   const canReassign = user && (currentRole === 'team_lead' || currentRole === 'mis_admin');
   const canChangeStatus = user && (currentRole === 'team_lead' || currentRole === 'mis_admin');

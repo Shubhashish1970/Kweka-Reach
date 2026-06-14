@@ -3,6 +3,7 @@ import { Plus, Edit2, Loader2, Download, Upload, Search, CheckCircle, XCircle, G
 import { useToast } from '../../../context/ToastContext';
 import ConfirmationModal from '../../shared/ConfirmationModal';
 import * as XLSX from 'xlsx';
+import { formatDateIST } from '../../../utils/dateRangeUtils';
 
 interface NonPurchaseReason {
   _id: string;
@@ -201,7 +202,7 @@ const NonPurchaseReasonsMasterView: React.FC = () => {
       'Name': reason.name,
       'Display Order': reason.displayOrder,
       'Status': reason.isActive ? 'Active' : 'Inactive',
-      'Created At': new Date(reason.createdAt).toLocaleDateString(),
+      'Created At': formatDateIST(reason.createdAt),
     }));
 
     const wb = XLSX.utils.book_new();
@@ -216,13 +217,7 @@ const NonPurchaseReasonsMasterView: React.FC = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
+  const formatDate = (dateStr: string) => formatDateIST(dateStr);
 
   return (
     <div className="space-y-6">

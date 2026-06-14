@@ -6,6 +6,7 @@ import ConfirmationModal from '../../shared/ConfirmationModal';
 import * as XLSX from 'xlsx';
 import ExcelUploadFlow from '../../shared/ExcelUploadFlow';
 import { STATE_LANGUAGE_MAP_FIELDS } from '../../../constants/excelUploadFields';
+import { formatDateIST } from '../../../utils/dateRangeUtils';
 
 interface StateLanguageMapping {
   _id: string;
@@ -274,7 +275,7 @@ const StateLanguageMappingView: React.FC = () => {
       'Primary Language': m.primaryLanguage,
       'Secondary Languages': (m.secondaryLanguages || []).join(', '),
       'Status': m.isActive ? 'Active' : 'Inactive',
-      'Created At': new Date(m.createdAt).toLocaleDateString(),
+      'Created At': formatDateIST(m.createdAt),
     }));
 
     const wb = XLSX.utils.book_new();
@@ -367,13 +368,7 @@ const StateLanguageMappingView: React.FC = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
+  const formatDate = (dateStr: string) => formatDateIST(dateStr);
 
   return (
     <div className="space-y-6">

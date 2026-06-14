@@ -9,7 +9,7 @@ import TaskDetail from './TaskDetail';
 import ReassignModal from './ReassignModal';
 import InfoBanner from './shared/InfoBanner';
 import { getTaskStatusLabel, TaskStatus } from '../utils/taskStatusLabels';
-import { type DateRangePreset, getPresetRange, formatPretty } from '../utils/dateRangeUtils';
+import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } from '../utils/dateRangeUtils';
 
 interface Task {
   _id: string;
@@ -344,10 +344,7 @@ const TaskList: React.FC = () => {
     );
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
+  const formatDate = (dateString: string) => formatDateIST(dateString);
 
   const toggleExpand = (taskId: string) => {
     setExpandedTaskIds((prev) => {

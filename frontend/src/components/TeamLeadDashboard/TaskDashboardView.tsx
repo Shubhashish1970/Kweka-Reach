@@ -6,7 +6,7 @@ import Modal from '../shared/Modal';
 import ConfirmationModal from '../shared/ConfirmationModal';
 import Button from '../shared/Button';
 import StyledSelect from '../shared/StyledSelect';
-import { type DateRangePreset, getPresetRange, formatPretty } from '../../utils/dateRangeUtils';
+import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } from '../../utils/dateRangeUtils';
 import { getTaskStatusLabel, TASK_STATUS_LABELS } from '../../utils/taskStatusLabels';
 import TaskQueueTable from './TaskQueueTable';
 
@@ -574,10 +574,7 @@ const TaskDashboardView: React.FC = () => {
     );
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
+  const formatDate = (dateString: string) => formatDateIST(dateString);
 
   // Preselect the first language with unassigned tasks once data is loaded
   useEffect(() => {

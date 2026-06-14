@@ -5,7 +5,7 @@ import { useToast } from '../../context/ToastContext';
 import Modal from '../shared/Modal';
 import StyledSelect from '../shared/StyledSelect';
 import InfoBanner from '../shared/InfoBanner';
-import { type DateRangePreset, getPresetRange, formatPretty } from '../../utils/dateRangeUtils';
+import { type DateRangePreset, getPresetRange, formatPretty, formatDateTimeIST } from '../../utils/dateRangeUtils';
 
 type LifecycleStatus = 'active' | 'sampled' | 'inactive' | 'not_eligible';
 
@@ -975,7 +975,7 @@ const SamplingControlView: React.FC = () => {
                 <strong>Last auto-run:</strong>{' '}
                 {config?.lastAutoRunAt ? (
                   <>
-                    {new Date(config.lastAutoRunAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                    {formatDateTimeIST(config.lastAutoRunAt)}
                     {typeof config.lastAutoRunMatched === 'number' && (
                       <> • Ran <strong>{config.lastAutoRunMatched}</strong> activities</>
                     )}

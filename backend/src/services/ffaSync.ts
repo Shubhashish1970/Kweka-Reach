@@ -15,7 +15,7 @@ import {
   isEmsFfaApiEnabled,
   resolveActivitiesDateFrom,
 } from './emsFfaClient.js';
-import { resolveEmsActivitiesDateFrom } from './ffaSyncConfigService.js';
+import { resolveEmsActivitiesDateFrom, recordLastSyncRunResult } from './ffaSyncConfigService.js';
 
 interface FFAActivity {
   activityId: string;
@@ -358,6 +358,22 @@ export type FfaSyncOptions = {
   activitiesLimit?: number | null;
   /** When true, skip the manual debounce guard (used by scheduled/cron sync). */
   skipMinInterval?: boolean;
+  /** When set, persist last-sync summary for admin UI (manual vs scheduled). */
+  syncSource?: 'manual' | 'scheduled';
+};
+
+const maybeRecordLastSyncRun = async (
+  result: {
+    activitiesSynced: number;
+    farmersSynced: number;
+    skipped?: boolean;
+    skipReason?: string;
+    infoMessage?: string;
+  },
+  syncSource?: 'manual' | 'scheduled'
+) => {
+  if (!syncSource) return;
+  await recordLastSyncRunResult(result, syncSource);
 };
 
 export const syncFFAData = async (
@@ -463,6 +479,14 @@ export const syncFFAData = async (
         infoMessage: FFA_SYNC_NO_ACTIVITIES_MESSAGE,
       };
       lastSyncTime = Date.now();
+      await maybeRecordLastSyncRun(
+        {
+          activitiesSynced: 0,
+          farmersSynced: 0,
+          infoMessage: FFA_SYNC_NO_ACTIVITIES_MESSAGE,
+        },
+        options?.syncSource
+      );
       return {
         activitiesSynced: 0,
         farmersSynced: 0,
@@ -503,6 +527,15 @@ export const syncFFAData = async (
           skipReason: `All ${ffaActivities.length} activities were already synced. No new data to process.`,
         };
         lastSyncTime = Date.now();
+        await maybeRecordLastSyncRun(
+          {
+            activitiesSynced: 0,
+            farmersSynced: 0,
+            skipped: true,
+            skipReason: `All ${ffaActivities.length} activities were already synced. No new data to process.`,
+          },
+          options?.syncSource
+        );
         return {
           activitiesSynced: 0,
           farmersSynced: 0,
@@ -569,6 +602,7 @@ export const syncFFAData = async (
     syncProgress.lastResult = result;
     isSyncing = false;
     lastSyncTime = Date.now();
+    await maybeRecordLastSyncRun(result, options?.syncSource);
 
     return result;
   } catch (error) {
@@ -594,12 +628,19 @@ export const syncFFAData = async (
  */
 export const getSyncStatus = async () => {
   try {
-    const lastActivity = await Activity.findOne().sort({ syncedAt: -1 });
-    const totalActivities = await Activity.countDocuments();
-    const totalFarmers = await Farmer.countDocuments();
+    const { getOrCreateFfaSyncConfig, resolveUnifiedLastSyncRun } = await import(
+      './ffaSyncConfigService.js'
+    );
+    const config = await getOrCreateFfaSyncConfig();
+    const [lastSyncRun, totalActivities, totalFarmers] = await Promise.all([
+      resolveUnifiedLastSyncRun(config),
+      Activity.countDocuments(),
+      Farmer.countDocuments(),
+    ]);
 
     return {
-      lastSyncAt: lastActivity?.syncedAt || null,
+      lastSyncAt: lastSyncRun.lastSyncRunAt,
+      lastSyncRun,
       totalActivities,
       totalFarmers,
       emsPullLimit: getEmsPullLimitConfig(),

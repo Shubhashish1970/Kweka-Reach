@@ -8,7 +8,17 @@ import {
   formatDateFromParam,
   formatEmsActivitiesDateFromParam,
 } from './emsFfaClient.js';
+import { getLatestSyncBatchSummary } from './dataBatchService.js';
 import logger from '../config/logger.js';
+
+export type LastSyncRunSummary = {
+  lastSyncRunAt: string | null;
+  lastSyncRunActivitiesSynced: number | null;
+  lastSyncRunFarmersSynced: number | null;
+  lastSyncRunSkipped: boolean;
+  lastSyncRunMessage: string | null;
+  lastSyncRunSource: 'manual' | 'scheduled' | null;
+};
 
 const DEFAULT_SEED = {
   key: 'default' as const,
@@ -87,7 +97,38 @@ const toIsoDateOnly = (d: Date | null | undefined): string | null => {
   return x.toISOString().slice(0, 10);
 };
 
-export const formatFfaSyncConfigResponse = (config: IFfaSyncConfig | Record<string, unknown> | null) => {
+export const resolveUnifiedLastSyncRun = async (
+  config: IFfaSyncConfig | Record<string, unknown> | null
+): Promise<LastSyncRunSummary> => {
+  const c = config as IFfaSyncConfig | null;
+  const configAt = c?.lastScheduledRunAt ? new Date(c.lastScheduledRunAt).getTime() : 0;
+  const batch = await getLatestSyncBatchSummary();
+  const batchAt = batch?.lastSyncedAt ? new Date(batch.lastSyncedAt).getTime() : 0;
+
+  if (batch && batchAt >= configAt) {
+    return {
+      lastSyncRunAt: batch.lastSyncedAt,
+      lastSyncRunActivitiesSynced: batch.activitiesSynced,
+      lastSyncRunFarmersSynced: batch.farmersSynced,
+      lastSyncRunSkipped: false,
+      lastSyncRunMessage: `${batch.activitiesSynced} activities, ${batch.farmersSynced} farmers`,
+      lastSyncRunSource: c?.lastSyncRunSource ?? 'scheduled',
+    };
+  }
+
+  return {
+    lastSyncRunAt: c?.lastScheduledRunAt ? new Date(c.lastScheduledRunAt).toISOString() : null,
+    lastSyncRunActivitiesSynced: c?.lastScheduledRunActivitiesSynced ?? null,
+    lastSyncRunFarmersSynced: c?.lastScheduledRunFarmersSynced ?? null,
+    lastSyncRunSkipped: c?.lastScheduledRunSkipped ?? false,
+    lastSyncRunMessage: c?.lastScheduledRunMessage ?? null,
+    lastSyncRunSource: c?.lastSyncRunSource ?? null,
+  };
+};
+
+export const formatFfaSyncConfigResponse = async (
+  config: IFfaSyncConfig | Record<string, unknown> | null
+) => {
   const c = config as IFfaSyncConfig | null;
   const emsPullLimit = getEmsPullLimitConfig();
   const serverDefaultPullLimit = emsPullLimit.globalLimit ?? emsPullLimit.fullLimit ?? 0;
@@ -98,6 +139,15 @@ export const formatFfaSyncConfigResponse = (config: IFfaSyncConfig | Record<stri
     : parseFfaEmsDefaultDateFrom();
   const scheduledSyncActive =
     c?.scheduleEnabled === true && c?.dataSource === 'api' && c?.scheduleMode !== 'off';
+  const lastSyncRun = await resolveUnifiedLastSyncRun(c);
+
+  const configForNextRun =
+    c && lastSyncRun.lastSyncRunAt
+      ? {
+          ...c,
+          lastScheduledRunAt: new Date(lastSyncRun.lastSyncRunAt),
+        }
+      : c;
 
   return {
     dataSource: c?.dataSource ?? 'api',
@@ -113,14 +163,17 @@ export const formatFfaSyncConfigResponse = (config: IFfaSyncConfig | Record<stri
     scheduleDailyHour: c?.scheduleDailyHour ?? 6,
     scheduleDailyMinute: c?.scheduleDailyMinute ?? 0,
     scheduleTimezone: c?.scheduleTimezone ?? 'Asia/Kolkata',
-    lastScheduledRunAt: c?.lastScheduledRunAt ?? null,
-    lastScheduledRunActivitiesSynced: c?.lastScheduledRunActivitiesSynced ?? null,
-    lastScheduledRunFarmersSynced: c?.lastScheduledRunFarmersSynced ?? null,
-    lastScheduledRunSkipped: c?.lastScheduledRunSkipped ?? false,
-    lastScheduledRunMessage: c?.lastScheduledRunMessage ?? null,
+    ...lastSyncRun,
+    // Legacy aliases (same values as lastSyncRun*)
+    lastScheduledRunAt: lastSyncRun.lastSyncRunAt,
+    lastScheduledRunActivitiesSynced: lastSyncRun.lastSyncRunActivitiesSynced,
+    lastScheduledRunFarmersSynced: lastSyncRun.lastSyncRunFarmersSynced,
+    lastScheduledRunSkipped: lastSyncRun.lastSyncRunSkipped,
+    lastScheduledRunMessage: lastSyncRun.lastSyncRunMessage,
     scheduledSyncActive,
     serverDefaultPullLimit,
-    nextScheduledRunAt: c && scheduledSyncActive ? computeNextScheduledRunAt(c) : null,
+    nextScheduledRunAt:
+      configForNextRun && scheduledSyncActive ? computeNextScheduledRunAt(configForNextRun) : null,
     updatedAt: c?.updatedAt ?? null,
   };
 };
@@ -270,14 +323,15 @@ export type ScheduledFfaSyncRunResult = {
   infoMessage?: string;
 };
 
-export const recordScheduledRunResult = async (
+export const recordLastSyncRunResult = async (
   result: {
     activitiesSynced: number;
     farmersSynced: number;
     skipped?: boolean;
     skipReason?: string;
     infoMessage?: string;
-  }
+  },
+  source: 'manual' | 'scheduled'
 ) => {
   const message =
     result.skipReason ||
@@ -293,11 +347,15 @@ export const recordScheduledRunResult = async (
         lastScheduledRunFarmersSynced: result.farmersSynced,
         lastScheduledRunSkipped: result.skipped === true,
         lastScheduledRunMessage: message,
+        lastSyncRunSource: source,
       },
     },
     { upsert: true }
   );
 };
+
+/** @deprecated Use recordLastSyncRunResult */
+export const recordScheduledRunResult = recordLastSyncRunResult;
 
 export const runScheduledFfaSyncIfDue = async (): Promise<ScheduledFfaSyncRunResult> => {
   const config = await getOrCreateFfaSyncConfig();
@@ -312,7 +370,11 @@ export const runScheduledFfaSyncIfDue = async (): Promise<ScheduledFfaSyncRunRes
         ? config.activitiesPullLimit
         : undefined;
 
-    const result = await syncFFAData(false, { activitiesLimit, skipMinInterval: true });
+    const result = await syncFFAData(false, {
+      activitiesLimit,
+      skipMinInterval: true,
+      syncSource: 'scheduled',
+    });
 
     if (result.skipped && result.skipReason === SYNC_IN_PROGRESS_REASON) {
       logger.info('[FFA CRON] Scheduled sync deferred — another sync is in progress');
@@ -323,8 +385,6 @@ export const runScheduledFfaSyncIfDue = async (): Promise<ScheduledFfaSyncRunRes
         skipReason: result.skipReason,
       };
     }
-
-    await recordScheduledRunResult(result);
 
     logger.info(
       `[FFA CRON] Scheduled sync finished: ${result.activitiesSynced} activities, ${result.farmersSynced} farmers` +
@@ -343,12 +403,15 @@ export const runScheduledFfaSyncIfDue = async (): Promise<ScheduledFfaSyncRunRes
   } catch (error) {
     logger.error('[FFA CRON] Scheduled FFA sync failed:', error);
     const skipReason = error instanceof Error ? error.message : String(error);
-    await recordScheduledRunResult({
-      activitiesSynced: 0,
-      farmersSynced: 0,
-      skipped: true,
-      skipReason,
-    });
+    await recordLastSyncRunResult(
+      {
+        activitiesSynced: 0,
+        farmersSynced: 0,
+        skipped: true,
+        skipReason,
+      },
+      'scheduled'
+    );
     return {
       ran: true,
       reason: 'failed',

@@ -27,7 +27,13 @@ type FfaAdminConfig = {
   lastScheduledRunFarmersSynced: number | null;
   lastScheduledRunSkipped: boolean;
   lastScheduledRunMessage: string | null;
+  lastSyncRunSource: 'manual' | 'scheduled' | null;
   nextScheduledRunAt: string | null;
+  lastSyncRunAt: string | null;
+  lastSyncRunActivitiesSynced: number | null;
+  lastSyncRunFarmersSynced: number | null;
+  lastSyncRunSkipped: boolean;
+  lastSyncRunMessage: string | null;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -122,6 +128,12 @@ const DataManagementView: React.FC = () => {
     | 'lastScheduledRunFarmersSynced'
     | 'lastScheduledRunSkipped'
     | 'lastScheduledRunMessage'
+    | 'lastSyncRunAt'
+    | 'lastSyncRunActivitiesSynced'
+    | 'lastSyncRunFarmersSynced'
+    | 'lastSyncRunSkipped'
+    | 'lastSyncRunMessage'
+    | 'lastSyncRunSource'
     | 'nextScheduledRunAt'
     | 'scheduleTimezone'
   > | null>(null);
@@ -148,6 +160,12 @@ const DataManagementView: React.FC = () => {
       lastScheduledRunFarmersSynced: cfg.lastScheduledRunFarmersSynced,
       lastScheduledRunSkipped: cfg.lastScheduledRunSkipped,
       lastScheduledRunMessage: cfg.lastScheduledRunMessage,
+      lastSyncRunAt: cfg.lastSyncRunAt ?? cfg.lastScheduledRunAt,
+      lastSyncRunActivitiesSynced: cfg.lastSyncRunActivitiesSynced ?? cfg.lastScheduledRunActivitiesSynced,
+      lastSyncRunFarmersSynced: cfg.lastSyncRunFarmersSynced ?? cfg.lastScheduledRunFarmersSynced,
+      lastSyncRunSkipped: cfg.lastSyncRunSkipped ?? cfg.lastScheduledRunSkipped,
+      lastSyncRunMessage: cfg.lastSyncRunMessage ?? cfg.lastScheduledRunMessage,
+      lastSyncRunSource: cfg.lastSyncRunSource ?? null,
       nextScheduledRunAt: cfg.nextScheduledRunAt,
       scheduleTimezone: cfg.scheduleTimezone,
     });
@@ -455,12 +473,15 @@ const DataManagementView: React.FC = () => {
                     </div>
                   )}
 
-                  {ffaConfigMeta?.lastScheduledRunAt && (
+                  {ffaConfigMeta?.lastSyncRunAt && (
                     <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                      Last scheduled run: {new Date(ffaConfigMeta.lastScheduledRunAt).toLocaleString()}
-                      {ffaConfigMeta.lastScheduledRunSkipped
-                        ? ` • Skipped: ${ffaConfigMeta.lastScheduledRunMessage ?? '—'}`
-                        : ` • ${ffaConfigMeta.lastScheduledRunActivitiesSynced ?? 0} activities, ${ffaConfigMeta.lastScheduledRunFarmersSynced ?? 0} farmers`}
+                      Last sync: {new Date(ffaConfigMeta.lastSyncRunAt).toLocaleString()}
+                      {ffaConfigMeta.lastSyncRunSource && (
+                        <> ({ffaConfigMeta.lastSyncRunSource === 'scheduled' ? 'scheduled' : 'manual'})</>
+                      )}
+                      {ffaConfigMeta.lastSyncRunSkipped
+                        ? ` • Skipped: ${ffaConfigMeta.lastSyncRunMessage ?? '—'}`
+                        : ` • ${ffaConfigMeta.lastSyncRunActivitiesSynced ?? 0} activities, ${ffaConfigMeta.lastSyncRunFarmersSynced ?? 0} farmers`}
                     </div>
                   )}
 

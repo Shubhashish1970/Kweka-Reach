@@ -93,6 +93,31 @@ export async function listDataBatches(limit = 25): Promise<DataBatchSummary[]> {
   return out;
 }
 
+/** Latest API sync batch — used to reconcile last-sync display across admin pages. */
+export async function getLatestSyncBatchSummary(): Promise<{
+  lastSyncedAt: string;
+  activitiesSynced: number;
+  farmersSynced: number;
+  batchId: string;
+} | null> {
+  const batches = await listDataBatches(10);
+  const latest = batches.find((b) => b.source === 'sync' && b.lastSyncedAt);
+  if (!latest?.lastSyncedAt) return null;
+
+  const acts = await Activity.find({ dataBatchId: latest.batchId }).select('farmerIds').lean();
+  let farmersSynced = 0;
+  for (const a of acts) {
+    farmersSynced += a.farmerIds?.length ?? 0;
+  }
+
+  return {
+    lastSyncedAt: latest.lastSyncedAt,
+    activitiesSynced: latest.activityCount,
+    farmersSynced,
+    batchId: latest.batchId,
+  };
+}
+
 export async function deleteDataBatch(batchId: string): Promise<{
   deletedActivities: number;
   deletedTasks: number;

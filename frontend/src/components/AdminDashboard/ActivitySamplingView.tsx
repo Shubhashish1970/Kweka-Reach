@@ -135,6 +135,14 @@ const ActivitySamplingView: React.FC = () => {
   const requestedSyncTypeRef = useRef<'full' | 'incremental' | null>(null);
   const [syncStatus, setSyncStatus] = useState<{
     lastSyncAt: string | null;
+    lastSyncRun?: {
+      lastSyncRunAt: string | null;
+      lastSyncRunActivitiesSynced: number | null;
+      lastSyncRunFarmersSynced: number | null;
+      lastSyncRunSkipped: boolean;
+      lastSyncRunMessage: string | null;
+      lastSyncRunSource: 'manual' | 'scheduled' | null;
+    };
     totalActivities: number;
     totalFarmers: number;
     emsPullLimit?: {
@@ -840,8 +848,18 @@ const ActivitySamplingView: React.FC = () => {
             <p className="text-sm text-slate-600">Monitor FFA activities and their status</p>
             {syncStatus && (
               <p className="text-xs text-slate-500 mt-1">
-                Last sync: {syncStatus.lastSyncAt ? new Date(syncStatus.lastSyncAt).toLocaleString() : 'Never'} • 
-                {syncStatus.totalActivities} activities • {syncStatus.totalFarmers} farmers
+                Last sync:{' '}
+                {syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt
+                  ? new Date(syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt!).toLocaleString()
+                  : 'Never'}
+                {syncStatus.lastSyncRun?.lastSyncRunSource && (
+                  <> ({syncStatus.lastSyncRun.lastSyncRunSource === 'scheduled' ? 'scheduled' : 'manual'})</>
+                )}
+                {' • '}
+                {syncStatus.lastSyncRun?.lastSyncRunActivitiesSynced ?? 0} activities,{' '}
+                {syncStatus.lastSyncRun?.lastSyncRunFarmersSynced ?? 0} farmers (last run)
+                {' • '}
+                Total: {syncStatus.totalActivities} activities, {syncStatus.totalFarmers} farmers
                 {' • '}
                 Data source: {dataSource === 'api' ? 'API' : 'Excel'}
                 {dataSource === 'api' && (

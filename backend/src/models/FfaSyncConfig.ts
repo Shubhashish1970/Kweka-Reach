@@ -25,6 +25,8 @@ export interface IFfaSyncConfig extends Document {
   lastScheduledRunFarmersSynced: number | null;
   lastScheduledRunSkipped: boolean;
   lastScheduledRunMessage: string | null;
+  /** Whether the last recorded sync run was manual or scheduled */
+  lastSyncRunSource: 'manual' | 'scheduled' | null;
   updatedByUserId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -89,6 +91,11 @@ const FfaSyncConfigSchema = new Schema<IFfaSyncConfig>(
     lastScheduledRunFarmersSynced: { type: Number, default: null },
     lastScheduledRunSkipped: { type: Boolean, default: false },
     lastScheduledRunMessage: { type: String, default: null },
+    lastSyncRunSource: {
+      type: String,
+      enum: ['manual', 'scheduled', null],
+      default: null,
+    },
     updatedByUserId: {
       type: Schema.Types.ObjectId,
       ref: 'User',

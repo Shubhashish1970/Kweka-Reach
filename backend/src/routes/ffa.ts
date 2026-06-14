@@ -254,7 +254,7 @@ router.post(
       });
 
       beginSyncProgress(fullSync ? 'full' : 'incremental');
-      syncFFAData(fullSync, { activitiesLimit }).catch((err) => {
+      syncFFAData(fullSync, { activitiesLimit, syncSource: 'manual' }).catch((err) => {
         logger.error('[FFA SYNC] Background sync error:', err);
       });
 
@@ -540,7 +540,7 @@ router.get(
       const config = await getOrCreateFfaSyncConfig();
       res.json({
         success: true,
-        data: { config: formatFfaSyncConfigResponse(config) },
+        data: { config: await formatFfaSyncConfigResponse(config) },
       });
     } catch (error) {
       next(error);
@@ -605,7 +605,7 @@ router.put(
       res.json({
         success: true,
         message: 'FFA settings updated',
-        data: { config: formatFfaSyncConfigResponse(config) },
+        data: { config: await formatFfaSyncConfigResponse(config) },
       });
     } catch (error) {
       next(error);
@@ -622,7 +622,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const status = await getSyncStatus();
-      const adminConfig = formatFfaSyncConfigResponse(await getOrCreateFfaSyncConfig());
+      const adminConfig = await formatFfaSyncConfigResponse(await getOrCreateFfaSyncConfig());
 
       res.json({
         success: true,

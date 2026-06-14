@@ -41,10 +41,11 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Enable Cloud Scheduler API
+      - name: Enable Cloud Scheduler API (best effort)
         run: |
           gcloud services enable cloudscheduler.googleapis.com \
-            --project "${{ secrets.GCP_PROJECT_ID }}"
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            || echo "⚠️ Could not enable Cloud Scheduler API (may already be enabled or need owner to enable once)"
 
       - name: Resolve backend URL
         id: backend

@@ -76,6 +76,10 @@ type ActivityTableColumnKey =
   | 'inProgress'
   | 'completed';
 
+/** Background poll: idle checks status/batches/stats; active also refreshes the activity grid. */
+const BACKGROUND_POLL_IDLE_MS = 60_000;
+const BACKGROUND_POLL_ACTIVE_MS = 8_000;
+
 const DEFAULT_ACTIVITY_TABLE_WIDTHS: Record<ActivityTableColumnKey, number> = {
   expand: 56,
   type: 180,
@@ -133,6 +137,11 @@ const ActivitySamplingView: React.FC = () => {
   const syncStartedAtRef = useRef<number | null>(null);
   const syncPollAttemptsRef = useRef(0);
   const requestedSyncTypeRef = useRef<'full' | 'incremental' | null>(null);
+  const backgroundPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastKnownSyncRunAtRef = useRef<string | null>(null);
+  const paginationPageRef = useRef(1);
+  const wasBackgroundSyncRunningRef = useRef(false);
+  const isManualSyncingRef = useRef(false);
   const [syncStatus, setSyncStatus] = useState<{
     lastSyncAt: string | null;
     lastSyncRun?: {
@@ -308,11 +317,17 @@ const ActivitySamplingView: React.FC = () => {
     `${filters.activityType}|${filters.territory}|${filters.zone}|${filters.bu}|${filters.samplingStatus}|${filters.dateFrom}|${filters.dateTo}`;
   const fetchFilterFingerprintRef = useRef<string>('');
 
-  const fetchActivities = async (page: number = 1, forceRefresh = false) => {
+  const fetchActivities = async (
+    page: number = 1,
+    forceRefresh = false,
+    opts?: { silent?: boolean }
+  ) => {
     const fingerprint = fetchFilterFingerprint();
     fetchFilterFingerprintRef.current = fingerprint;
-    setIsLoading(true);
-    setError(null);
+    if (!opts?.silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       const response = await adminAPI.getActivitiesWithSampling({
         ...filters,
@@ -336,18 +351,20 @@ const ActivitySamplingView: React.FC = () => {
       }
     } catch (err: any) {
       if (fetchFilterFingerprintRef.current !== fingerprint) return;
-      const errorMsg = err.message || 'Failed to load activities';
-      setError(errorMsg);
-      showError(errorMsg);
+      if (!opts?.silent) {
+        const errorMsg = err.message || 'Failed to load activities';
+        setError(errorMsg);
+        showError(errorMsg);
+      }
     } finally {
-      setIsLoading(false);
+      if (!opts?.silent) setIsLoading(false);
     }
   };
 
-  const fetchStats = async () => {
+  const fetchStats = async (opts?: { silent?: boolean }) => {
     const fingerprint = fetchFilterFingerprint();
     fetchFilterFingerprintRef.current = fingerprint;
-    setIsStatsLoading(true);
+    if (!opts?.silent) setIsStatsLoading(true);
     try {
       const res: any = await adminAPI.getActivitiesSamplingStats({
         ...filters,
@@ -363,7 +380,7 @@ const ActivitySamplingView: React.FC = () => {
       if (fetchFilterFingerprintRef.current !== fingerprint) return;
       console.error('Failed to fetch activity sampling stats:', err);
     } finally {
-      setIsStatsLoading(false);
+      if (!opts?.silent) setIsStatsLoading(false);
     }
   };
 
@@ -421,6 +438,21 @@ const ActivitySamplingView: React.FC = () => {
   }, [tableColumnWidths]);
 
   useEffect(() => {
+    paginationPageRef.current = pagination.page;
+  }, [pagination.page]);
+
+  useEffect(() => {
+    isManualSyncingRef.current = isIncrementalSyncing || isFullSyncing;
+  }, [isIncrementalSyncing, isFullSyncing]);
+
+  useEffect(() => {
+    const at = syncStatus?.lastSyncRun?.lastSyncRunAt || syncStatus?.lastSyncAt || null;
+    if (at && !lastKnownSyncRunAtRef.current) {
+      lastKnownSyncRunAtRef.current = at;
+    }
+  }, [syncStatus?.lastSyncRun?.lastSyncRunAt, syncStatus?.lastSyncAt]);
+
+  useEffect(() => {
     return () => {
       if (syncProgressPollRef.current) {
         clearInterval(syncProgressPollRef.current);
@@ -429,20 +461,23 @@ const ActivitySamplingView: React.FC = () => {
     };
   }, []);
 
-  const fetchSyncStatus = async () => {
+  const fetchSyncStatus = async (opts?: { silent?: boolean }) => {
     try {
       const response = await ffaAPI.getFFASyncStatus() as any;
       if (response.success && response.data) {
         setSyncStatus(response.data);
+        return response.data as NonNullable<typeof syncStatus>;
       }
     } catch (err) {
-      // Silently fail - sync status is not critical
-      console.error('Failed to fetch sync status:', err);
+      if (!opts?.silent) {
+        console.error('Failed to fetch sync status:', err);
+      }
     }
+    return null;
   };
 
-  const fetchDataBatches = async () => {
-    setDataBatchesLoading(true);
+  const fetchDataBatches = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setDataBatchesLoading(true);
     try {
       const res = (await ffaAPI.getDataBatches()) as any;
       if (res?.success && Array.isArray(res?.data?.batches)) {
@@ -451,9 +486,121 @@ const ActivitySamplingView: React.FC = () => {
     } catch (err) {
       console.error('Failed to fetch data batches:', err);
     } finally {
-      setDataBatchesLoading(false);
+      if (!opts?.silent) setDataBatchesLoading(false);
     }
   };
+
+  /** Option B: idle poll (status/batches/stats); active poll (+ grid) while sync runs or after a new sync completes. */
+  useEffect(() => {
+    const scheduledActive =
+      syncStatus?.adminConfig?.dataSource === 'api' &&
+      (syncStatus?.adminConfig?.scheduledSyncActive === true ||
+        syncStatus?.adminConfig?.scheduleEnabled === true);
+
+    if (!scheduledActive) return;
+
+    let cancelled = false;
+
+    const clearBackgroundPoll = () => {
+      if (backgroundPollTimeoutRef.current) {
+        clearTimeout(backgroundPollTimeoutRef.current);
+        backgroundPollTimeoutRef.current = null;
+      }
+    };
+
+    const scheduleNext = (delayMs: number) => {
+      clearBackgroundPoll();
+      if (cancelled) return;
+      backgroundPollTimeoutRef.current = setTimeout(() => {
+        void runBackgroundPoll();
+      }, delayMs);
+    };
+
+    const runBackgroundPoll = async () => {
+      if (cancelled) return;
+
+      if (document.hidden) {
+        scheduleNext(BACKGROUND_POLL_IDLE_MS);
+        return;
+      }
+
+      if (syncProgressPollRef.current || isManualSyncingRef.current) {
+        scheduleNext(BACKGROUND_POLL_ACTIVE_MS);
+        return;
+      }
+
+      let nextInterval = BACKGROUND_POLL_IDLE_MS;
+
+      try {
+        let syncRunning = false;
+        try {
+          const pr = (await ffaAPI.getFFASyncProgress()) as any;
+          const progressData = pr?.data ?? pr;
+          syncRunning = Boolean(progressData?.running);
+        } catch {
+          // Ignore — status/batch refresh still useful
+        }
+
+        const statusData = await fetchSyncStatus({ silent: true });
+        const lastSyncAt =
+          statusData?.lastSyncRun?.lastSyncRunAt || statusData?.lastSyncAt || null;
+
+        let syncRunChanged = false;
+        if (lastSyncAt) {
+          if (
+            lastKnownSyncRunAtRef.current &&
+            lastSyncAt !== lastKnownSyncRunAtRef.current
+          ) {
+            syncRunChanged = true;
+          }
+          lastKnownSyncRunAtRef.current = lastSyncAt;
+        }
+
+        const syncJustFinished = wasBackgroundSyncRunningRef.current && !syncRunning;
+        wasBackgroundSyncRunningRef.current = syncRunning;
+
+        const includeGrid = syncRunning || syncRunChanged || syncJustFinished;
+
+        if (includeGrid) {
+          nextInterval = BACKGROUND_POLL_ACTIVE_MS;
+          await Promise.all([
+            fetchDataBatches({ silent: true }),
+            fetchStats({ silent: true }),
+            fetchActivities(paginationPageRef.current, false, { silent: true }),
+          ]);
+        } else {
+          await Promise.all([
+            fetchDataBatches({ silent: true }),
+            fetchStats({ silent: true }),
+          ]);
+        }
+      } catch (err) {
+        console.error('Background sync poll error:', err);
+      }
+
+      scheduleNext(nextInterval);
+    };
+
+    const onVisibilityChange = () => {
+      if (!document.hidden && !cancelled) {
+        clearBackgroundPoll();
+        void runBackgroundPoll();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    scheduleNext(BACKGROUND_POLL_IDLE_MS);
+
+    return () => {
+      cancelled = true;
+      clearBackgroundPoll();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [
+    syncStatus?.adminConfig?.dataSource,
+    syncStatus?.adminConfig?.scheduledSyncActive,
+    syncStatus?.adminConfig?.scheduleEnabled,
+  ]);
 
   const handleRefresh = async () => {
     await Promise.all([
@@ -516,7 +663,10 @@ const ActivitySamplingView: React.FC = () => {
         await fetchActivities(pagination.page);
       }
       await fetchStats();
-      await fetchSyncStatus();
+      const statusAfterSync = await fetchSyncStatus();
+      const syncAt =
+        statusAfterSync?.lastSyncRun?.lastSyncRunAt || statusAfterSync?.lastSyncAt || null;
+      if (syncAt) lastKnownSyncRunAtRef.current = syncAt;
       await fetchDataBatches();
       if (fullSync) setIsFullSyncing(false);
       else setIsIncrementalSyncing(false);

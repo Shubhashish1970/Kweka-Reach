@@ -143,13 +143,21 @@ export const formatFfaSyncConfigResponse = async (
     c?.scheduleEnabled === true && c?.dataSource === 'api' && c?.scheduleMode !== 'off';
   const lastSyncRun = options?.lastSyncRun ?? (await resolveUnifiedLastSyncRun(c));
 
-  const configForNextRun =
-    c && lastSyncRun.lastSyncRunAt
-      ? {
-          ...c,
-          lastScheduledRunAt: new Date(lastSyncRun.lastSyncRunAt),
-        }
-      : c;
+  const configForNextRun = c
+    ? {
+        scheduleEnabled: c.scheduleEnabled === true,
+        scheduleMode: (c.scheduleMode ?? 'daily') as FfaScheduleMode,
+        scheduleIntervalMinutes: c.scheduleIntervalMinutes ?? 60,
+        scheduleDailyHour: c.scheduleDailyHour ?? 6,
+        scheduleDailyMinute: c.scheduleDailyMinute ?? 0,
+        scheduleTimezone: c.scheduleTimezone ?? 'Asia/Kolkata',
+        lastScheduledRunAt: lastSyncRun.lastSyncRunAt
+          ? new Date(lastSyncRun.lastSyncRunAt)
+          : c.lastScheduledRunAt
+            ? new Date(c.lastScheduledRunAt)
+            : undefined,
+      }
+    : null;
 
   return {
     dataSource: c?.dataSource ?? 'api',
@@ -199,8 +207,13 @@ export const computeNextScheduledRunAt = (config: Pick<
   const now = new Date();
 
   if (config.scheduleMode === 'interval') {
-    const base = config.lastScheduledRunAt ? new Date(config.lastScheduledRunAt) : now;
-    return new Date(base.getTime() + config.scheduleIntervalMinutes * 60 * 1000);
+    const intervalMs = Math.max(3, config.scheduleIntervalMinutes || 15) * 60 * 1000;
+    const base = config.lastScheduledRunAt ? new Date(config.lastScheduledRunAt).getTime() : now.getTime();
+    let nextMs = base + intervalMs;
+    while (nextMs <= now.getTime()) {
+      nextMs += intervalMs;
+    }
+    return new Date(nextMs);
   }
 
   if (config.scheduleMode === 'hourly') {

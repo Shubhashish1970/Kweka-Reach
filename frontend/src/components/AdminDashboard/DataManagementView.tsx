@@ -40,22 +40,48 @@ type FfaAdminConfig = {
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
-/** Next run for display — API value or interval fallback from last sync time. */
+/** Next run for display — API value or client fallback from last sync + interval. */
 const resolveNextScheduledRunAt = (
   meta: Pick<
     FfaAdminConfig,
     'nextScheduledRunAt' | 'lastSyncRunAt' | 'scheduleMode' | 'scheduleIntervalMinutes'
   > | null,
   scheduleEnabled: boolean,
-  dataSource: 'api' | 'excel'
+  dataSource: 'api' | 'excel',
+  scheduleMode: 'hourly' | 'daily' | 'interval',
+  scheduleIntervalMinutes: number
 ): string | null => {
-  if (!scheduleEnabled || dataSource !== 'api' || !meta) return null;
-  if (meta.nextScheduledRunAt) return meta.nextScheduledRunAt;
-  if (meta.scheduleMode !== 'interval' || !meta.lastSyncRunAt) return null;
-  const baseMs = new Date(meta.lastSyncRunAt).getTime();
-  if (!Number.isFinite(baseMs)) return null;
-  const mins = meta.scheduleIntervalMinutes > 0 ? meta.scheduleIntervalMinutes : 15;
-  return new Date(baseMs + mins * 60 * 1000).toISOString();
+  if (!scheduleEnabled || dataSource !== 'api') return null;
+
+  const rollIntervalForward = (baseIso: string): string | null => {
+    const baseMs = new Date(baseIso).getTime();
+    if (!Number.isFinite(baseMs)) return null;
+    const mins = scheduleIntervalMinutes > 0 ? scheduleIntervalMinutes : 15;
+    const intervalMs = mins * 60 * 1000;
+    let nextMs = baseMs + intervalMs;
+    while (nextMs <= Date.now()) {
+      nextMs += intervalMs;
+    }
+    return new Date(nextMs).toISOString();
+  };
+
+  if (meta?.nextScheduledRunAt) {
+    const apiMs = new Date(meta.nextScheduledRunAt).getTime();
+    if (Number.isFinite(apiMs) && apiMs > Date.now()) {
+      return meta.nextScheduledRunAt;
+    }
+    if (scheduleMode === 'interval' && meta.lastSyncRunAt) {
+      return rollIntervalForward(meta.lastSyncRunAt);
+    }
+    if (Number.isFinite(apiMs)) return meta.nextScheduledRunAt;
+  }
+
+  if (scheduleMode === 'interval') {
+    if (meta?.lastSyncRunAt) return rollIntervalForward(meta.lastSyncRunAt);
+    return new Date(Date.now() + (scheduleIntervalMinutes > 0 ? scheduleIntervalMinutes : 15) * 60 * 1000).toISOString();
+  }
+
+  return meta?.nextScheduledRunAt ?? null;
 };
 
 const DataManagementView: React.FC = () => {
@@ -484,9 +510,25 @@ const DataManagementView: React.FC = () => {
                   )}
 
                   {ffaConfigMeta?.scheduledSyncActive && (
-                    <div className="text-xs text-green-800 bg-green-50 border border-green-200 rounded-xl px-3 py-2">
-                      Scheduled sync is active. Cloud Scheduler (or the server) checks every minute and runs incremental sync when due.
-                      Turn off by unchecking above and saving.
+                    <div className="text-xs text-green-800 bg-green-50 border border-green-200 rounded-xl px-3 py-2 space-y-1">
+                      <div>
+                        Scheduled sync is active. Cloud Scheduler (or the server) checks every minute and runs incremental sync when due.
+                        Turn off by unchecking above and saving.
+                      </div>
+                      {(() => {
+                        const nextRunAt = resolveNextScheduledRunAt(
+                          ffaConfigMeta,
+                          scheduleEnabled,
+                          ffaDataSource,
+                          scheduleMode,
+                          scheduleIntervalMinutes
+                        );
+                        return nextRunAt ? (
+                          <div className="pt-1 border-t border-green-200 font-semibold text-green-900">
+                            Next scheduled run: {formatDateTimeIST(nextRunAt)}
+                          </div>
+                        ) : null;
+                      })()}
                     </div>
                   )}
 
@@ -500,7 +542,9 @@ const DataManagementView: React.FC = () => {
                     const nextRunAt = resolveNextScheduledRunAt(
                       ffaConfigMeta,
                       scheduleEnabled,
-                      ffaDataSource
+                      ffaDataSource,
+                      scheduleMode,
+                      scheduleIntervalMinutes
                     );
                     return (
                     <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 space-y-1.5">
@@ -513,7 +557,7 @@ const DataManagementView: React.FC = () => {
                           ? ` • Skipped: ${ffaConfigMeta.lastSyncRunMessage ?? '—'}`
                           : ` • ${ffaConfigMeta.lastSyncRunActivitiesSynced ?? 0} activities, ${ffaConfigMeta.lastSyncRunFarmersSynced ?? 0} farmers`}
                       </div>
-                      {nextRunAt && (
+                      {nextRunAt && !ffaConfigMeta.scheduledSyncActive && (
                         <div className="pt-1 border-t border-slate-200 text-slate-700 font-medium">
                           Next scheduled run: {formatDateTimeIST(nextRunAt)}
                         </div>

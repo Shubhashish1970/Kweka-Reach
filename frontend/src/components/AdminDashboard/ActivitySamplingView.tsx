@@ -449,8 +449,6 @@ const ActivitySamplingView: React.FC = () => {
       syncStatus?.adminConfig?.scheduleEnabled === true ||
       syncStatus?.adminConfig?.scheduledSyncActive === true);
 
-  const showLiveSyncBanner = Boolean(syncProgress?.running) || scheduledSyncConfigured;
-
   const scheduleIntervalMinutes =
     ffaAdminSchedule?.scheduleIntervalMinutes ??
     syncStatus?.adminConfig?.scheduleIntervalMinutes ??
@@ -458,6 +456,14 @@ const ActivitySamplingView: React.FC = () => {
 
   const nextScheduledRunAt =
     ffaAdminSchedule?.nextScheduledRunAt ?? syncStatus?.adminConfig?.nextScheduledRunAt ?? null;
+
+  const showFfaSyncProgressPanel = Boolean(
+    syncProgress &&
+      (isIncrementalSyncing ||
+        isFullSyncing ||
+        syncProgress.running ||
+        syncProgress.lastResult)
+  );
 
   const isFfaSyncTimeoutError = (errors?: string[]) =>
     (errors ?? []).some((e) => /timed?\s*out|timeout\s*expired/i.test(e));
@@ -1119,51 +1125,18 @@ const ActivitySamplingView: React.FC = () => {
         Activity statistics and sampling status for the selected date range and filters. Export matches current filters.
       </InfoBanner>
 
-      {showLiveSyncBanner && (
-        <div className="rounded-2xl border-2 border-green-500 bg-green-50 px-4 py-3 shadow-md">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              {syncProgress?.running ? (
-                <Loader2 size={18} className="animate-spin text-green-700 shrink-0" />
-              ) : (
-                <span className="h-3 w-3 rounded-full bg-green-600 shrink-0" aria-hidden />
-              )}
-              <span className="text-sm font-bold text-green-900">
-                {syncProgress?.running
-                  ? `FFA sync in progress${scheduledSyncConfigured ? ' (scheduled)' : ''}`
-                  : `Scheduled sync active · every ${scheduleIntervalMinutes} min`}
-              </span>
-            </div>
-            <span className="text-xs font-medium text-green-800">
-              {syncProgress?.running
-                ? `Live refresh every ${BACKGROUND_POLL_ACTIVE_MS / 1000}s · ${syncProgress.activitiesSynced} / ${syncProgress.totalActivities || '…'} activities`
-                : nextScheduledRunAt
-                  ? `Next run ~${formatDateTimeIST(nextScheduledRunAt)}`
-                  : 'Auto-refreshes batches, stats & grid while sync runs'}
-            </span>
-          </div>
-          {syncProgress?.running && (
-            <div className="mt-3 h-2.5 w-full rounded-full bg-green-200 overflow-hidden" role="progressbar">
-              <div
-                className="h-full bg-green-600 transition-all duration-500 rounded-full"
-                style={{
-                  width:
-                    syncProgress.totalActivities > 0
-                      ? `${Math.min(100, (100 * syncProgress.activitiesSynced) / syncProgress.totalActivities)}%`
-                      : '20%',
-                }}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Header with Filters */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm min-w-0">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
           <div className="min-w-0">
             <h2 className="text-xl font-black text-slate-900 mb-1">Activity Monitoring</h2>
             <p className="text-sm text-slate-600">Monitor FFA activities and their status</p>
+            {scheduledSyncConfigured && !syncProgress?.running && (
+              <p className="text-xs text-slate-500 mt-1">
+                Scheduled sync every {scheduleIntervalMinutes} min
+                {nextScheduledRunAt ? ` · Next run ~${formatDateTimeIST(nextScheduledRunAt)}` : ''}
+              </p>
+            )}
             {syncStatus && (
               <p className="text-xs text-slate-500 mt-1">
                 Last sync:{' '}
@@ -1235,14 +1208,15 @@ const ActivitySamplingView: React.FC = () => {
           </div>
         </div>
 
-        {syncProgress && (isIncrementalSyncing || isFullSyncing) && (
+        {showFfaSyncProgressPanel && syncProgress && (
           <div className="mt-3 pt-3 border-t border-slate-200">
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
               {syncProgress.running ? (
                 <>
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <span className="text-xs font-black text-slate-700 uppercase tracking-widest">
-                      FFA Sync in progress ({syncProgress.syncType ?? 'incremental'})
+                      FFA Sync in progress ({syncProgress.syncType ?? 'incremental'}
+                      {!isIncrementalSyncing && !isFullSyncing && scheduledSyncConfigured ? ', scheduled' : ''})
                     </span>
                     <span className="text-sm font-medium text-slate-600">
                       {syncProgress.activitiesSynced} / {syncProgress.totalActivities} activities • {syncProgress.farmersSynced} farmers

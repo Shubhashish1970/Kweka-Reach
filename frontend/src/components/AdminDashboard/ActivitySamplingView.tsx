@@ -688,8 +688,11 @@ const ActivitySamplingView: React.FC = () => {
     };
 
     try {
-      const pullLimit = resolveFfaPullLimitForSync();
-      const response = (await ffaAPI.syncFFAData(fullSync, pullLimit)) as any;
+      const statusForSync = await fetchSyncStatus({ silent: true });
+      const pullLimit = statusForSync?.adminConfig?.activitiesPullLimit;
+      const pullLimitToSend =
+        pullLimit !== null && pullLimit !== undefined ? pullLimit : undefined;
+      const response = (await ffaAPI.syncFFAData(fullSync, pullLimitToSend)) as any;
       if (!response?.success) {
         showError(response?.message || 'FFA sync failed to start');
         setSyncProgress(null);

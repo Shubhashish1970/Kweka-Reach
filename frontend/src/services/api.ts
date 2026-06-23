@@ -1214,7 +1214,21 @@ export const ffaAPI = {
       params.set('limit', String(activitiesLimit));
     }
     const q = params.toString() ? `?${params.toString()}` : '';
-    return apiRequest(`/ffa/sync${q}`, { method: 'POST' }, undefined, 300000);
+    const body: Record<string, unknown> = {};
+    if (fullSync) body.fullSync = true;
+    if (activitiesLimit !== undefined && activitiesLimit !== null && String(activitiesLimit).trim() !== '') {
+      body.activitiesLimit = activitiesLimit;
+    }
+    return apiRequest(
+      `/ffa/sync${q}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      undefined,
+      300000
+    );
   },
 
   getFFASyncStatus: async () => {

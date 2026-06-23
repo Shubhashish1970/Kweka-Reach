@@ -7,6 +7,7 @@ import {
   getFfaEmsDefaultDateFromIso,
   formatDateFromParam,
   formatEmsActivitiesDateFromParam,
+  parseEmsActivitiesLimit,
 } from './emsFfaClient.js';
 import { getLatestSyncBatchSummary } from './dataBatchService.js';
 import logger from '../config/logger.js';
@@ -357,6 +358,23 @@ export const recordLastSyncRunResult = async (
 /** @deprecated Use recordLastSyncRunResult */
 export const recordScheduledRunResult = recordLastSyncRunResult;
 
+/**
+ * EMS activities `limit` for a sync run: explicit request override, else saved admin pull limit, else env defaults.
+ */
+export const resolveActivitiesPullLimitForRun = async (
+  requestOverride?: number | null
+): Promise<number | undefined> => {
+  if (requestOverride !== undefined && requestOverride !== null) {
+    const parsed = parseEmsActivitiesLimit(String(requestOverride));
+    if (parsed !== undefined) return parsed;
+  }
+  const config = await getOrCreateFfaSyncConfig();
+  if (config.activitiesPullLimit !== null && config.activitiesPullLimit !== undefined) {
+    return config.activitiesPullLimit;
+  }
+  return undefined;
+};
+
 export const runScheduledFfaSyncIfDue = async (): Promise<ScheduledFfaSyncRunResult> => {
   const config = await getOrCreateFfaSyncConfig();
   if (!isScheduledFfaSyncDue(config)) {
@@ -365,10 +383,7 @@ export const runScheduledFfaSyncIfDue = async (): Promise<ScheduledFfaSyncRunRes
 
   try {
     logger.info('[FFA CRON] Starting scheduled incremental FFA sync...');
-    const activitiesLimit =
-      config.activitiesPullLimit !== null && config.activitiesPullLimit !== undefined
-        ? config.activitiesPullLimit
-        : undefined;
+    const activitiesLimit = await resolveActivitiesPullLimitForRun(config.activitiesPullLimit);
 
     const result = await syncFFAData(false, {
       activitiesLimit,

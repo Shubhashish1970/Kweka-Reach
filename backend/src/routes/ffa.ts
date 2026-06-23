@@ -7,6 +7,7 @@ import {
   getOrCreateFfaSyncConfig,
   formatFfaSyncConfigResponse,
   updateFfaSyncConfig,
+  resolveActivitiesPullLimitForRun,
 } from '../services/ffaSyncConfigService.js';
 import { parseEmsActivitiesLimit } from '../services/emsFfaClient.js';
 import { Activity } from '../models/Activity.js';
@@ -239,10 +240,11 @@ router.post(
       const ffaApiUrl = process.env.FFA_API_URL || 'http://localhost:4000/api';
       const fullSync = req.query.fullSync === 'true' || req.body?.fullSync === true;
       const limitRaw = req.query.limit ?? req.body?.limit ?? req.body?.activitiesLimit;
-      const activitiesLimit =
+      const limitFromRequest =
         limitRaw !== undefined && limitRaw !== null && String(limitRaw).trim() !== ''
           ? parseEmsActivitiesLimit(String(limitRaw))
           : undefined;
+      const activitiesLimit = await resolveActivitiesPullLimitForRun(limitFromRequest);
 
       logger.info(`[FFA SYNC] Manual FFA sync triggered (${fullSync ? 'full' : 'incremental'})`, {
         userId: (req as any).user?.id,
@@ -251,6 +253,7 @@ router.post(
         hasEnvVar: !!process.env.FFA_API_URL,
         fullSync,
         activitiesLimit: activitiesLimit ?? 'server-default',
+        limitSource: limitFromRequest !== undefined ? 'request' : 'admin-config-or-env',
       });
 
       beginSyncProgress(fullSync ? 'full' : 'incremental');

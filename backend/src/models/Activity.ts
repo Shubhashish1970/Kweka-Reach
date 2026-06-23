@@ -170,6 +170,7 @@ ActivitySchema.index({ state: 1, date: -1 }); // Compound: state + date for filt
 ActivitySchema.index({ zoneName: 1 }); // For zone filtering
 ActivitySchema.index({ buName: 1 }); // For BU filtering
 ActivitySchema.index({ syncedAt: -1 }); // For sync monitoring
+ActivitySchema.index({ dataBatchId: 1, syncedAt: -1 }); // Batch list + latest sync batch lookup
 ActivitySchema.index({ farmerIds: 1 }); // For farmer lookup in activities
 ActivitySchema.index({ lifecycleStatus: 1, date: -1 }); // For sampling control list views
 

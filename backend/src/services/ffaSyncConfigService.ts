@@ -128,7 +128,8 @@ export const resolveUnifiedLastSyncRun = async (
 };
 
 export const formatFfaSyncConfigResponse = async (
-  config: IFfaSyncConfig | Record<string, unknown> | null
+  config: IFfaSyncConfig | Record<string, unknown> | null,
+  options?: { lastSyncRun?: LastSyncRunSummary }
 ) => {
   const c = config as IFfaSyncConfig | null;
   const emsPullLimit = getEmsPullLimitConfig();
@@ -140,7 +141,7 @@ export const formatFfaSyncConfigResponse = async (
     : parseFfaEmsDefaultDateFrom();
   const scheduledSyncActive =
     c?.scheduleEnabled === true && c?.dataSource === 'api' && c?.scheduleMode !== 'off';
-  const lastSyncRun = await resolveUnifiedLastSyncRun(c);
+  const lastSyncRun = options?.lastSyncRun ?? (await resolveUnifiedLastSyncRun(c));
 
   const configForNextRun =
     c && lastSyncRun.lastSyncRunAt

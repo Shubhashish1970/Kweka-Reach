@@ -73,6 +73,12 @@ const INDEXES: IndexDefinition[] = [
     options: { background: true },
     description: 'Compound index for sampling control with BU filter',
   },
+  {
+    collection: 'activities',
+    index: { dataBatchId: 1, syncedAt: -1 },
+    options: { background: true, sparse: true },
+    description: 'Compound index for ingest batch aggregation and latest sync batch',
+  },
 
   // Farmer indexes for language-based task assignment
   {

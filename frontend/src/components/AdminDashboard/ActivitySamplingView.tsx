@@ -79,9 +79,10 @@ type ActivityTableColumnKey =
 /** Background poll: idle checks status/batches/stats; active also refreshes the activity grid. */
 const BACKGROUND_POLL_IDLE_MS = 30_000;
 const BACKGROUND_POLL_ACTIVE_MS = 8_000;
+const BACKGROUND_POLL_SYNC_MS = 3_000;
 const BACKGROUND_POLL_INITIAL_MS = 5_000;
-/** Manual sync polls progress every 1.5s; refresh grid/batches/stats every N polls (~7.5s). */
-const MANUAL_SYNC_GRID_REFRESH_EVERY_POLLS = 5;
+/** Manual sync polls progress every 1.5s; refresh batches on every poll while running. */
+const MANUAL_SYNC_GRID_REFRESH_EVERY_POLLS = 1;
 
 const DEFAULT_ACTIVITY_TABLE_WIDTHS: Record<ActivityTableColumnKey, number> = {
   expand: 56,
@@ -125,6 +126,7 @@ const ActivitySamplingView: React.FC = () => {
     errorCount: number;
     syncType: 'full' | 'incremental' | null;
     message: string;
+    dataBatchId?: string | null;
     lastResult?: {
       activitiesSynced: number;
       farmersSynced: number;
@@ -465,6 +467,13 @@ const ActivitySamplingView: React.FC = () => {
         syncProgress.lastResult)
   );
 
+  const activeSyncBatch = syncProgress?.dataBatchId
+    ? dataBatches.find((b) => b.batchId === syncProgress.dataBatchId)
+    : null;
+  const syncProgressActivityCount = syncProgress?.running
+    ? Math.max(syncProgress.activitiesSynced, activeSyncBatch?.activityCount ?? 0)
+    : syncProgress?.activitiesSynced ?? 0;
+
   const isFfaSyncTimeoutError = (errors?: string[]) =>
     (errors ?? []).some((e) => /timed?\s*out|timeout\s*expired/i.test(e));
 
@@ -568,6 +577,7 @@ const ActivitySamplingView: React.FC = () => {
       errorCount: data?.errorCount ?? 0,
       syncType: (data?.syncType ?? 'incremental') as 'full' | 'incremental' | null,
       message: data?.message || (data?.running ? 'Scheduled sync in progress…' : ''),
+      dataBatchId: data?.dataBatchId ?? null,
       lastResult: data?.lastResult,
     });
 
@@ -615,6 +625,7 @@ const ActivitySamplingView: React.FC = () => {
         if (syncRunning && progressData) {
           backgroundSyncProgressVisibleRef.current = true;
           setSyncProgress(mapProgressFromApi(progressData));
+          await fetchDataBatches({ silent: true });
         }
 
         const statusData = await fetchSyncStatus({ silent: true });
@@ -670,9 +681,9 @@ const ActivitySamplingView: React.FC = () => {
         const includeGrid = syncRunning || syncRunChanged || syncJustFinished;
 
         if (includeGrid) {
-          nextInterval = BACKGROUND_POLL_ACTIVE_MS;
+          nextInterval = syncRunning ? BACKGROUND_POLL_SYNC_MS : BACKGROUND_POLL_ACTIVE_MS;
           await Promise.all([
-            fetchDataBatches({ silent: true }),
+            ...(syncRunning ? [] : [fetchDataBatches({ silent: true })]),
             fetchStats({ silent: true }),
             fetchActivities(paginationPageRef.current, false, { silent: true }),
           ]);
@@ -837,6 +848,7 @@ const ActivitySamplingView: React.FC = () => {
             errorCount: data.errorCount ?? 0,
             syncType: data.syncType ?? null,
             message: data.message ?? '',
+            dataBatchId: data.dataBatchId ?? null,
             lastResult: data.lastResult,
           });
           if (data.running) {
@@ -1219,7 +1231,7 @@ const ActivitySamplingView: React.FC = () => {
                       {!isIncrementalSyncing && !isFullSyncing && scheduledSyncConfigured ? ', scheduled' : ''})
                     </span>
                     <span className="text-sm font-medium text-slate-600">
-                      {syncProgress.activitiesSynced} / {syncProgress.totalActivities} activities • {syncProgress.farmersSynced} farmers
+                      {syncProgressActivityCount} / {syncProgress.totalActivities} activities • {syncProgress.farmersSynced} farmers
                       {syncProgress.errorCount > 0 && ` • ${syncProgress.errorCount} errors`}
                     </span>
                   </div>
@@ -1228,12 +1240,20 @@ const ActivitySamplingView: React.FC = () => {
                       className="h-full bg-green-600 transition-all duration-300 rounded-full"
                       style={{
                         width: syncProgress.totalActivities > 0
-                          ? `${Math.min(100, (100 * syncProgress.activitiesSynced) / syncProgress.totalActivities)}%`
+                          ? `${Math.min(100, (100 * syncProgressActivityCount) / syncProgress.totalActivities)}%`
                           : '0%',
                       }}
                     />
                   </div>
-                  <p className="text-xs text-slate-500 mt-1.5">{syncProgress.message}</p>
+                  <p className="text-xs text-slate-500 mt-1.5">
+                    {syncProgress.message}
+                    {syncProgress.dataBatchId && (
+                      <span className="block mt-0.5 font-mono text-[11px] text-slate-400">
+                        Batch {syncProgress.dataBatchId}
+                        {activeSyncBatch ? ` • ${activeSyncBatch.activityCount} saved in table` : ''}
+                      </span>
+                    )}
+                  </p>
                 </>
               ) : syncProgress.lastResult ? (
                 <>
@@ -1683,8 +1703,14 @@ const ActivitySamplingView: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-amber-100">
-                    {dataBatches.map((b) => (
-                      <tr key={b.batchId} className="text-slate-800">
+                    {dataBatches.map((b) => {
+                      const isActiveBatch =
+                        syncProgress?.running && syncProgress.dataBatchId === b.batchId;
+                      return (
+                      <tr
+                        key={b.batchId}
+                        className={`text-slate-800 ${isActiveBatch ? 'bg-green-50 ring-1 ring-inset ring-green-200' : ''}`}
+                      >
                         <td className="px-3 py-2 font-medium capitalize">{b.source}</td>
                         <td className="px-3 py-2">{b.activityCount}</td>
                         <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">
@@ -1715,7 +1741,8 @@ const ActivitySamplingView: React.FC = () => {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

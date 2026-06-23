@@ -29,19 +29,19 @@ async function batchCanDelete(
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (activityObjectIds.length === 0) return { ok: false, reason: 'No activities in this batch.' };
 
-  const [auditCount, taskCount] = await Promise.all([
-    SamplingAudit.countDocuments({ activityId: { $in: activityObjectIds } }),
-    CallTask.countDocuments({ activityId: { $in: activityObjectIds } }),
+  const [auditExists, taskExists] = await Promise.all([
+    SamplingAudit.exists({ activityId: { $in: activityObjectIds } }),
+    CallTask.exists({ activityId: { $in: activityObjectIds } }),
   ]);
 
-  if (auditCount > 0) {
+  if (auditExists) {
     return {
       ok: false,
       reason:
         'Sampling has run for one or more activities in this batch (sampling audit exists). Batch delete is not allowed.',
     };
   }
-  if (taskCount > 0) {
+  if (taskExists) {
     return {
       ok: false,
       reason:
@@ -49,6 +49,30 @@ async function batchCanDelete(
     };
   }
   return { ok: true };
+}
+
+async function summarizeBatchRow(r: {
+  _id: string;
+  activityCount: number;
+  lastSyncedAt: Date | null;
+  minActivityDate: Date | null;
+  maxActivityDate: Date | null;
+}): Promise<DataBatchSummary> {
+  const batchId = r._id;
+  const objectIds = (await Activity.distinct('_id', {
+    dataBatchId: batchId,
+  })) as mongoose.Types.ObjectId[];
+  const gate = await batchCanDelete(objectIds);
+  return {
+    batchId,
+    activityCount: r.activityCount,
+    lastSyncedAt: r.lastSyncedAt ? new Date(r.lastSyncedAt).toISOString() : null,
+    minActivityDate: r.minActivityDate ? new Date(r.minActivityDate).toISOString() : null,
+    maxActivityDate: r.maxActivityDate ? new Date(r.maxActivityDate).toISOString() : null,
+    source: inferSource(batchId),
+    canDelete: gate.ok,
+    blockReason: gate.ok ? undefined : gate.reason,
+  };
 }
 
 export async function listDataBatches(limit = 25): Promise<DataBatchSummary[]> {
@@ -73,24 +97,7 @@ export async function listDataBatches(limit = 25): Promise<DataBatchSummary[]> {
     { $limit: limit },
   ]);
 
-  const out: DataBatchSummary[] = [];
-  for (const r of rows) {
-    const batchId = r._id;
-    const ids = await Activity.find({ dataBatchId: batchId }).select('_id').lean();
-    const objectIds = ids.map((d) => d._id as mongoose.Types.ObjectId);
-    const gate = await batchCanDelete(objectIds);
-    out.push({
-      batchId,
-      activityCount: r.activityCount,
-      lastSyncedAt: r.lastSyncedAt ? new Date(r.lastSyncedAt).toISOString() : null,
-      minActivityDate: r.minActivityDate ? new Date(r.minActivityDate).toISOString() : null,
-      maxActivityDate: r.maxActivityDate ? new Date(r.maxActivityDate).toISOString() : null,
-      source: inferSource(batchId),
-      canDelete: gate.ok,
-      blockReason: gate.ok ? undefined : gate.reason,
-    });
-  }
-  return out;
+  return Promise.all(rows.map((r) => summarizeBatchRow(r)));
 }
 
 /** Latest API sync batch — used to reconcile last-sync display across admin pages. */
@@ -100,21 +107,41 @@ export async function getLatestSyncBatchSummary(): Promise<{
   farmersSynced: number;
   batchId: string;
 } | null> {
-  const batches = await listDataBatches(10);
-  const latest = batches.find((b) => b.source === 'sync' && b.lastSyncedAt);
+  const batchRows = await Activity.aggregate<{
+    _id: string;
+    activityCount: number;
+    lastSyncedAt: Date | null;
+  }>([
+    { $match: { dataBatchId: { $regex: /^sync-/ } } },
+    {
+      $group: {
+        _id: '$dataBatchId',
+        activityCount: { $sum: 1 },
+        lastSyncedAt: { $max: '$syncedAt' },
+      },
+    },
+    { $sort: { lastSyncedAt: -1 } },
+    { $limit: 1 },
+  ]);
+
+  const latest = batchRows[0];
   if (!latest?.lastSyncedAt) return null;
 
-  const acts = await Activity.find({ dataBatchId: latest.batchId }).select('farmerIds').lean();
-  let farmersSynced = 0;
-  for (const a of acts) {
-    farmersSynced += a.farmerIds?.length ?? 0;
-  }
+  const farmerAgg = await Activity.aggregate<{ total: number }>([
+    { $match: { dataBatchId: latest._id } },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: { $size: { $ifNull: ['$farmerIds', []] } } },
+      },
+    },
+  ]);
 
   return {
-    lastSyncedAt: latest.lastSyncedAt,
+    lastSyncedAt: new Date(latest.lastSyncedAt).toISOString(),
     activitiesSynced: latest.activityCount,
-    farmersSynced,
-    batchId: latest.batchId,
+    farmersSynced: farmerAgg[0]?.total ?? 0,
+    batchId: latest._id,
   };
 }
 

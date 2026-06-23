@@ -624,8 +624,11 @@ router.get(
   requirePermission('config.ffa'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const status = await getSyncStatus();
-      const adminConfig = await formatFfaSyncConfigResponse(await getOrCreateFfaSyncConfig());
+      const config = await getOrCreateFfaSyncConfig();
+      const status = await getSyncStatus(config);
+      const adminConfig = await formatFfaSyncConfigResponse(config, {
+        lastSyncRun: status.lastSyncRun,
+      });
 
       res.json({
         success: true,

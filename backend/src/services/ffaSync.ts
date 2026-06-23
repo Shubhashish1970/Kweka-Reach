@@ -341,6 +341,8 @@ export type SyncProgressState = {
   errorCount: number;
   syncType: 'full' | 'incremental' | null;
   message: string;
+  /** Current ingest batch id (sync-{timestamp}) while a run is active or just finished */
+  dataBatchId?: string | null;
   lastResult?: {
     activitiesSynced: number;
     activitiesFetched?: number;
@@ -362,6 +364,7 @@ let syncProgress: SyncProgressState = {
   errorCount: 0,
   syncType: null,
   message: '',
+  dataBatchId: null,
 };
 
 const snapshotSyncProgress = (): SyncProgressState => ({ ...syncProgress });
@@ -397,6 +400,7 @@ const readStoredSyncProgress = (raw: Record<string, unknown> | null | undefined)
     syncType:
       raw.syncType === 'full' || raw.syncType === 'incremental' ? raw.syncType : null,
     message: String(raw.message ?? ''),
+    dataBatchId: typeof raw.dataBatchId === 'string' ? raw.dataBatchId : null,
     lastResult: raw.lastResult as SyncProgressState['lastResult'],
   };
 };
@@ -430,6 +434,7 @@ export const beginSyncProgress = (syncType: 'full' | 'incremental'): void => {
     errorCount: 0,
     syncType,
     message: syncType === 'full' ? 'Full sync in progress…' : 'Incremental sync in progress…',
+    dataBatchId: null,
     lastResult: undefined,
   };
   void persistSyncProgress();
@@ -676,6 +681,8 @@ export const syncFFAData = async (
       newActivities = ffaActivities;
     }
 
+    const dataBatchId = `sync-${Date.now()}`;
+
     // Set progress for UI
     syncProgress = {
       running: true,
@@ -685,10 +692,9 @@ export const syncFFAData = async (
       errorCount: 0,
       syncType: fullSync ? 'full' : 'incremental',
       message: `Syncing activities (${fullSync ? 'full' : 'incremental'})...`,
+      dataBatchId,
     };
     persistLiveSyncProgress(true);
-
-    const dataBatchId = `sync-${Date.now()}`;
 
     for (const ffaActivity of newActivities) {
       try {
@@ -757,12 +763,14 @@ export const syncFFAData = async (
 /**
  * Get sync status
  */
-export const getSyncStatus = async () => {
+export const getSyncStatus = async (existingConfig?: Awaited<
+  ReturnType<typeof import('./ffaSyncConfigService.js').getOrCreateFfaSyncConfig>
+>) => {
   try {
     const { getOrCreateFfaSyncConfig, resolveUnifiedLastSyncRun } = await import(
       './ffaSyncConfigService.js'
     );
-    const config = await getOrCreateFfaSyncConfig();
+    const config = existingConfig ?? (await getOrCreateFfaSyncConfig());
     const [lastSyncRun, totalActivities, totalFarmers] = await Promise.all([
       resolveUnifiedLastSyncRun(config),
       Activity.countDocuments(),

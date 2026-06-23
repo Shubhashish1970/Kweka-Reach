@@ -1,0 +1,73 @@
+# Manual probe: EMS activities GET (same shape as NACL API doc).
+name: Probe EMS Activities
+
+on:
+  workflow_dispatch:
+    inputs:
+      dateFrom:
+        description: 'dateFrom (DD/MM/YYYY)'
+        required: true
+        default: '01/06/2026'
+      limit:
+        description: 'limit (>0)'
+        required: true
+        default: '5'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Authenticate and fetch activities
+        env:
+          FFA_API_URL: ${{ secrets.FFA_API_URL }}
+          FFA_EMS_CTID: ${{ secrets.FFA_EMS_CTID }}
+          FFA_EMS_SECTKEY: ${{ secrets.FFA_EMS_SECTKEY }}
+          FFA_EMS_TOKEN: ${{ secrets.FFA_EMS_TOKEN }}
+          DATE_FROM: ${{ inputs.dateFrom }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          BASE="${FFA_API_URL%/}"
+          if [[ "$BASE" != */api ]]; then BASE="${BASE}/api"; fi
+          AUTH_URL="${BASE}/EMS/authenticate"
+          echo "POST $AUTH_URL"
+          curl -sS -o /tmp/auth.json -w "auth HTTP %{http_code}\n" \
+            -X POST "$AUTH_URL" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg ctid "$FFA_EMS_CTID" --arg token "${FFA_EMS_TOKEN:-}" --arg sectkey "$FFA_EMS_SECTKEY" \
+              '{ctid: $ctid, token: $token, sectkey: $sectkey}')"
+          jq '{styp, senm, token_len: (.odat[0].token | length)}' /tmp/auth.json
+          STYP=$(jq -r '.styp // empty' /tmp/auth.json)
+          if [ "$STYP" = "E" ] || [ "$STYP" = "e" ]; then
+            jq . /tmp/auth.json
+            exit 1
+          fi
+          TOKEN=$(jq -r 'if (.odat|type)=="array" then .odat[0].token else .odat.token end' /tmp/auth.json)
+          echo "::add-mask::$TOKEN"
+          DATE_ENC=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DATE_FROM', safe=''))")
+          URL="${BASE}/EMS/activities?limit=${LIMIT}&dateFrom=${DATE_ENC}"
+          echo "GET $URL"
+          curl -sS -o /tmp/acts.json -w "activities HTTP %{http_code}\n" \
+            -X GET "$URL" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json"
+          echo "--- Response summary ---"
+          jq -r '
+            if type == "array" then "shape: top-level array, count: \(length)"
+            elif .Data.Activities then "shape: Data.Activities, count: \(.Data.Activities|length), Success: \(.Success)"
+            elif .Data then "shape: object Data, Success: \(.Success // "n/a")"
+            else "shape: other keys: \(keys|join(", "))"
+            end
+          ' /tmp/acts.json 2>/dev/null || head -c 800 /tmp/acts.json
+          echo ""
+          echo "--- First 5 activities (Type, Date, OfficerId, Territory) ---"
+          jq -r '
+            def rows:
+              if type == "array" then .
+              elif .Data.Activities then .Data.Activities
+              elif .data.activities then .data.activities
+              else [] end;
+            rows | .[0:5][] |
+              "- \(.Type // .type // "n/a") | \(.Date // .date // "n/a") | officer \(.OfficerId // .officerId // "n/a") | \(.Territory // .territory // "n/a")"
+          ' /tmp/acts.json 2>/dev/null || echo "(could not parse activities)"

@@ -410,6 +410,7 @@ export async function getSyncProgress(): Promise<SyncProgressState> {
     const stored = readStoredSyncProgress(
       config?.liveSyncProgress as Record<string, unknown> | null | undefined
     );
+    if (stored?.running) return stored;
     if (stored) return stored;
   } catch (error) {
     logger.warn('[FFA SYNC] Failed to read live sync progress', {

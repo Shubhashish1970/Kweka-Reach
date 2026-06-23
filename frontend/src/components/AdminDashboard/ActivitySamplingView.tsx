@@ -176,7 +176,7 @@ const ActivitySamplingView: React.FC = () => {
       scheduleDailyHour: number;
       scheduleDailyMinute: number;
       scheduleTimezone: string;
-      scheduledSyncActive: boolean;
+      scheduledSyncActive?: boolean;
       nextScheduledRunAt?: string | null;
       serverDefaultPullLimit: number;
       lastScheduledRunAt: string | null;
@@ -213,6 +213,12 @@ const ActivitySamplingView: React.FC = () => {
   const [dataBatchesLoading, setDataBatchesLoading] = useState(false);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<string | null>(null);
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
+  const [ffaAdminSchedule, setFfaAdminSchedule] = useState<{
+    scheduleEnabled?: boolean;
+    scheduledSyncActive?: boolean;
+    scheduleIntervalMinutes?: number;
+    nextScheduledRunAt?: string | null;
+  } | null>(null);
   const [tableSort, setTableSort] = useState<{ key: ActivityTableColumnKey; dir: 'asc' | 'desc' }>(() => {
     const raw = localStorage.getItem('admin.activitySampling.tableSort');
     try {
@@ -396,6 +402,29 @@ const ActivitySamplingView: React.FC = () => {
     fetchDataBatches();
   }, [filters.activityType, filters.territory, filters.zone, filters.bu, filters.samplingStatus, filters.dateFrom, filters.dateTo, pageSize]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = (await ffaAPI.getFfaAdminConfig()) as any;
+        const cfg = res?.data?.config ?? res?.data;
+        if (!cancelled && cfg) {
+          setFfaAdminSchedule({
+            scheduleEnabled: cfg.scheduleEnabled,
+            scheduledSyncActive: cfg.scheduledSyncActive,
+            scheduleIntervalMinutes: cfg.scheduleIntervalMinutes,
+            nextScheduledRunAt: cfg.nextScheduledRunAt ?? null,
+          });
+        }
+      } catch {
+        // Non-blocking — status endpoint may still include adminConfig
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const dataSource = syncStatus?.adminConfig?.dataSource ?? 'api';
 
   const resolveFfaPullLimitForSync = (): number | undefined => {
@@ -415,8 +444,20 @@ const ActivitySamplingView: React.FC = () => {
 
   const scheduledSyncConfigured =
     dataSource === 'api' &&
-    (syncStatus?.adminConfig?.scheduleEnabled === true ||
+    (ffaAdminSchedule?.scheduleEnabled === true ||
+      ffaAdminSchedule?.scheduledSyncActive === true ||
+      syncStatus?.adminConfig?.scheduleEnabled === true ||
       syncStatus?.adminConfig?.scheduledSyncActive === true);
+
+  const showLiveSyncBanner = Boolean(syncProgress?.running) || scheduledSyncConfigured;
+
+  const scheduleIntervalMinutes =
+    ffaAdminSchedule?.scheduleIntervalMinutes ??
+    syncStatus?.adminConfig?.scheduleIntervalMinutes ??
+    15;
+
+  const nextScheduledRunAt =
+    ffaAdminSchedule?.nextScheduledRunAt ?? syncStatus?.adminConfig?.nextScheduledRunAt ?? null;
 
   const isFfaSyncTimeoutError = (errors?: string[]) =>
     (errors ?? []).some((e) => /timed?\s*out|timeout\s*expired/i.test(e));
@@ -506,14 +547,10 @@ const ActivitySamplingView: React.FC = () => {
     }
   };
 
-  /** Option B: idle poll (status/batches/stats); active poll (+ grid) while sync runs or after a new sync completes. */
+  /** Poll sync progress + refresh grids whenever API data source is active (not only when schedule flags load). */
   useEffect(() => {
-    const scheduledActive =
-      syncStatus?.adminConfig?.dataSource === 'api' &&
-      (syncStatus?.adminConfig?.scheduledSyncActive === true ||
-        syncStatus?.adminConfig?.scheduleEnabled === true);
-
-    if (!scheduledActive) return;
+    const apiActive = dataSource === 'api';
+    if (!apiActive) return;
 
     let cancelled = false;
 
@@ -575,6 +612,16 @@ const ActivitySamplingView: React.FC = () => {
         }
 
         const statusData = await fetchSyncStatus({ silent: true });
+        if (statusData?.adminConfig) {
+          setFfaAdminSchedule((prev) => ({
+            scheduleEnabled: statusData.adminConfig?.scheduleEnabled ?? prev?.scheduleEnabled,
+            scheduledSyncActive: statusData.adminConfig?.scheduledSyncActive ?? prev?.scheduledSyncActive,
+            scheduleIntervalMinutes:
+              statusData.adminConfig?.scheduleIntervalMinutes ?? prev?.scheduleIntervalMinutes,
+            nextScheduledRunAt:
+              statusData.adminConfig?.nextScheduledRunAt ?? prev?.nextScheduledRunAt ?? null,
+          }));
+        }
         const lastSyncAt =
           statusData?.lastSyncRun?.lastSyncRunAt || statusData?.lastSyncAt || null;
 
@@ -651,11 +698,7 @@ const ActivitySamplingView: React.FC = () => {
       clearBackgroundPoll();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [
-    syncStatus?.adminConfig?.dataSource,
-    syncStatus?.adminConfig?.scheduledSyncActive,
-    syncStatus?.adminConfig?.scheduleEnabled,
-  ]);
+  }, [dataSource]);
 
   const handleRefresh = async () => {
     await Promise.all([
@@ -1076,6 +1119,45 @@ const ActivitySamplingView: React.FC = () => {
         Activity statistics and sampling status for the selected date range and filters. Export matches current filters.
       </InfoBanner>
 
+      {showLiveSyncBanner && (
+        <div className="rounded-2xl border-2 border-green-500 bg-green-50 px-4 py-3 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {syncProgress?.running ? (
+                <Loader2 size={18} className="animate-spin text-green-700 shrink-0" />
+              ) : (
+                <span className="h-3 w-3 rounded-full bg-green-600 shrink-0" aria-hidden />
+              )}
+              <span className="text-sm font-bold text-green-900">
+                {syncProgress?.running
+                  ? `FFA sync in progress${scheduledSyncConfigured ? ' (scheduled)' : ''}`
+                  : `Scheduled sync active · every ${scheduleIntervalMinutes} min`}
+              </span>
+            </div>
+            <span className="text-xs font-medium text-green-800">
+              {syncProgress?.running
+                ? `Live refresh every ${BACKGROUND_POLL_ACTIVE_MS / 1000}s · ${syncProgress.activitiesSynced} / ${syncProgress.totalActivities || '…'} activities`
+                : nextScheduledRunAt
+                  ? `Next run ~${formatDateTimeIST(nextScheduledRunAt)}`
+                  : 'Auto-refreshes batches, stats & grid while sync runs'}
+            </span>
+          </div>
+          {syncProgress?.running && (
+            <div className="mt-3 h-2.5 w-full rounded-full bg-green-200 overflow-hidden" role="progressbar">
+              <div
+                className="h-full bg-green-600 transition-all duration-500 rounded-full"
+                style={{
+                  width:
+                    syncProgress.totalActivities > 0
+                      ? `${Math.min(100, (100 * syncProgress.activitiesSynced) / syncProgress.totalActivities)}%`
+                      : '20%',
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Header with Filters */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm min-w-0">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -1152,44 +1234,6 @@ const ActivitySamplingView: React.FC = () => {
             </Button>
           </div>
         </div>
-
-        {scheduledSyncConfigured && (
-          <div className="mb-4 rounded-2xl border-2 border-green-500 bg-green-50 px-4 py-3 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                {syncProgress?.running ? (
-                  <Loader2 size={18} className="animate-spin text-green-700 shrink-0" />
-                ) : (
-                  <span className="h-3 w-3 rounded-full bg-green-600 shrink-0" aria-hidden />
-                )}
-                <span className="text-sm font-bold text-green-900">
-                  Scheduled sync active · every {syncStatus?.adminConfig?.scheduleIntervalMinutes ?? 15} min
-                  {syncProgress?.running ? ' · syncing now' : ''}
-                </span>
-              </div>
-              <span className="text-xs font-medium text-green-800">
-                {syncProgress?.running
-                  ? `Live refresh every ${BACKGROUND_POLL_ACTIVE_MS / 1000}s · ${syncProgress.activitiesSynced} / ${syncProgress.totalActivities || '…'} activities`
-                  : syncStatus?.adminConfig?.nextScheduledRunAt
-                    ? `Next run ~${formatDateTimeIST(syncStatus.adminConfig.nextScheduledRunAt)}`
-                    : 'Auto-refreshes batches, stats & grid while sync runs'}
-              </span>
-            </div>
-            {syncProgress?.running && (
-              <div className="mt-3 h-2 w-full rounded-full bg-green-200 overflow-hidden" role="progressbar">
-                <div
-                  className="h-full bg-green-600 transition-all duration-500 rounded-full"
-                  style={{
-                    width:
-                      syncProgress.totalActivities > 0
-                        ? `${Math.min(100, (100 * syncProgress.activitiesSynced) / syncProgress.totalActivities)}%`
-                        : '15%',
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        )}
 
         {syncProgress && (isIncrementalSyncing || isFullSyncing) && (
           <div className="mt-3 pt-3 border-t border-slate-200">

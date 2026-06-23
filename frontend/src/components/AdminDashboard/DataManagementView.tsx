@@ -40,6 +40,24 @@ type FfaAdminConfig = {
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
+/** Next run for display — API value or interval fallback from last sync time. */
+const resolveNextScheduledRunAt = (
+  meta: Pick<
+    FfaAdminConfig,
+    'nextScheduledRunAt' | 'lastSyncRunAt' | 'scheduleMode' | 'scheduleIntervalMinutes'
+  > | null,
+  scheduleEnabled: boolean,
+  dataSource: 'api' | 'excel'
+): string | null => {
+  if (!scheduleEnabled || dataSource !== 'api' || !meta) return null;
+  if (meta.nextScheduledRunAt) return meta.nextScheduledRunAt;
+  if (meta.scheduleMode !== 'interval' || !meta.lastSyncRunAt) return null;
+  const baseMs = new Date(meta.lastSyncRunAt).getTime();
+  if (!Number.isFinite(baseMs)) return null;
+  const mins = meta.scheduleIntervalMinutes > 0 ? meta.scheduleIntervalMinutes : 15;
+  return new Date(baseMs + mins * 60 * 1000).toISOString();
+};
+
 const DataManagementView: React.FC = () => {
   const { showToast } = useToast();
   type TxEntity =
@@ -478,23 +496,31 @@ const DataManagementView: React.FC = () => {
                     </div>
                   )}
 
-                  {ffaConfigMeta?.lastSyncRunAt && (
-                    <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                      Last sync: {formatDateTimeIST(ffaConfigMeta.lastSyncRunAt)}
-                      {ffaConfigMeta.lastSyncRunSource && (
-                        <> ({ffaConfigMeta.lastSyncRunSource === 'scheduled' ? 'scheduled' : 'manual'})</>
+                  {ffaConfigMeta?.lastSyncRunAt && (() => {
+                    const nextRunAt = resolveNextScheduledRunAt(
+                      ffaConfigMeta,
+                      scheduleEnabled,
+                      ffaDataSource
+                    );
+                    return (
+                    <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 space-y-1.5">
+                      <div>
+                        Last sync: {formatDateTimeIST(ffaConfigMeta.lastSyncRunAt)}
+                        {ffaConfigMeta.lastSyncRunSource && (
+                          <> ({ffaConfigMeta.lastSyncRunSource === 'scheduled' ? 'scheduled' : 'manual'})</>
+                        )}
+                        {ffaConfigMeta.lastSyncRunSkipped
+                          ? ` • Skipped: ${ffaConfigMeta.lastSyncRunMessage ?? '—'}`
+                          : ` • ${ffaConfigMeta.lastSyncRunActivitiesSynced ?? 0} activities, ${ffaConfigMeta.lastSyncRunFarmersSynced ?? 0} farmers`}
+                      </div>
+                      {nextRunAt && (
+                        <div className="pt-1 border-t border-slate-200 text-slate-700 font-medium">
+                          Next scheduled run: {formatDateTimeIST(nextRunAt)}
+                        </div>
                       )}
-                      {ffaConfigMeta.lastSyncRunSkipped
-                        ? ` • Skipped: ${ffaConfigMeta.lastSyncRunMessage ?? '—'}`
-                        : ` • ${ffaConfigMeta.lastSyncRunActivitiesSynced ?? 0} activities, ${ffaConfigMeta.lastSyncRunFarmersSynced ?? 0} farmers`}
                     </div>
-                  )}
-
-                  {ffaConfigMeta?.nextScheduledRunAt && scheduleEnabled && ffaDataSource === 'api' && (
-                    <div className="text-xs text-slate-500">
-                      Next scheduled run (approx.): {formatDateTimeIST(ffaConfigMeta.nextScheduledRunAt)}
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
 

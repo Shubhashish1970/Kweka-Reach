@@ -173,8 +173,11 @@ export const formatFfaSyncConfigResponse = async (
     lastScheduledRunMessage: lastSyncRun.lastSyncRunMessage,
     scheduledSyncActive,
     serverDefaultPullLimit,
-    nextScheduledRunAt:
-      configForNextRun && scheduledSyncActive ? computeNextScheduledRunAt(configForNextRun) : null,
+    nextScheduledRunAt: (() => {
+      if (!configForNextRun || !scheduledSyncActive) return null;
+      const next = computeNextScheduledRunAt(configForNextRun);
+      return next ? next.toISOString() : null;
+    })(),
     updatedAt: c?.updatedAt ?? null,
   };
 };

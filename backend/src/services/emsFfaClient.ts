@@ -353,7 +353,54 @@ const normalizeActivity = (raw: Record<string, unknown>): EmsFfaActivity => ({
       : [],
 });
 
-const extractActivitiesFromPayload = (data: Record<string, unknown>): EmsFfaActivity[] => {
+const mapRawActivityList = (rawList: unknown[]): EmsFfaActivity[] =>
+  rawList
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => normalizeActivity(item as Record<string, unknown>));
+
+/** Truncate EMS body for logs when parsing fails (avoid huge payloads). */
+const summarizeEmsResponseForLog = (payload: unknown): string => {
+  try {
+    if (payload === null || payload === undefined) return String(payload);
+    if (Array.isArray(payload)) {
+      return `array[len=${payload.length}] sample=${JSON.stringify(payload[0] ?? null).slice(0, 400)}`;
+    }
+    if (typeof payload === 'object') {
+      const keys = Object.keys(payload as object);
+      return `object keys=[${keys.join(', ')}] sample=${JSON.stringify(payload).slice(0, 500)}`;
+    }
+    return String(payload).slice(0, 500);
+  } catch {
+    return '[unserializable EMS response]';
+  }
+};
+
+const resolveRawActivityListFromObject = (data: Record<string, unknown>): unknown[] | undefined => {
+  const nested = data.data ?? data.Data;
+  if (Array.isArray(nested)) {
+    return nested;
+  }
+  if (nested && typeof nested === 'object') {
+    const nestedObj = nested as Record<string, unknown>;
+    if (Array.isArray(nestedObj.activities)) return nestedObj.activities;
+    if (Array.isArray(nestedObj.Activities)) return nestedObj.Activities;
+  }
+  if (Array.isArray(data.activities)) return data.activities;
+  if (Array.isArray(data.Activities)) return data.Activities;
+  if (Array.isArray(data.odat)) return data.odat;
+  return undefined;
+};
+
+const extractActivitiesFromPayload = (payload: unknown): EmsFfaActivity[] => {
+  if (Array.isArray(payload)) {
+    return mapRawActivityList(payload);
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('EMS activities returned invalid response format');
+  }
+
+  const data = payload as Record<string, unknown>;
   const success =
     data.success === true ||
     data.Success === true ||
@@ -370,21 +417,7 @@ const extractActivitiesFromPayload = (data: Record<string, unknown>): EmsFfaActi
     return [];
   }
 
-  let rawList: unknown[] | undefined;
-  const nested = (data.data ?? data.Data) as Record<string, unknown> | undefined;
-  if (nested) {
-    if (Array.isArray(nested.activities)) rawList = nested.activities;
-    else if (Array.isArray(nested.Activities)) rawList = nested.Activities;
-  }
-  if (!rawList && Array.isArray(data.activities)) {
-    rawList = data.activities;
-  }
-  if (!rawList && Array.isArray(data.Activities)) {
-    rawList = data.Activities;
-  }
-  if (!rawList && Array.isArray(data.odat)) {
-    rawList = data.odat;
-  }
+  const rawList = resolveRawActivityListFromObject(data);
 
   if (!rawList) {
     if (!success && (data.styp === 'E' || data.styp === 'e')) {
@@ -393,12 +426,13 @@ const extractActivitiesFromPayload = (data: Record<string, unknown>): EmsFfaActi
     if (!success && data.Success === false) {
       return [];
     }
+    logger.error('[FFA SYNC][EMS] EMS activities response does not contain an activities array', {
+      responseSummary: summarizeEmsResponseForLog(payload),
+    });
     throw new Error('EMS activities response does not contain an activities array');
   }
 
-  return rawList
-    .filter((item) => item && typeof item === 'object')
-    .map((item) => normalizeActivity(item as Record<string, unknown>));
+  return mapRawActivityList(rawList);
 };
 
 /**
@@ -500,11 +534,7 @@ export const fetchEmsActivities = async (
     }
 
     const data = response.data;
-    if (!data || typeof data !== 'object') {
-      throw new Error('EMS activities returned invalid response format');
-    }
-
-    let activities = extractActivitiesFromPayload(data as Record<string, unknown>);
+    let activities = extractActivitiesFromPayload(data);
 
     // NACL: limit=0 should return all eligible; some environments return empty — retry with a high cap
     if (activities.length === 0 && safeLimit === 0) {
@@ -522,8 +552,8 @@ export const fetchEmsActivities = async (
         },
         validateStatus: (status) => status < 500,
       });
-      if (fallbackRes.status < 400 && fallbackRes.data && typeof fallbackRes.data === 'object') {
-        activities = extractActivitiesFromPayload(fallbackRes.data as Record<string, unknown>);
+      if (fallbackRes.status < 400 && fallbackRes.data != null) {
+        activities = extractActivitiesFromPayload(fallbackRes.data);
         logger.info(`[FFA SYNC][EMS] Fallback limit=${fallbackLimit} fetched ${activities.length} activities`);
       }
     }

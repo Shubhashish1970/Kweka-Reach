@@ -201,6 +201,68 @@ describe('emsFfaClient', () => {
     );
   });
 
+  test('fetchEmsActivities maps NACL prod top-level JSON array (Postman raw array)', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      status: 200,
+      data: { styp: 'S', odat: [{ token: 'tok' }] },
+    });
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: [
+        {
+          Type: 'Farmer Meeting',
+          Date: '18-06-2024 06:01:37',
+          OfficerId: '506315',
+          OfficerName: 'Lakhan Patel',
+          Location: 'Unnamed Road',
+          Territory: 'Mahasamund',
+          TerritoryName: 'Mahasamund',
+          ZoneName: 'Raipur',
+          BuName: 'EBU',
+          TmEmpCode: '506315',
+          TmName: 'Lakhan Patel',
+          Farmers: [],
+        },
+      ],
+    });
+
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2024, 5, 18), 100);
+    expect(activities).toHaveLength(1);
+    expect(activities[0].type).toBe('Farmer Meeting');
+    expect(activities[0].officerId).toBe('506315');
+    expect(activities[0].date).toBe('18-06-2024 06:01:37');
+  });
+
+  test('fetchEmsActivities maps Data as direct array without Activities key', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      status: 200,
+      data: { styp: 'S', odat: [{ token: 'tok' }] },
+    });
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: {
+        Success: true,
+        Data: [
+          {
+            ActivityId: 'A-99',
+            Type: 'Field Day',
+            Date: '18-06-2024 07:55:32',
+            OfficerId: '505629',
+            OfficerName: 'Abhinav Srivastava',
+            Location: 'Prayagraj',
+            Territory: 'Prayagraj',
+            Farmers: [],
+          },
+        ],
+      },
+    });
+
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2024, 5, 18), 100);
+    expect(activities).toHaveLength(1);
+    expect(activities[0].activityId).toBe('A-99');
+    expect(activities[0].type).toBe('Field Day');
+  });
+
   test('fetchEmsActivities maps vendor-shaped activities', async () => {
     jest.spyOn(axios, 'post').mockResolvedValueOnce({
       status: 200,

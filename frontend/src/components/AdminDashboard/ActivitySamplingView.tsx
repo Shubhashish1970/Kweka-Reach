@@ -80,7 +80,6 @@ type ActivityTableColumnKey =
 const BACKGROUND_POLL_IDLE_MS = 30_000;
 const BACKGROUND_POLL_ACTIVE_MS = 8_000;
 const BACKGROUND_POLL_SYNC_MS = 3_000;
-const BACKGROUND_POLL_INITIAL_MS = 5_000;
 /** Manual sync polls progress every 1.5s; refresh batches on every poll while running. */
 const MANUAL_SYNC_GRID_REFRESH_EVERY_POLLS = 1;
 
@@ -524,6 +523,37 @@ const ActivitySamplingView: React.FC = () => {
     }
   }, [syncStatus?.lastSyncRun?.lastSyncRunAt, syncStatus?.lastSyncAt]);
 
+  /** On tab load, pick up an in-flight server sync immediately (do not wait for background poll). */
+  useEffect(() => {
+    if (dataSource !== 'api') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const pr = (await ffaAPI.getFFASyncProgress()) as any;
+        const data = pr?.data ?? pr;
+        if (cancelled || !data?.running) return;
+        backgroundSyncProgressVisibleRef.current = true;
+        setSyncProgress({
+          running: true,
+          activitiesSynced: data.activitiesSynced ?? 0,
+          totalActivities: data.totalActivities ?? 0,
+          farmersSynced: data.farmersSynced ?? 0,
+          errorCount: data.errorCount ?? 0,
+          syncType: data.syncType ?? 'incremental',
+          message: data.message || 'FFA sync in progress…',
+          dataBatchId: data.dataBatchId ?? null,
+          lastResult: data.lastResult,
+        });
+        void fetchDataBatches({ silent: true });
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataSource]);
+
   useEffect(() => {
     return () => {
       if (syncProgressPollRef.current) {
@@ -605,7 +635,7 @@ const ActivitySamplingView: React.FC = () => {
       }
 
       if (isManualSyncingRef.current) {
-        scheduleNext(BACKGROUND_POLL_ACTIVE_MS);
+        scheduleNext(BACKGROUND_POLL_SYNC_MS);
         return;
       }
 
@@ -622,13 +652,23 @@ const ActivitySamplingView: React.FC = () => {
           // Ignore — status/batch refresh still useful
         }
 
-        if (syncRunning && progressData) {
+        const statusData = await fetchSyncStatus({ silent: true });
+        const scheduledSyncActive =
+          statusData?.adminConfig?.scheduledSyncActive === true ||
+          ffaAdminSchedule?.scheduledSyncActive === true;
+        if (scheduledSyncActive) {
+          nextInterval = BACKGROUND_POLL_ACTIVE_MS;
+        }
+        if (syncRunning) {
+          nextInterval = BACKGROUND_POLL_SYNC_MS;
+        }
+
+        if (progressData?.running) {
           backgroundSyncProgressVisibleRef.current = true;
           setSyncProgress(mapProgressFromApi(progressData));
           await fetchDataBatches({ silent: true });
         }
 
-        const statusData = await fetchSyncStatus({ silent: true });
         if (statusData?.adminConfig) {
           setFfaAdminSchedule((prev) => ({
             scheduleEnabled: statusData.adminConfig?.scheduleEnabled ?? prev?.scheduleEnabled,
@@ -656,7 +696,11 @@ const ActivitySamplingView: React.FC = () => {
         const syncJustFinished = wasBackgroundSyncRunningRef.current && !syncRunning;
         wasBackgroundSyncRunningRef.current = syncRunning;
 
-        if (syncJustFinished && progressData?.lastResult) {
+        if (
+          !syncRunning &&
+          progressData?.lastResult &&
+          (syncJustFinished || syncRunChanged)
+        ) {
           const lr = progressData.lastResult;
           setSyncProgress({
             running: false,
@@ -665,23 +709,28 @@ const ActivitySamplingView: React.FC = () => {
             farmersSynced: lr.farmersSynced ?? 0,
             errorCount: lr.errors?.length ?? 0,
             syncType: lr.syncType ?? 'incremental',
-            message: 'Scheduled sync completed',
+            message: syncJustFinished ? 'Scheduled sync completed' : 'Last sync completed',
+            dataBatchId: progressData.dataBatchId ?? null,
             lastResult: lr,
           });
           backgroundSyncProgressVisibleRef.current = true;
-          if (!lr.skipped && (lr.activitiesSynced ?? 0) > 0) {
-            showInfo(
-              `Scheduled sync completed: ${lr.activitiesSynced} activities, ${lr.farmersSynced ?? 0} farmers imported`
-            );
-          } else if (lr.skipped && lr.skipReason) {
-            showWarning(lr.skipReason);
+          if (syncJustFinished) {
+            if (!lr.skipped && (lr.activitiesSynced ?? 0) > 0) {
+              showInfo(
+                `Scheduled sync completed: ${lr.activitiesSynced} activities, ${lr.farmersSynced ?? 0} farmers imported`
+              );
+            } else if (lr.skipped && lr.skipReason) {
+              showWarning(lr.skipReason);
+            }
           }
         }
 
         const includeGrid = syncRunning || syncRunChanged || syncJustFinished;
 
         if (includeGrid) {
-          nextInterval = syncRunning ? BACKGROUND_POLL_SYNC_MS : BACKGROUND_POLL_ACTIVE_MS;
+          if (!syncRunning) {
+            nextInterval = BACKGROUND_POLL_ACTIVE_MS;
+          }
           await Promise.all([
             ...(syncRunning ? [] : [fetchDataBatches({ silent: true })]),
             fetchStats({ silent: true }),
@@ -708,7 +757,7 @@ const ActivitySamplingView: React.FC = () => {
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
-    scheduleNext(BACKGROUND_POLL_INITIAL_MS);
+    void runBackgroundPoll();
 
     return () => {
       cancelled = true;
@@ -765,7 +814,29 @@ const ActivitySamplingView: React.FC = () => {
       infoMessage?: string;
     }) => {
       stopSyncPolling();
-      setSyncProgress(null);
+      if (result) {
+        setSyncProgress({
+          running: false,
+          activitiesSynced: result.activitiesSynced ?? 0,
+          totalActivities: result.activitiesSynced ?? 0,
+          farmersSynced: result.farmersSynced ?? 0,
+          errorCount: result.errors?.length ?? 0,
+          syncType: result.syncType ?? requestedSyncTypeRef.current ?? 'incremental',
+          message: 'Sync completed',
+          lastResult: {
+            activitiesSynced: result.activitiesSynced ?? 0,
+            farmersSynced: result.farmersSynced ?? 0,
+            errors: result.errors ?? [],
+            syncType: result.syncType ?? 'incremental',
+            skipped: result.skipped,
+            skipReason: result.skipReason,
+            infoMessage: result.infoMessage,
+          },
+        });
+        backgroundSyncProgressVisibleRef.current = true;
+      } else {
+        setSyncProgress(null);
+      }
       const imported = result?.activitiesSynced ?? 0;
       const fetched = result?.activitiesFetched;
       const pullLimit = result?.emsPullLimit;
@@ -1139,89 +1210,8 @@ const ActivitySamplingView: React.FC = () => {
 
       {/* Header with Filters */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm min-w-0">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
-          <div className="min-w-0">
-            <h2 className="text-xl font-black text-slate-900 mb-1">Activity Monitoring</h2>
-            <p className="text-sm text-slate-600">Monitor FFA activities and their status</p>
-            {scheduledSyncConfigured && !syncProgress?.running && (
-              <p className="text-xs text-slate-500 mt-1">
-                Scheduled sync every {scheduleIntervalMinutes} min
-                {nextScheduledRunAt ? ` · Next run ~${formatDateTimeIST(nextScheduledRunAt)}` : ''}
-              </p>
-            )}
-            {syncStatus && (
-              <p className="text-xs text-slate-500 mt-1">
-                Last sync:{' '}
-                {syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt
-                  ? formatDateTimeIST(syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt!)
-                  : 'Never'}
-                {syncStatus.lastSyncRun?.lastSyncRunSource && (
-                  <> ({syncStatus.lastSyncRun.lastSyncRunSource === 'scheduled' ? 'scheduled' : 'manual'})</>
-                )}
-                {' • '}
-                {syncStatus.lastSyncRun?.lastSyncRunActivitiesSynced ?? 0} activities,{' '}
-                {syncStatus.lastSyncRun?.lastSyncRunFarmersSynced ?? 0} farmers (last run)
-                {' • '}
-                Total: {syncStatus.totalActivities} activities, {syncStatus.totalFarmers} farmers
-                {' • '}
-                Data source: {dataSource === 'api' ? 'API' : 'Excel'}
-                {dataSource === 'api' && (
-                  <>
-                    {' '}
-                    • Pull limit: {effectivePullLimit} (0 = all eligible)
-                    {syncStatus.adminConfig?.emsActivitiesDateFromDisplay && (
-                      <> • Activity date from: {formatConfigDateTimeDisplay(syncStatus.adminConfig.emsActivitiesDateFromDisplay)}</>
-                    )}
-                  </>
-                )}
-              </p>
-            )}
-          </div>
-          <div className="flex flex-nowrap items-center gap-2 sm:gap-3 shrink-0 overflow-x-auto max-w-full pb-0.5">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowFilters(!showFilters)}
-            >
-              <Filter size={16} />
-              {showFilters ? 'Hide filters' : 'Filters'}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isLoading || isStatsLoading}
-            >
-              <RefreshCw size={16} className={isLoading || isStatsLoading ? 'animate-spin' : ''} />
-              Refresh
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              className="shrink-0 whitespace-nowrap"
-              onClick={() => handleSyncFFA(false)}
-              disabled={dataSource !== 'api' || isIncrementalSyncing || isFullSyncing}
-              title="Incremental sync: Only syncs new activities since last sync"
-            >
-              <Download size={16} className={isIncrementalSyncing ? 'animate-spin' : ''} />
-              {isIncrementalSyncing ? 'Syncing...' : 'Sync FFA (Incremental)'}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="shrink-0 whitespace-nowrap"
-              onClick={() => handleSyncFFA(true)}
-              disabled={dataSource !== 'api' || isIncrementalSyncing || isFullSyncing}
-              title="Full sync: Syncs all activities from FFA_EMS_DEFAULT_DATE_FROM (takes longer)"
-            >
-              <Download size={16} className={isFullSyncing ? 'animate-spin' : ''} />
-              {isFullSyncing ? 'Full syncing...' : 'Sync FFA (Full)'}
-            </Button>
-          </div>
-        </div>
-
         {showFfaSyncProgressPanel && syncProgress && (
-          <div className="mt-3 pt-3 border-t border-slate-200">
+          <div className="mb-4 pb-4 border-b border-slate-200">
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
               {syncProgress.running ? (
                 <>
@@ -1302,6 +1292,87 @@ const ActivitySamplingView: React.FC = () => {
             </div>
           </div>
         )}
+
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
+          <div className="min-w-0">
+            <h2 className="text-xl font-black text-slate-900 mb-1">Activity Monitoring</h2>
+            <p className="text-sm text-slate-600">Monitor FFA activities and their status</p>
+            {scheduledSyncConfigured && !syncProgress?.running && (
+              <p className="text-xs text-slate-500 mt-1">
+                Scheduled sync every {scheduleIntervalMinutes} min
+                {nextScheduledRunAt ? ` · Next run ~${formatDateTimeIST(nextScheduledRunAt)}` : ''}
+              </p>
+            )}
+            {syncStatus && (
+              <p className="text-xs text-slate-500 mt-1">
+                Last sync:{' '}
+                {syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt
+                  ? formatDateTimeIST(syncStatus.lastSyncRun?.lastSyncRunAt || syncStatus.lastSyncAt!)
+                  : 'Never'}
+                {syncStatus.lastSyncRun?.lastSyncRunSource && (
+                  <> ({syncStatus.lastSyncRun.lastSyncRunSource === 'scheduled' ? 'scheduled' : 'manual'})</>
+                )}
+                {' • '}
+                {syncStatus.lastSyncRun?.lastSyncRunActivitiesSynced ?? 0} activities,{' '}
+                {syncStatus.lastSyncRun?.lastSyncRunFarmersSynced ?? 0} farmers (last run)
+                {' • '}
+                Total: {syncStatus.totalActivities} activities, {syncStatus.totalFarmers} farmers
+                {' • '}
+                Data source: {dataSource === 'api' ? 'API' : 'Excel'}
+                {dataSource === 'api' && (
+                  <>
+                    {' '}
+                    • Pull limit: {effectivePullLimit} (0 = all eligible)
+                    {syncStatus.adminConfig?.emsActivitiesDateFromDisplay && (
+                      <> • Activity date from: {formatConfigDateTimeDisplay(syncStatus.adminConfig.emsActivitiesDateFromDisplay)}</>
+                    )}
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-nowrap items-center gap-2 sm:gap-3 shrink-0 overflow-x-auto max-w-full pb-0.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              <Filter size={16} />
+              {showFilters ? 'Hide filters' : 'Filters'}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isLoading || isStatsLoading}
+            >
+              <RefreshCw size={16} className={isLoading || isStatsLoading ? 'animate-spin' : ''} />
+              Refresh
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              className="shrink-0 whitespace-nowrap"
+              onClick={() => handleSyncFFA(false)}
+              disabled={dataSource !== 'api' || isIncrementalSyncing || isFullSyncing}
+              title="Incremental sync: Only syncs new activities since last sync"
+            >
+              <Download size={16} className={isIncrementalSyncing ? 'animate-spin' : ''} />
+              {isIncrementalSyncing ? 'Syncing...' : 'Sync FFA (Incremental)'}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0 whitespace-nowrap"
+              onClick={() => handleSyncFFA(true)}
+              disabled={dataSource !== 'api' || isIncrementalSyncing || isFullSyncing}
+              title="Full sync: Syncs all activities from FFA_EMS_DEFAULT_DATE_FROM (takes longer)"
+            >
+              <Download size={16} className={isFullSyncing ? 'animate-spin' : ''} />
+              {isFullSyncing ? 'Full syncing...' : 'Sync FFA (Full)'}
+            </Button>
+          </div>
+        </div>
 
         {/* Filters – expand when Filter button clicked */}
         {showFilters && (

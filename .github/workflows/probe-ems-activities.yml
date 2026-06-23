@@ -53,13 +53,10 @@ jobs:
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json"
           echo "--- Response summary ---"
-          jq -r '
-            if type == "array" then "shape: top-level array, count: \(length)"
-            elif .Data.Activities then "shape: Data.Activities, count: \(.Data.Activities|length), Success: \(.Success)"
-            elif .Data then "shape: object Data, Success: \(.Success // "n/a")"
-            else "shape: other keys: \(keys|join(", "))"
-            end
-          ' /tmp/acts.json 2>/dev/null || head -c 800 /tmp/acts.json
+          jq '{Success, message, activity_count: (
+            if type == "array" then length
+            elif .Data.Activities then (.Data.Activities|length)
+            else 0 end)}' /tmp/acts.json 2>/dev/null || head -c 800 /tmp/acts.json
           echo ""
           echo "--- First 5 activities (Type, Date, OfficerId, Territory) ---"
           jq -r '

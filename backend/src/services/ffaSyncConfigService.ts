@@ -155,7 +155,7 @@ export const formatFfaSyncConfigResponse = async (
           ? new Date(lastSyncRun.lastSyncRunAt)
           : c.lastScheduledRunAt
             ? new Date(c.lastScheduledRunAt)
-            : undefined,
+            : null,
       }
     : null;
 

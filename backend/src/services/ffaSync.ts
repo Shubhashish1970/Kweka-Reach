@@ -1,6 +1,7 @@
 import { Activity, IActivity } from '../models/Activity.js';
 import { Farmer, IFarmer } from '../models/Farmer.js';
 import logger from '../config/logger.js';
+import { FfaSyncConfig } from '../models/FfaSyncConfig.js';
 import mongoose from 'mongoose';
 import axios, { AxiosError } from 'axios';
 import { getLanguageForState } from '../utils/stateLanguageMapper.js';
@@ -363,8 +364,59 @@ let syncProgress: SyncProgressState = {
   message: '',
 };
 
-export function getSyncProgress(): SyncProgressState {
-  return { ...syncProgress };
+const snapshotSyncProgress = (): SyncProgressState => ({ ...syncProgress });
+
+const persistSyncProgress = async (): Promise<void> => {
+  try {
+    await FfaSyncConfig.updateOne(
+      { key: 'default' },
+      {
+        $set: {
+          liveSyncProgress: {
+            ...snapshotSyncProgress(),
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }
+    );
+  } catch (error) {
+    logger.warn('[FFA SYNC] Failed to persist live sync progress', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
+const readStoredSyncProgress = (raw: Record<string, unknown> | null | undefined): SyncProgressState | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    running: Boolean(raw.running),
+    activitiesSynced: Number(raw.activitiesSynced) || 0,
+    totalActivities: Number(raw.totalActivities) || 0,
+    farmersSynced: Number(raw.farmersSynced) || 0,
+    errorCount: Number(raw.errorCount) || 0,
+    syncType:
+      raw.syncType === 'full' || raw.syncType === 'incremental' ? raw.syncType : null,
+    message: String(raw.message ?? ''),
+    lastResult: raw.lastResult as SyncProgressState['lastResult'],
+  };
+};
+
+export async function getSyncProgress(): Promise<SyncProgressState> {
+  if (syncProgress.running) {
+    return snapshotSyncProgress();
+  }
+  try {
+    const config = await FfaSyncConfig.findOne({ key: 'default' }).select('liveSyncProgress').lean();
+    const stored = readStoredSyncProgress(
+      config?.liveSyncProgress as Record<string, unknown> | null | undefined
+    );
+    if (stored) return stored;
+  } catch (error) {
+    logger.warn('[FFA SYNC] Failed to read live sync progress', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return snapshotSyncProgress();
 }
 
 /** Reset progress when a new sync is queued (avoids stale lastResult on first poll). */
@@ -379,6 +431,15 @@ export const beginSyncProgress = (syncType: 'full' | 'incremental'): void => {
     message: syncType === 'full' ? 'Full sync in progress…' : 'Incremental sync in progress…',
     lastResult: undefined,
   };
+  void persistSyncProgress();
+};
+
+let lastLiveProgressPersistAt = 0;
+const persistLiveSyncProgress = (force = false): void => {
+  const now = Date.now();
+  if (!force && now - lastLiveProgressPersistAt < 2000) return;
+  lastLiveProgressPersistAt = now;
+  void persistSyncProgress();
 };
 
 // Minimum time between manual incremental syncs (ms) — default 3 minutes
@@ -435,6 +496,7 @@ export const syncFFAData = async (
       logger.warn(`[FFA SYNC] ${skipReason}`);
       syncProgress.running = false;
       syncProgress.lastResult = { activitiesSynced: 0, farmersSynced: 0, errors: [skipReason], syncType: 'incremental', skipped: true, skipReason };
+      persistLiveSyncProgress(true);
       return {
         activitiesSynced: 0,
         farmersSynced: 0,
@@ -458,6 +520,7 @@ export const syncFFAData = async (
       logger.info(`[FFA SYNC] ${skipReason}`);
       syncProgress.running = false;
       syncProgress.lastResult = { activitiesSynced: 0, farmersSynced: 0, errors: [], syncType: 'incremental', skipped: true, skipReason };
+      persistLiveSyncProgress(true);
       return {
         activitiesSynced: 0,
         farmersSynced: 0,
@@ -524,6 +587,7 @@ export const syncFFAData = async (
         syncType: fullSync ? 'full' : 'incremental',
         infoMessage: FFA_SYNC_NO_ACTIVITIES_MESSAGE,
       };
+      persistLiveSyncProgress(true);
       lastSyncTime = Date.now();
       await maybeRecordLastSyncRun(
         {
@@ -582,6 +646,7 @@ export const syncFFAData = async (
           skipped: true,
           skipReason,
         };
+        persistLiveSyncProgress(true);
         lastSyncTime = Date.now();
         await maybeRecordLastSyncRun(
           {
@@ -620,6 +685,7 @@ export const syncFFAData = async (
       syncType: fullSync ? 'full' : 'incremental',
       message: `Syncing activities (${fullSync ? 'full' : 'incremental'})...`,
     };
+    persistLiveSyncProgress(true);
 
     const dataBatchId = `sync-${Date.now()}`;
 
@@ -638,10 +704,12 @@ export const syncFFAData = async (
         syncProgress.activitiesSynced = activitiesSynced;
         syncProgress.farmersSynced = farmersSynced;
         syncProgress.errorCount = errors.length;
+        persistLiveSyncProgress();
       } catch (error) {
         const errorMsg = `Failed to sync activity ${ffaActivity.activityId || 'unknown'}: ${error instanceof Error ? error.message : 'Unknown error'}`;
         errors.push(errorMsg);
         syncProgress.errorCount = errors.length;
+        persistLiveSyncProgress();
         logger.error(`[FFA SYNC] ${errorMsg}`, error);
       }
     }
@@ -660,6 +728,7 @@ export const syncFFAData = async (
     };
     syncProgress.running = false;
     syncProgress.lastResult = result;
+    persistLiveSyncProgress(true);
     isSyncing = false;
     lastSyncTime = Date.now();
     await maybeRecordLastSyncRun(result, options?.syncSource);
@@ -673,6 +742,7 @@ export const syncFFAData = async (
       errors: [error instanceof Error ? error.message : 'Unknown error'],
       syncType: (syncProgress.syncType || 'incremental') as 'full' | 'incremental',
     };
+    persistLiveSyncProgress(true);
     isSyncing = false;
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error('[FFA SYNC] FFA sync failed:', {

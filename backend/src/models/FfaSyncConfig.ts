@@ -27,6 +27,8 @@ export interface IFfaSyncConfig extends Document {
   lastScheduledRunMessage: string | null;
   /** Whether the last recorded sync run was manual or scheduled */
   lastSyncRunSource: 'manual' | 'scheduled' | null;
+  /** Cross-instance sync progress for Activity Monitoring UI polling */
+  liveSyncProgress?: Record<string, unknown> | null;
   updatedByUserId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -94,6 +96,10 @@ const FfaSyncConfigSchema = new Schema<IFfaSyncConfig>(
     lastSyncRunSource: {
       type: String,
       enum: ['manual', 'scheduled', null],
+      default: null,
+    },
+    liveSyncProgress: {
+      type: Schema.Types.Mixed,
       default: null,
     },
     updatedByUserId: {

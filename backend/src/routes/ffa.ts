@@ -216,9 +216,9 @@ const formatDDMMYYYY = (d: Date): string => {
 router.get(
   '/sync-progress',
   requirePermission('config.ffa'),
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const progress = getSyncProgress();
+      const progress = await getSyncProgress();
       res.json({
         success: true,
         data: progress,

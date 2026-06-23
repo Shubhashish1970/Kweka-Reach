@@ -177,6 +177,7 @@ const ActivitySamplingView: React.FC = () => {
       scheduleDailyMinute: number;
       scheduleTimezone: string;
       scheduledSyncActive: boolean;
+      nextScheduledRunAt?: string | null;
       serverDefaultPullLimit: number;
       lastScheduledRunAt: string | null;
       lastScheduledRunMessage: string | null;
@@ -411,6 +412,11 @@ const ActivitySamplingView: React.FC = () => {
 
   const effectivePullLimit =
     syncStatus?.adminConfig?.activitiesPullLimit ?? serverDefaultPullLimit;
+
+  const scheduledSyncConfigured =
+    dataSource === 'api' &&
+    (syncStatus?.adminConfig?.scheduleEnabled === true ||
+      syncStatus?.adminConfig?.scheduledSyncActive === true);
 
   const isFfaSyncTimeoutError = (errors?: string[]) =>
     (errors ?? []).some((e) => /timed?\s*out|timeout\s*expired/i.test(e));
@@ -1076,12 +1082,6 @@ const ActivitySamplingView: React.FC = () => {
           <div className="min-w-0">
             <h2 className="text-xl font-black text-slate-900 mb-1">Activity Monitoring</h2>
             <p className="text-sm text-slate-600">Monitor FFA activities and their status</p>
-            {syncStatus?.adminConfig?.scheduledSyncActive && (
-              <p className="text-xs text-emerald-700 mt-1">
-                Scheduled sync active — auto-refreshes batches, stats, and grid every{' '}
-                {BACKGROUND_POLL_ACTIVE_MS / 1000}s while sync runs.
-              </p>
-            )}
             {syncStatus && (
               <p className="text-xs text-slate-500 mt-1">
                 Last sync:{' '}
@@ -1153,7 +1153,45 @@ const ActivitySamplingView: React.FC = () => {
           </div>
         </div>
 
-        {syncProgress && (
+        {scheduledSyncConfigured && (
+          <div className="mb-4 rounded-2xl border-2 border-green-500 bg-green-50 px-4 py-3 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                {syncProgress?.running ? (
+                  <Loader2 size={18} className="animate-spin text-green-700 shrink-0" />
+                ) : (
+                  <span className="h-3 w-3 rounded-full bg-green-600 shrink-0" aria-hidden />
+                )}
+                <span className="text-sm font-bold text-green-900">
+                  Scheduled sync active · every {syncStatus?.adminConfig?.scheduleIntervalMinutes ?? 15} min
+                  {syncProgress?.running ? ' · syncing now' : ''}
+                </span>
+              </div>
+              <span className="text-xs font-medium text-green-800">
+                {syncProgress?.running
+                  ? `Live refresh every ${BACKGROUND_POLL_ACTIVE_MS / 1000}s · ${syncProgress.activitiesSynced} / ${syncProgress.totalActivities || '…'} activities`
+                  : syncStatus?.adminConfig?.nextScheduledRunAt
+                    ? `Next run ~${formatDateTimeIST(syncStatus.adminConfig.nextScheduledRunAt)}`
+                    : 'Auto-refreshes batches, stats & grid while sync runs'}
+              </span>
+            </div>
+            {syncProgress?.running && (
+              <div className="mt-3 h-2 w-full rounded-full bg-green-200 overflow-hidden" role="progressbar">
+                <div
+                  className="h-full bg-green-600 transition-all duration-500 rounded-full"
+                  style={{
+                    width:
+                      syncProgress.totalActivities > 0
+                        ? `${Math.min(100, (100 * syncProgress.activitiesSynced) / syncProgress.totalActivities)}%`
+                        : '15%',
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {syncProgress && (isIncrementalSyncing || isFullSyncing) && (
           <div className="mt-3 pt-3 border-t border-slate-200">
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
               {syncProgress.running ? (

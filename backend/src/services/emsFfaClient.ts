@@ -223,7 +223,9 @@ export const resolveActivitiesDateFrom = (dateFrom?: Date): Date => {
 
 export type EmsActivitiesFetchMode = 'full' | 'incremental';
 
-const DEFAULT_EMS_LIMIT = 0;
+/** NACL EMS requires limit > 0; 100 is the documented example. */
+const DEFAULT_EMS_LIMIT_INCREMENTAL = 100;
+const DEFAULT_EMS_LIMIT_FULL = 100;
 const DEFAULT_EMS_LIMIT_FALLBACK = 10_000;
 
 /** Parse non-negative integer limit; undefined if unset/invalid. */
@@ -235,7 +237,7 @@ export const parseEmsActivitiesLimit = (raw: string | undefined | null): number 
 };
 
 /**
- * NACL EMS `limit` query param: **0 = all eligible** activities for the given dateFrom.
+ * NACL EMS `limit` query param resolution (config/env). 0 means "use server default cap" in admin UI.
  * Resolution order: per-request override → mode env → global `FFA_EMS_ACTIVITIES_LIMIT` → 0.
  */
 export const resolveEmsActivitiesLimit = (
@@ -254,12 +256,25 @@ export const resolveEmsActivitiesLimit = (
   if (modeLimit !== undefined) return modeLimit;
   const globalLimit = parseEmsActivitiesLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT);
   if (globalLimit !== undefined) return globalLimit;
-  return DEFAULT_EMS_LIMIT;
+  return 0;
 };
 
 /** When limit=0 returns empty on prod, retry with this cap (env override). */
 export const resolveEmsActivitiesLimitFallback = (): number => {
   return parseEmsActivitiesLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT_FALLBACK) ?? DEFAULT_EMS_LIMIT_FALLBACK;
+};
+
+/**
+ * EMS API rejects limit=0 (doc: limit must be > 0). Map 0 / unset to a positive request limit.
+ */
+export const coerceEmsActivitiesRequestLimit = (
+  resolved: number,
+  mode: EmsActivitiesFetchMode
+): number => {
+  if (resolved > 0) return resolved;
+  const fromEnv = parseEmsActivitiesLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT_FALLBACK);
+  if (fromEnv !== undefined && fromEnv > 0) return fromEnv;
+  return mode === 'full' ? DEFAULT_EMS_LIMIT_FULL : DEFAULT_EMS_LIMIT_INCREMENTAL;
 };
 
 export const getEmsPullLimitConfig = (): {
@@ -271,11 +286,11 @@ export const getEmsPullLimitConfig = (): {
   hint: string;
 } => ({
   enabled: isEmsFfaApiEnabled(),
-  globalLimit: parseEmsActivitiesLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT) ?? DEFAULT_EMS_LIMIT,
+  globalLimit: parseEmsActivitiesLimit(process.env.FFA_EMS_ACTIVITIES_LIMIT) ?? 0,
   fullLimit: resolveEmsActivitiesLimit('full'),
   incrementalLimit: resolveEmsActivitiesLimit('incremental'),
   fallbackLimit: resolveEmsActivitiesLimitFallback(),
-  hint: '0 = all eligible activities for the dateFrom window (NACL EMS). Positive = max rows per pull.',
+  hint: 'EMS requires limit > 0. Admin 0 = server default (100 incremental / 10000 fallback).',
 });
 
 const resolveActivitiesRequestTimeoutMs = (limit: number): number => {
@@ -507,21 +522,23 @@ export const fetchEmsActivities = async (
   ffaApiUrl: string,
   dateFrom: Date,
   limit: number,
-  _useDateTimeFrom = true
+  mode: EmsActivitiesFetchMode = 'incremental'
 ): Promise<EmsFfaActivity[]> => {
   const base = resolveEmsApiBase(ffaApiUrl);
   const dateFromParam = formatEmsActivitiesQueryDateFrom(dateFrom);
   const safeLimit = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : 0;
+  const requestLimit = coerceEmsActivitiesRequestLimit(safeLimit, mode);
   const sessionToken = await authenticateEms(ffaApiUrl);
 
-  const fetchWithLimit = async (requestLimit: number): Promise<EmsFfaActivity[]> => {
-    const url = `${base}/EMS/activities?limit=${requestLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
-    const timeoutMs = resolveActivitiesRequestTimeoutMs(requestLimit);
+  const fetchWithLimit = async (reqLimit: number): Promise<EmsFfaActivity[]> => {
+    const url = `${base}/EMS/activities?limit=${reqLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
+    const timeoutMs = resolveActivitiesRequestTimeoutMs(reqLimit);
 
     logger.info('[FFA SYNC][EMS] Fetching activities', {
       url,
       dateFrom: dateFromParam,
-      limit: requestLimit,
+      limit: reqLimit,
+      configuredLimit: safeLimit,
       timeoutMs,
     });
 
@@ -544,19 +561,7 @@ export const fetchEmsActivities = async (
   };
 
   try {
-    let activities = await fetchWithLimit(safeLimit);
-
-    // NACL: limit=0 should return all eligible; prod often returns Success:false / empty — retry with env cap
-    if (activities.length === 0 && safeLimit === 0) {
-      const fallbackLimit = resolveEmsActivitiesLimitFallback();
-      logger.warn('[FFA SYNC][EMS] limit=0 returned no activities; retrying with high limit', {
-        fallbackLimit,
-        dateFromParam,
-      });
-      activities = await fetchWithLimit(fallbackLimit);
-      logger.info(`[FFA SYNC][EMS] Fallback limit=${fallbackLimit} fetched ${activities.length} activities`);
-    }
-
+    const activities = await fetchWithLimit(requestLimit);
     logger.info(`[FFA SYNC][EMS] Fetched ${activities.length} activities`);
     return activities;
   } catch (error) {

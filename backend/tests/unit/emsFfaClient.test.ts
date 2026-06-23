@@ -12,6 +12,7 @@ import {
   isEmsFfaApiEnabled,
   parseFfaEmsDefaultDateFrom,
   resolveEmsApiBase,
+  coerceEmsActivitiesRequestLimit,
   resolveEmsActivitiesLimit,
 } from '../../src/services/emsFfaClient.js';
 
@@ -80,7 +81,7 @@ describe('emsFfaClient', () => {
     expect(legacy.getDate()).toBe(1);
   });
 
-  test('resolveEmsActivitiesLimit defaults to 0 for full and incremental', () => {
+  test('resolveEmsActivitiesLimit defaults to 0 when env unset', () => {
     delete process.env.FFA_EMS_ACTIVITIES_LIMIT;
     delete process.env.FFA_EMS_ACTIVITIES_LIMIT_FULL;
     delete process.env.FFA_EMS_ACTIVITIES_LIMIT_INCREMENTAL;
@@ -91,6 +92,14 @@ describe('emsFfaClient', () => {
     process.env.FFA_EMS_ACTIVITIES_LIMIT_FULL = '100';
     expect(resolveEmsActivitiesLimit('full')).toBe(100);
     expect(resolveEmsActivitiesLimit('incremental', 250)).toBe(250);
+  });
+
+  test('coerceEmsActivitiesRequestLimit maps 0 to positive EMS request limit', () => {
+    delete process.env.FFA_EMS_ACTIVITIES_LIMIT_FALLBACK;
+    expect(coerceEmsActivitiesRequestLimit(0, 'incremental')).toBe(100);
+    expect(coerceEmsActivitiesRequestLimit(5, 'incremental')).toBe(5);
+    process.env.FFA_EMS_ACTIVITIES_LIMIT_FALLBACK = '500';
+    expect(coerceEmsActivitiesRequestLimit(0, 'incremental')).toBe(500);
   });
 
   test('getFfaEmsDefaultDateFromDisplay and ISO conversion', () => {
@@ -128,18 +137,13 @@ describe('emsFfaClient', () => {
       .mockResolvedValueOnce({
         status: 200,
         data: { Success: false, message: 'No data available' },
-      })
-      .mockResolvedValueOnce({
-        status: 200,
-        data: { Success: false, message: 'No data available' },
       });
 
     const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 0);
     expect(activities).toEqual([]);
-    expect(axios.get).toHaveBeenCalledTimes(2);
-    expect(axios.get).toHaveBeenNthCalledWith(
-      1,
-      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=01%2F05%2F2025`,
+    expect(axios.get).toHaveBeenCalledTimes(1);
+    expect(axios.get).toHaveBeenCalledWith(
+      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=01%2F05%2F2025`,
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer tok' }),
       })
@@ -192,7 +196,7 @@ describe('emsFfaClient', () => {
     expect(activities[0].state).toBe('KARNATAKA');
     expect(activities[0].farmers[0].name).toBe('Test Farmer');
     expect(axios.get).toHaveBeenCalledWith(
-      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=11%2F05%2F2025`,
+      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=11%2F05%2F2025`,
       expect.any(Object)
     );
   });
@@ -293,38 +297,26 @@ describe('emsFfaClient', () => {
     expect(activities).toEqual([]);
   });
 
-  test('fetchEmsActivities retries with fallback limit when limit=0 returns empty', async () => {
+  test('fetchEmsActivities uses configured positive limit directly', async () => {
     process.env.FFA_EMS_ACTIVITIES_LIMIT_FALLBACK = '500';
     jest.spyOn(axios, 'post').mockResolvedValueOnce({
       status: 200,
       data: { styp: 'S', odat: [{ token: 'tok' }] },
     });
-    jest.spyOn(axios, 'get')
-      .mockResolvedValueOnce({
-        status: 200,
-        data: { Success: false, message: 'No data available' },
-      })
-      .mockResolvedValueOnce({
-        status: 200,
-        data: {
-          Success: true,
-          Data: {
-            Activities: [{ ActivityId: '1', Type: 'Field Day', Date: '01-05-2025', Farmers: [] }],
-          },
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: {
+        Success: true,
+        Data: {
+          Activities: [{ ActivityId: '1', Type: 'Field Day', Date: '01-05-2025', Farmers: [] }],
         },
-      });
+      },
+    });
 
-    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 0);
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 5);
     expect(activities).toHaveLength(1);
-    expect(axios.get).toHaveBeenCalledTimes(2);
-    expect(axios.get).toHaveBeenNthCalledWith(
-      1,
-      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=01%2F05%2F2025`,
-      expect.any(Object)
-    );
-    expect(axios.get).toHaveBeenNthCalledWith(
-      2,
-      `${EMS_BASE}/EMS/activities?limit=500&dateFrom=01%2F05%2F2025`,
+    expect(axios.get).toHaveBeenCalledWith(
+      `${EMS_BASE}/EMS/activities?limit=5&dateFrom=01%2F05%2F2025`,
       expect.any(Object)
     );
   });

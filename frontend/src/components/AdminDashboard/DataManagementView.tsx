@@ -13,6 +13,7 @@ type FfaAdminConfig = {
   activitiesPullLimit: number | null;
   emsActivitiesDateFrom: string | null;
   emsActivitiesDateFromDisplay: string;
+  emsActivitiesDateFromDisplayShort?: string;
   serverDefaultActivitiesDateFrom: string;
   serverDefaultActivitiesDateFromIso: string;
   scheduleEnabled: boolean;
@@ -393,8 +394,11 @@ const DataManagementView: React.FC = () => {
                     />
                     <p className="text-xs text-slate-500 mt-2">
                       FFA <strong>activity date</strong> cutoff sent to the NACL FFA API as{' '}
-                      <code className="text-[11px]">dateFrom</code> in <strong>DD-MM-YYYY HH:mm:ss</strong> (e.g.{' '}
-                      {formatConfigDateTimeDisplay(ffaConfigMeta?.emsActivitiesDateFromDisplay) || '01/04/26, 00:00:00 IST'}) for both incremental and full pull.
+                      <code className="text-[11px]">dateFrom</code> in <strong>DD/MM/YYYY</strong> (e.g.{' '}
+                      {ffaConfigMeta?.emsActivitiesDateFromDisplayShort ||
+                        ffaConfigMeta?.serverDefaultActivitiesDateFrom ||
+                        '01/04/2026'}
+                      ).
                       FFA sends undelivered activities on or after this date; Kweka Reach EMS receives up to the pull limit per sync.
                       Once pulled, FFA marks them delivered and will not send again. Prod rejects{' '}
                       <code className="text-[11px]">DD/MM/YYYY HH:mm:ss</code> (slash + time).

@@ -12,6 +12,7 @@ import {
   parseEmsActivityDate,
   getEmsPullLimitConfig,
   parseEmsActivitiesLimit,
+  coerceEmsActivitiesRequestLimit,
   resolveEmsActivitiesLimit,
   isEmsFfaApiEnabled,
   resolveActivitiesDateFrom,
@@ -73,15 +74,36 @@ const fetchFFAActivities = async (
     const emsDateFrom = resolveActivitiesDateFrom(dateFrom);
     const emsMode = fullSync ? 'full' : 'incremental';
     const emsLimit = resolveEmsActivitiesLimit(emsMode, activitiesLimit);
+    const emsRequestLimit = coerceEmsActivitiesRequestLimit(emsLimit, emsMode);
     const dateFromParam = formatEmsActivitiesQueryDateFrom(emsDateFrom);
     logger.info('[FFA SYNC] Using NACL EMS API (authenticate + /EMS/activities)', {
       syncMode: emsMode,
-      limit: emsLimit,
+      configuredLimit: emsLimit,
+      requestLimit: emsRequestLimit,
       dateFrom: emsDateFrom.toISOString(),
       dateFromParam,
       dateFromMeaning: 'FFA activity date cutoff (DD/MM/YYYY for EMS query)',
     });
-    return fetchEmsActivities(FFA_API_URL, emsDateFrom, emsLimit);
+    const raw = await fetchEmsActivities(FFA_API_URL, emsDateFrom, emsLimit, emsMode);
+    const cutoffStart = new Date(emsDateFrom);
+    cutoffStart.setHours(0, 0, 0, 0);
+    const filtered = raw.filter((a) => {
+      try {
+        return parseEmsActivityDate(a.date) >= cutoffStart;
+      } catch {
+        logger.warn('[FFA SYNC] Dropping EMS activity with unparseable date', {
+          activityId: a.activityId,
+          date: a.date,
+        });
+        return false;
+      }
+    });
+    if (filtered.length < raw.length) {
+      logger.info(
+        `[FFA SYNC] Kept ${filtered.length}/${raw.length} EMS activities on or after ${dateFromParam}`
+      );
+    }
+    return filtered;
   }
 
   // Build URL with optional dateFrom parameter for incremental sync (mock / vendor spec)
@@ -314,6 +336,8 @@ export type SyncProgressState = {
   message: string;
   lastResult?: {
     activitiesSynced: number;
+    activitiesFetched?: number;
+    emsPullLimit?: number;
     farmersSynced: number;
     errors: string[];
     syncType: 'full' | 'incremental';
@@ -389,6 +413,8 @@ export const syncFFAData = async (
   skipped?: boolean;
   skipReason?: string;
   infoMessage?: string;
+  activitiesFetched?: number;
+  emsPullLimit?: number;
 }> => {
   const startTime = Date.now();
   const errors: string[] = [];
@@ -454,6 +480,14 @@ export const syncFFAData = async (
       emsDateFromParam: formatDateFromParam(activityDateFrom),
     });
 
+    const emsMode = fullSync ? 'full' : 'incremental';
+    const emsPullLimitResolved = isEmsFfaApiEnabled()
+      ? coerceEmsActivitiesRequestLimit(
+          resolveEmsActivitiesLimit(emsMode, options?.activitiesLimit),
+          emsMode
+        )
+      : undefined;
+
     let ffaActivities: FFAActivity[];
     try {
       ffaActivities = await fetchFFAActivities(
@@ -461,7 +495,10 @@ export const syncFFAData = async (
         fullSync,
         options?.activitiesLimit
       );
-      logger.info(`[FFA SYNC] Fetched ${ffaActivities.length} activities from FFA API`);
+      logger.info(
+        `[FFA SYNC] Fetched ${ffaActivities.length} activities from FFA API` +
+          (emsPullLimitResolved != null ? ` (EMS request limit=${emsPullLimitResolved})` : '')
+      );
     } catch (fetchError) {
       const errorMsg = fetchError instanceof Error ? fetchError.message : 'Failed to fetch activities from FFA API';
       logger.error('[FFA SYNC] Failed to fetch activities from FFA API:', errorMsg);
@@ -474,6 +511,8 @@ export const syncFFAData = async (
       syncProgress.running = false;
       syncProgress.lastResult = {
         activitiesSynced: 0,
+        activitiesFetched: 0,
+        emsPullLimit: emsPullLimitResolved,
         farmersSynced: 0,
         errors: [],
         syncType: fullSync ? 'full' : 'incremental',
@@ -490,6 +529,8 @@ export const syncFFAData = async (
       );
       return {
         activitiesSynced: 0,
+        activitiesFetched: 0,
+        emsPullLimit: emsPullLimitResolved,
         farmersSynced: 0,
         errors: [],
         syncType: fullSync ? 'full' : 'incremental',
@@ -503,29 +544,37 @@ export const syncFFAData = async (
     let newActivities: FFAActivity[] = [];
     if (!fullSync && ffaActivities.length > 0) {
       const existingActivityIds = await Activity.find({
-        activityId: { $in: ffaActivities.map(a => a.activityId).filter(Boolean) },
-        syncedAt: { $gte: lastSyncDate || new Date(0) }, // Only check activities synced after cutoff
-      }).select('activityId').lean();
+        activityId: { $in: ffaActivities.map((a) => a.activityId).filter(Boolean) },
+      })
+        .select('activityId')
+        .lean();
 
-      const existingIds = new Set(existingActivityIds.map(a => a.activityId));
-      newActivities = ffaActivities.filter(a => !existingIds.has(a.activityId));
-      
+      const existingIds = new Set(existingActivityIds.map((a) => a.activityId));
+      newActivities = ffaActivities.filter((a) => !existingIds.has(a.activityId));
+
       const skippedCount = ffaActivities.length - newActivities.length;
       if (skippedCount > 0) {
-        logger.info(`[FFA SYNC] Skipping ${skippedCount} activities that were already synced recently`);
+        logger.info(`[FFA SYNC] Skipping ${skippedCount} activities already in database`);
       }
-      
+
       if (newActivities.length === 0) {
-        logger.info(`[FFA SYNC] All ${ffaActivities.length} fetched activities were already synced. No new data to process.`);
+        const skipReason =
+          `EMS returned ${ffaActivities.length} activities but all are already in the database` +
+          (emsPullLimitResolved != null
+            ? ` (pull limit ${emsPullLimitResolved} — increase in Data Management if more are expected)`
+            : '');
+        logger.info(`[FFA SYNC] ${skipReason}`);
         isSyncing = false;
         syncProgress.running = false;
         syncProgress.lastResult = {
           activitiesSynced: 0,
+          activitiesFetched: ffaActivities.length,
+          emsPullLimit: emsPullLimitResolved,
           farmersSynced: 0,
           errors: [],
           syncType: 'incremental',
           skipped: true,
-          skipReason: `All ${ffaActivities.length} activities were already synced. No new data to process.`,
+          skipReason,
         };
         lastSyncTime = Date.now();
         await maybeRecordLastSyncRun(
@@ -533,18 +582,20 @@ export const syncFFAData = async (
             activitiesSynced: 0,
             farmersSynced: 0,
             skipped: true,
-            skipReason: `All ${ffaActivities.length} activities were already synced. No new data to process.`,
+            skipReason,
           },
           options?.syncSource
         );
         return {
           activitiesSynced: 0,
+          activitiesFetched: ffaActivities.length,
+          emsPullLimit: emsPullLimitResolved,
           farmersSynced: 0,
           errors: [],
           syncType: 'incremental',
           lastSyncDate,
           skipped: true,
-          skipReason: `All ${ffaActivities.length} activities were already synced. No new data to process.`,
+          skipReason,
         };
       }
       
@@ -594,6 +645,8 @@ export const syncFFAData = async (
 
     const result = {
       activitiesSynced,
+      activitiesFetched: ffaActivities.length,
+      emsPullLimit: emsPullLimitResolved,
       farmersSynced,
       errors,
       syncType: (fullSync ? 'full' : 'incremental') as 'full' | 'incremental',

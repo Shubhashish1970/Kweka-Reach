@@ -9,7 +9,7 @@ import ExcelUploadFlow from '../shared/ExcelUploadFlow';
 import { FFA_ACTIVITY_MAP_FIELDS, FFA_FARMER_MAP_FIELDS } from '../../constants/excelUploadFields';
 import InfoBanner from '../shared/InfoBanner';
 import { getTaskStatusLabel } from '../../utils/taskStatusLabels';
-import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST, formatDateTimeIST, formatConfigDateTimeDisplay } from '../../utils/dateRangeUtils';
+import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST, formatDateTimeIST, formatConfigDateTimeDisplay, toISODateLocal } from '../../utils/dateRangeUtils';
 
 interface ActivitySamplingStatus {
   activity: {
@@ -97,7 +97,7 @@ const DEFAULT_ACTIVITY_TABLE_WIDTHS: Record<ActivityTableColumnKey, number> = {
 };
 
 const ActivitySamplingView: React.FC = () => {
-  const { showError, showSuccess } = useToast();
+  const { showError, showSuccess, showWarning, showInfo } = useToast();
   const [isExporting, setIsExporting] = useState(false);
   const [activities, setActivities] = useState<ActivitySamplingStatus[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -408,13 +408,16 @@ const ActivitySamplingView: React.FC = () => {
   const effectivePullLimit =
     syncStatus?.adminConfig?.activitiesPullLimit ?? serverDefaultPullLimit;
 
-  /** After FFA sync, widen grid filter so imported activity dates (often older) are visible. */
+  /** After FFA sync, align grid date filter with activity cutoff → today so imported rows are visible. */
   const widenDateFilterAfterSync = () => {
-    const range = getPresetRange('Last 90 days');
-    setSelectedPreset('Last 90 days');
-    setDraftStart(range.start);
-    setDraftEnd(range.end);
-    setFilters((prev) => ({ ...prev, dateFrom: range.start, dateTo: range.end }));
+    const fromIso =
+      syncStatus?.adminConfig?.emsActivitiesDateFrom?.slice(0, 10) ||
+      getPresetRange('Last 90 days').start;
+    const end = toISODateLocal(new Date());
+    setSelectedPreset('Custom');
+    setDraftStart(fromIso);
+    setDraftEnd(end);
+    setFilters((prev) => ({ ...prev, dateFrom: fromIso, dateTo: end }));
   };
 
   const formatBatchActivityDateRange = (min?: string | null, max?: string | null) => {
@@ -639,6 +642,8 @@ const ActivitySamplingView: React.FC = () => {
 
     const finalizeSyncUi = async (result?: {
       activitiesSynced?: number;
+      activitiesFetched?: number;
+      emsPullLimit?: number;
       farmersSynced?: number;
       errors?: string[];
       syncType?: 'full' | 'incremental';
@@ -648,20 +653,30 @@ const ActivitySamplingView: React.FC = () => {
     }) => {
       stopSyncPolling();
       setSyncProgress(null);
+      const imported = result?.activitiesSynced ?? 0;
+      const fetched = result?.activitiesFetched;
+      const pullLimit = result?.emsPullLimit;
+
       if (result?.skipped) {
-        showSuccess(result.skipReason || 'Sync skipped');
+        showWarning(result.skipReason || 'Sync completed with no new activities imported');
       } else if (result?.infoMessage && (result.errors?.length ?? 0) === 0) {
-        showSuccess(result.infoMessage);
+        showInfo(
+          `${result.infoMessage}` +
+            (pullLimit != null ? ` (EMS pull limit: ${pullLimit})` : '')
+        );
       } else if (result) {
+        const fetchedNote =
+          fetched != null && fetched !== imported
+            ? ` — ${fetched} received from EMS`
+            : fetched != null
+              ? ` — ${fetched} from EMS`
+              : '';
         showSuccess(
-          `FFA sync completed (${result.syncType}): ${result.activitiesSynced ?? 0} activities, ${result.farmersSynced ?? 0} farmers synced${(result.errors?.length ?? 0) > 0 ? `, ${result.errors.length} errors` : ''}`
+          `FFA sync completed (${result.syncType}): ${imported} activities, ${result.farmersSynced ?? 0} farmers imported${fetchedNote}${(result.errors?.length ?? 0) > 0 ? `, ${result.errors.length} errors` : ''}` +
+            (pullLimit != null ? ` (pull limit ${pullLimit})` : '')
         );
       }
-      if ((result?.activitiesSynced ?? 0) > 0) {
-        widenDateFilterAfterSync();
-      } else {
-        await fetchActivities(pagination.page);
-      }
+      widenDateFilterAfterSync();
       await fetchStats();
       const statusAfterSync = await fetchSyncStatus();
       const syncAt =

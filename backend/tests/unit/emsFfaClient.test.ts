@@ -280,7 +280,7 @@ describe('emsFfaClient', () => {
     expect(activities[0].type).toBe('Field Day');
   });
 
-  test('fetchEmsActivities returns empty when Success true but no activities array (SQL/timeout message)', async () => {
+  test('fetchEmsActivities returns empty when Success true but no activities array (SQL message)', async () => {
     jest.spyOn(axios, 'post').mockResolvedValueOnce({
       status: 200,
       data: { styp: 'S', odat: [{ token: 'tok' }] },
@@ -295,6 +295,45 @@ describe('emsFfaClient', () => {
 
     const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 100);
     expect(activities).toEqual([]);
+  });
+
+  test('fetchEmsActivities throws when EMS Success true but message indicates timeout', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      status: 200,
+      data: { styp: 'S', odat: [{ token: 'tok' }] },
+    });
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: {
+        Success: true,
+        message:
+          'Timeout expired.  The timeout period elapsed prior to completion of the operation or the server is not responding.',
+      },
+    });
+
+    await expect(fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 5)).rejects.toThrow(
+      /EMS activities timed out/i
+    );
+  });
+
+  test('fetchEmsActivities uses longer axios timeout for large pulls', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      status: 200,
+      data: { styp: 'S', odat: [{ token: 'tok' }] },
+    });
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: {
+        Success: true,
+        Data: { Activities: [] },
+      },
+    });
+
+    await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 100);
+    expect(axios.get).toHaveBeenCalledWith(
+      expect.stringContaining('limit=100'),
+      expect.objectContaining({ timeout: 180_000 })
+    );
   });
 
   test('fetchEmsActivities uses configured positive limit directly', async () => {

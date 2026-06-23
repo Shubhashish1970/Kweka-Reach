@@ -299,8 +299,10 @@ const resolveActivitiesRequestTimeoutMs = (limit: number): number => {
     const n = Number.parseInt(envRaw, 10);
     if (Number.isFinite(n) && n > 0) return n;
   }
-  // Large pulls (limit=0) may return many activities + farmers
-  return limit === 0 ? 120_000 : REQUEST_TIMEOUT_MS;
+  // EMS can be slow (especially small limits); scale timeout with pull size.
+  if (limit === 0) return 120_000;
+  if (limit >= 50) return 180_000;
+  return 90_000;
 };
 
 const normalizeFarmer = (raw: Record<string, unknown>): EmsFfaFarmer => ({
@@ -446,6 +448,10 @@ const extractActivitiesFromPayload = (payload: unknown): EmsFfaActivity[] => {
       throw new Error(`EMS activities error: ${String(data.senm ?? data.message ?? 'unknown')}`);
     }
     const msg = String(data.message ?? data.Message ?? data.senm ?? '').trim();
+    const msgLower = msg.toLowerCase();
+    if (msgLower.includes('timeout')) {
+      throw new Error(`EMS activities timed out: ${msg || 'vendor did not respond in time'}`);
+    }
     logger.warn('[FFA SYNC][EMS] Activities response had no activities array', {
       responseSummary: summarizeEmsResponseForLog(payload),
       message: msg || undefined,

@@ -225,8 +225,9 @@ const fetchFFAActivities = async (
   }
 };
 
+const MISSING_ACTIVITY_LOCATION = 'Missing Location ';
+
 /**
- * Sync a single activity from FFA
  * @param dataBatchId - Same id for all activities in one sync run (for per-batch delete before sampling)
  */
 const syncActivity = async (ffaActivity: FFAActivity, dataBatchId: string): Promise<IActivity> => {
@@ -245,6 +246,11 @@ const syncActivity = async (ffaActivity: FFAActivity, dataBatchId: string): Prom
       logger.warn(`[FFA SYNC] Activity ${ffaActivity.activityId} missing state in payload; derived state from territory as "${resolvedState}"`);
     }
 
+    const resolvedLocation = (ffaActivity.location || '').trim() || MISSING_ACTIVITY_LOCATION;
+    if (!((ffaActivity.location || '').trim())) {
+      logger.warn(`[FFA SYNC] Activity ${ffaActivity.activityId} missing location; using "${MISSING_ACTIVITY_LOCATION}"`);
+    }
+
     // Upsert activity
     const activity = await Activity.findOneAndUpdate(
       { activityId: ffaActivity.activityId },
@@ -255,7 +261,7 @@ const syncActivity = async (ffaActivity: FFAActivity, dataBatchId: string): Prom
           date: parseEmsActivityDate(ffaActivity.date),
         officerId: ffaActivity.officerId,
         officerName: ffaActivity.officerName,
-        location: ffaActivity.location,
+        location: resolvedLocation,
         territory: ffaActivity.territory,
           territoryName: (ffaActivity.territoryName || ffaActivity.territory || '').trim(),
           zoneName: (ffaActivity.zoneName || '').trim(),

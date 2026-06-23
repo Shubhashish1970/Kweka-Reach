@@ -408,6 +408,9 @@ const ActivitySamplingView: React.FC = () => {
   const effectivePullLimit =
     syncStatus?.adminConfig?.activitiesPullLimit ?? serverDefaultPullLimit;
 
+  const isFfaSyncTimeoutError = (errors?: string[]) =>
+    (errors ?? []).some((e) => /timed?\s*out|timeout\s*expired/i.test(e));
+
   /** After FFA sync, align grid date filter with activity cutoff → today so imported rows are visible. */
   const widenDateFilterAfterSync = () => {
     const fromIso =
@@ -664,6 +667,11 @@ const ActivitySamplingView: React.FC = () => {
           `${result.infoMessage}` +
             (pullLimit != null ? ` (EMS pull limit: ${pullLimit})` : '')
         );
+      } else if (result && isFfaSyncTimeoutError(result.errors)) {
+        const detail =
+          result.errors?.[0] ??
+          'EMS activities request timed out. Try again or increase the pull limit in Data Management.';
+        showError(`FFA sync failed — timeout: ${detail}`);
       } else if (result) {
         const fetchedNote =
           fetched != null && fetched !== imported

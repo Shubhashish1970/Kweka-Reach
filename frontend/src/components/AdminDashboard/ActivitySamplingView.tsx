@@ -77,8 +77,11 @@ type ActivityTableColumnKey =
   | 'completed';
 
 /** Background poll: idle checks status/batches/stats; active also refreshes the activity grid. */
-const BACKGROUND_POLL_IDLE_MS = 60_000;
+const BACKGROUND_POLL_IDLE_MS = 30_000;
 const BACKGROUND_POLL_ACTIVE_MS = 8_000;
+const BACKGROUND_POLL_INITIAL_MS = 5_000;
+/** Manual sync polls progress every 1.5s; refresh grid/batches/stats every N polls (~7.5s). */
+const MANUAL_SYNC_GRID_REFRESH_EVERY_POLLS = 5;
 
 const DEFAULT_ACTIVITY_TABLE_WIDTHS: Record<ActivityTableColumnKey, number> = {
   expand: 56,
@@ -142,6 +145,7 @@ const ActivitySamplingView: React.FC = () => {
   const paginationPageRef = useRef(1);
   const wasBackgroundSyncRunningRef = useRef(false);
   const isManualSyncingRef = useRef(false);
+  const backgroundSyncProgressVisibleRef = useRef(false);
   const [syncStatus, setSyncStatus] = useState<{
     lastSyncAt: string | null;
     lastSyncRun?: {
@@ -507,6 +511,17 @@ const ActivitySamplingView: React.FC = () => {
 
     let cancelled = false;
 
+    const mapProgressFromApi = (data: any) => ({
+      running: data?.running ?? false,
+      activitiesSynced: data?.activitiesSynced ?? 0,
+      totalActivities: data?.totalActivities ?? 0,
+      farmersSynced: data?.farmersSynced ?? 0,
+      errorCount: data?.errorCount ?? 0,
+      syncType: (data?.syncType ?? 'incremental') as 'full' | 'incremental' | null,
+      message: data?.message || (data?.running ? 'Scheduled sync in progress…' : ''),
+      lastResult: data?.lastResult,
+    });
+
     const clearBackgroundPoll = () => {
       if (backgroundPollTimeoutRef.current) {
         clearTimeout(backgroundPollTimeoutRef.current);
@@ -530,7 +545,7 @@ const ActivitySamplingView: React.FC = () => {
         return;
       }
 
-      if (syncProgressPollRef.current || isManualSyncingRef.current) {
+      if (isManualSyncingRef.current) {
         scheduleNext(BACKGROUND_POLL_ACTIVE_MS);
         return;
       }
@@ -539,12 +554,18 @@ const ActivitySamplingView: React.FC = () => {
 
       try {
         let syncRunning = false;
+        let progressData: any = null;
         try {
           const pr = (await ffaAPI.getFFASyncProgress()) as any;
-          const progressData = pr?.data ?? pr;
+          progressData = pr?.data ?? pr;
           syncRunning = Boolean(progressData?.running);
         } catch {
           // Ignore — status/batch refresh still useful
+        }
+
+        if (syncRunning && progressData) {
+          backgroundSyncProgressVisibleRef.current = true;
+          setSyncProgress(mapProgressFromApi(progressData));
         }
 
         const statusData = await fetchSyncStatus({ silent: true });
@@ -564,6 +585,28 @@ const ActivitySamplingView: React.FC = () => {
 
         const syncJustFinished = wasBackgroundSyncRunningRef.current && !syncRunning;
         wasBackgroundSyncRunningRef.current = syncRunning;
+
+        if (syncJustFinished && progressData?.lastResult) {
+          const lr = progressData.lastResult;
+          setSyncProgress({
+            running: false,
+            activitiesSynced: lr.activitiesSynced ?? 0,
+            totalActivities: lr.activitiesSynced ?? 0,
+            farmersSynced: lr.farmersSynced ?? 0,
+            errorCount: lr.errors?.length ?? 0,
+            syncType: lr.syncType ?? 'incremental',
+            message: 'Scheduled sync completed',
+            lastResult: lr,
+          });
+          backgroundSyncProgressVisibleRef.current = true;
+          if (!lr.skipped && (lr.activitiesSynced ?? 0) > 0) {
+            showInfo(
+              `Scheduled sync completed: ${lr.activitiesSynced} activities, ${lr.farmersSynced ?? 0} farmers imported`
+            );
+          } else if (lr.skipped && lr.skipReason) {
+            showWarning(lr.skipReason);
+          }
+        }
 
         const includeGrid = syncRunning || syncRunChanged || syncJustFinished;
 
@@ -595,7 +638,7 @@ const ActivitySamplingView: React.FC = () => {
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
-    scheduleNext(BACKGROUND_POLL_IDLE_MS);
+    scheduleNext(BACKGROUND_POLL_INITIAL_MS);
 
     return () => {
       cancelled = true;
@@ -633,6 +676,7 @@ const ActivitySamplingView: React.FC = () => {
     syncStartedAtRef.current = Date.now();
     syncPollAttemptsRef.current = 0;
     requestedSyncTypeRef.current = fullSync ? 'full' : 'incremental';
+    backgroundSyncProgressVisibleRef.current = false;
 
     const stopSyncPolling = () => {
       if (syncProgressPollRef.current) {
@@ -685,14 +729,17 @@ const ActivitySamplingView: React.FC = () => {
         );
       }
       widenDateFilterAfterSync();
-      await fetchStats();
+      await Promise.all([
+        fetchStats(),
+        fetchActivities(1, false, { silent: true }),
+        fetchDataBatches(),
+      ]);
+      if (fullSync) setIsFullSyncing(false);
+      else setIsIncrementalSyncing(false);
       const statusAfterSync = await fetchSyncStatus();
       const syncAt =
         statusAfterSync?.lastSyncRun?.lastSyncRunAt || statusAfterSync?.lastSyncAt || null;
       if (syncAt) lastKnownSyncRunAtRef.current = syncAt;
-      await fetchDataBatches();
-      if (fullSync) setIsFullSyncing(false);
-      else setIsIncrementalSyncing(false);
     };
 
     try {
@@ -739,6 +786,16 @@ const ActivitySamplingView: React.FC = () => {
           });
           if (data.running) {
             syncPollSawRunningRef.current = true;
+          }
+          if (
+            data.running &&
+            syncPollAttemptsRef.current % MANUAL_SYNC_GRID_REFRESH_EVERY_POLLS === 0
+          ) {
+            await Promise.all([
+              fetchDataBatches({ silent: true }),
+              fetchStats({ silent: true }),
+              fetchActivities(paginationPageRef.current, false, { silent: true }),
+            ]);
           }
           if (data.running) {
             return;
@@ -1019,6 +1076,12 @@ const ActivitySamplingView: React.FC = () => {
           <div className="min-w-0">
             <h2 className="text-xl font-black text-slate-900 mb-1">Activity Monitoring</h2>
             <p className="text-sm text-slate-600">Monitor FFA activities and their status</p>
+            {syncStatus?.adminConfig?.scheduledSyncActive && (
+              <p className="text-xs text-emerald-700 mt-1">
+                Scheduled sync active — auto-refreshes batches, stats, and grid every{' '}
+                {BACKGROUND_POLL_ACTIVE_MS / 1000}s while sync runs.
+              </p>
+            )}
             {syncStatus && (
               <p className="text-xs text-slate-500 mt-1">
                 Last sync:{' '}

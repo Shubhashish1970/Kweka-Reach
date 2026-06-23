@@ -3,6 +3,7 @@ import {
   authenticateEms,
   fetchEmsActivities,
   formatDateFromParam,
+  formatEmsActivitiesQueryDateFrom,
   formatEmsActivitiesDateFromParam,
   formatEmsDateTimeFromParam,
   parseEmsActivityDate,
@@ -48,7 +49,12 @@ describe('emsFfaClient', () => {
     expect(formatDateFromParam(new Date(2025, 4, 1))).toBe('01/05/2025');
   });
 
-  test('formatEmsActivitiesDateFromParam uses DD-MM-YYYY HH:mm:ss', () => {
+  test('formatEmsActivitiesQueryDateFrom uses DD/MM/YYYY for EMS API query', () => {
+    expect(formatEmsActivitiesQueryDateFrom(new Date(2025, 4, 1))).toBe('01/05/2025');
+    expect(formatEmsActivitiesQueryDateFrom(new Date(2026, 5, 3, 15, 6, 7))).toBe('03/06/2026');
+  });
+
+  test('formatEmsActivitiesDateFromParam uses DD-MM-YYYY HH:mm:ss for display', () => {
     expect(formatEmsActivitiesDateFromParam(new Date(2025, 4, 1))).toBe('01-05-2025 00:00:00');
     expect(formatEmsActivitiesDateFromParam(new Date(2026, 4, 8, 22, 28, 44))).toBe(
       '08-05-2026 22:28:44'
@@ -118,15 +124,22 @@ describe('emsFfaClient', () => {
       status: 200,
       data: { styp: 'S', odat: [{ token: 'tok' }] },
     });
-    jest.spyOn(axios, 'get').mockResolvedValueOnce({
-      status: 200,
-      data: { Success: false, message: 'No data available' },
-    });
+    jest.spyOn(axios, 'get')
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { Success: false, message: 'No data available' },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { Success: false, message: 'No data available' },
+      });
 
     const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 0);
     expect(activities).toEqual([]);
-    expect(axios.get).toHaveBeenCalledWith(
-      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=01-05-2025%2000%3A00%3A00`,
+    expect(axios.get).toHaveBeenCalledTimes(2);
+    expect(axios.get).toHaveBeenNthCalledWith(
+      1,
+      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=01%2F05%2F2025`,
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer tok' }),
       })
@@ -179,12 +192,12 @@ describe('emsFfaClient', () => {
     expect(activities[0].state).toBe('KARNATAKA');
     expect(activities[0].farmers[0].name).toBe('Test Farmer');
     expect(axios.get).toHaveBeenCalledWith(
-      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=11-05-2025%2000%3A00%3A00`,
+      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=11%2F05%2F2025`,
       expect.any(Object)
     );
   });
 
-  test('fetchEmsActivities uses DD-MM-YYYY HH:mm:ss dateFrom for full and incremental', async () => {
+  test('fetchEmsActivities uses DD/MM/YYYY dateFrom for full and incremental', async () => {
     jest.spyOn(axios, 'post').mockResolvedValueOnce({
       status: 200,
       data: { styp: 'S', odat: [{ token: 'tok' }] },
@@ -194,9 +207,9 @@ describe('emsFfaClient', () => {
       data: { Success: true, Data: { Activities: [] } },
     });
 
-    await fetchEmsActivities(EMS_BASE, new Date(2026, 5, 3, 15, 6, 7), 0);
+    await fetchEmsActivities(EMS_BASE, new Date(2026, 5, 3, 15, 6, 7), 100);
     expect(axios.get).toHaveBeenCalledWith(
-      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=03-06-2026%2015%3A06%3A07`,
+      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=03%2F06%2F2026`,
       expect.any(Object)
     );
   });
@@ -263,6 +276,59 @@ describe('emsFfaClient', () => {
     expect(activities[0].type).toBe('Field Day');
   });
 
+  test('fetchEmsActivities returns empty when Success true but no activities array (SQL/timeout message)', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      status: 200,
+      data: { styp: 'S', odat: [{ token: 'tok' }] },
+    });
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: {
+        Success: true,
+        message: 'Error converting data type varchar to date.',
+      },
+    });
+
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 100);
+    expect(activities).toEqual([]);
+  });
+
+  test('fetchEmsActivities retries with fallback limit when limit=0 returns empty', async () => {
+    process.env.FFA_EMS_ACTIVITIES_LIMIT_FALLBACK = '500';
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      status: 200,
+      data: { styp: 'S', odat: [{ token: 'tok' }] },
+    });
+    jest.spyOn(axios, 'get')
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { Success: false, message: 'No data available' },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          Success: true,
+          Data: {
+            Activities: [{ ActivityId: '1', Type: 'Field Day', Date: '01-05-2025', Farmers: [] }],
+          },
+        },
+      });
+
+    const activities = await fetchEmsActivities(EMS_BASE, new Date(2025, 4, 1), 0);
+    expect(activities).toHaveLength(1);
+    expect(axios.get).toHaveBeenCalledTimes(2);
+    expect(axios.get).toHaveBeenNthCalledWith(
+      1,
+      `${EMS_BASE}/EMS/activities?limit=0&dateFrom=01%2F05%2F2025`,
+      expect.any(Object)
+    );
+    expect(axios.get).toHaveBeenNthCalledWith(
+      2,
+      `${EMS_BASE}/EMS/activities?limit=500&dateFrom=01%2F05%2F2025`,
+      expect.any(Object)
+    );
+  });
+
   test('fetchEmsActivities maps vendor-shaped activities', async () => {
     jest.spyOn(axios, 'post').mockResolvedValueOnce({
       status: 200,
@@ -296,7 +362,7 @@ describe('emsFfaClient', () => {
     expect(activities).toHaveLength(1);
     expect(activities[0].activityId).toBe('A-1');
     expect(axios.get).toHaveBeenCalledWith(
-      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=01-05-2025%2000%3A00%3A00`,
+      `${EMS_BASE}/EMS/activities?limit=100&dateFrom=01%2F05%2F2025`,
       expect.any(Object)
     );
     expect(activities[0].farmers[0].mobileNumber).toBe('9876543210');

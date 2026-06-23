@@ -7,6 +7,7 @@ import { getLanguageForState } from '../utils/stateLanguageMapper.js';
 import {
   fetchEmsActivities,
   formatDateFromParam,
+  formatEmsActivitiesQueryDateFrom,
   formatEmsActivitiesDateFromParam,
   parseEmsActivityDate,
   getEmsPullLimitConfig,
@@ -72,13 +73,13 @@ const fetchFFAActivities = async (
     const emsDateFrom = resolveActivitiesDateFrom(dateFrom);
     const emsMode = fullSync ? 'full' : 'incremental';
     const emsLimit = resolveEmsActivitiesLimit(emsMode, activitiesLimit);
-    const dateFromParam = formatEmsActivitiesDateFromParam(emsDateFrom);
+    const dateFromParam = formatEmsActivitiesQueryDateFrom(emsDateFrom);
     logger.info('[FFA SYNC] Using NACL EMS API (authenticate + /EMS/activities)', {
       syncMode: emsMode,
       limit: emsLimit,
       dateFrom: emsDateFrom.toISOString(),
       dateFromParam,
-      dateFromMeaning: 'FFA activity date cutoff (DD-MM-YYYY HH:mm:ss)',
+      dateFromMeaning: 'FFA activity date cutoff (DD/MM/YYYY for EMS query)',
     });
     return fetchEmsActivities(FFA_API_URL, emsDateFrom, emsLimit);
   }
@@ -442,7 +443,7 @@ export const syncFFAData = async (
     const activityDateFrom = await resolveEmsActivitiesDateFrom();
     lastSyncDate = activityDateFrom;
     logger.info(
-      `[FFA SYNC] EMS activity dateFrom=${formatEmsActivitiesDateFromParam(activityDateFrom)} (full and incremental; DD-MM-YYYY HH:mm:ss)`
+      `[FFA SYNC] EMS activity dateFrom=${formatEmsActivitiesQueryDateFrom(activityDateFrom)} (DD/MM/YYYY query param; cutoff from admin config or FFA_EMS_DEFAULT_DATE_FROM)`
     );
 
     logger.info(`[FFA SYNC] Starting FFA data sync (${fullSync ? 'full' : 'incremental'})...`, {

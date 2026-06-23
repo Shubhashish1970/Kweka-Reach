@@ -80,7 +80,14 @@ export const formatEmsDateTimeFromParam = (date: Date): string => {
   return `${dd}-${mm}-${yyyy} ${hh}:${min}:${ss}`;
 };
 
-/** EMS activities `dateFrom` — always DD-MM-YYYY HH:mm:ss for full and incremental. */
+/**
+ * NACL EMS `dateFrom` query param for GET /EMS/activities.
+ * Prod accepts DD/MM/YYYY date-only (Postman / live API). DD-MM-YYYY HH:mm:ss and
+ * DD/MM/YYYY HH:mm:ss cause SQL errors or timeouts on emsffaapi.naclind.com.
+ */
+export const formatEmsActivitiesQueryDateFrom = (date: Date): string => formatDateFromParam(date);
+
+/** @deprecated Prefer formatEmsActivitiesQueryDateFrom for EMS API query strings. */
 export const formatEmsActivitiesDateFromParam = (date: Date): string =>
   formatEmsDateTimeFromParam(date);
 
@@ -423,13 +430,13 @@ const extractActivitiesFromPayload = (payload: unknown): EmsFfaActivity[] => {
     if (!success && (data.styp === 'E' || data.styp === 'e')) {
       throw new Error(`EMS activities error: ${String(data.senm ?? data.message ?? 'unknown')}`);
     }
-    if (!success && data.Success === false) {
-      return [];
-    }
-    logger.error('[FFA SYNC][EMS] EMS activities response does not contain an activities array', {
+    const msg = String(data.message ?? data.Message ?? data.senm ?? '').trim();
+    logger.warn('[FFA SYNC][EMS] Activities response had no activities array', {
       responseSummary: summarizeEmsResponseForLog(payload),
+      message: msg || undefined,
+      success,
     });
-    throw new Error('EMS activities response does not contain an activities array');
+    return [];
   }
 
   return mapRawActivityList(rawList);
@@ -493,8 +500,8 @@ export const authenticateEms = async (ffaApiUrl: string): Promise<string> => {
 
 /**
  * GET /api/EMS/activities?limit=N&dateFrom=... (dateFrom required by EMS).
- * dateFrom as DD-MM-YYYY HH:mm:ss for full and incremental (NACL activity date format).
- * DD/MM/YYYY date-only is also accepted by EMS; DD/MM/YYYY HH:mm:ss is rejected by prod.
+ * dateFrom query uses DD/MM/YYYY (NACL prod / Postman). Activity `Date` fields in the
+ * response remain DD-MM-YYYY HH:mm:ss and are parsed by parseEmsActivityDate.
  */
 export const fetchEmsActivities = async (
   ffaApiUrl: string,
@@ -503,21 +510,21 @@ export const fetchEmsActivities = async (
   _useDateTimeFrom = true
 ): Promise<EmsFfaActivity[]> => {
   const base = resolveEmsApiBase(ffaApiUrl);
-  const dateFromParam = formatEmsActivitiesDateFromParam(dateFrom);
+  const dateFromParam = formatEmsActivitiesQueryDateFrom(dateFrom);
   const safeLimit = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : 0;
-  const url = `${base}/EMS/activities?limit=${safeLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
-  const timeoutMs = resolveActivitiesRequestTimeoutMs(safeLimit);
-
   const sessionToken = await authenticateEms(ffaApiUrl);
 
-  logger.info('[FFA SYNC][EMS] Fetching activities', {
-    url,
-    dateFrom: dateFromParam,
-    limit: safeLimit,
-    timeoutMs,
-  });
+  const fetchWithLimit = async (requestLimit: number): Promise<EmsFfaActivity[]> => {
+    const url = `${base}/EMS/activities?limit=${requestLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
+    const timeoutMs = resolveActivitiesRequestTimeoutMs(requestLimit);
 
-  try {
+    logger.info('[FFA SYNC][EMS] Fetching activities', {
+      url,
+      dateFrom: dateFromParam,
+      limit: requestLimit,
+      timeoutMs,
+    });
+
     const response = await axios.get(url, {
       timeout: timeoutMs,
       headers: {
@@ -533,29 +540,21 @@ export const fetchEmsActivities = async (
       throw new Error(`EMS activities HTTP ${response.status}: ${detail}`);
     }
 
-    const data = response.data;
-    let activities = extractActivitiesFromPayload(data);
+    return extractActivitiesFromPayload(response.data);
+  };
 
-    // NACL: limit=0 should return all eligible; some environments return empty — retry with a high cap
+  try {
+    let activities = await fetchWithLimit(safeLimit);
+
+    // NACL: limit=0 should return all eligible; prod often returns Success:false / empty — retry with env cap
     if (activities.length === 0 && safeLimit === 0) {
       const fallbackLimit = resolveEmsActivitiesLimitFallback();
-      const fallbackUrl = `${base}/EMS/activities?limit=${fallbackLimit}&dateFrom=${encodeURIComponent(dateFromParam)}`;
       logger.warn('[FFA SYNC][EMS] limit=0 returned no activities; retrying with high limit', {
         fallbackLimit,
         dateFromParam,
       });
-      const fallbackRes = await axios.get(fallbackUrl, {
-        timeout: resolveActivitiesRequestTimeoutMs(fallbackLimit),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-        },
-        validateStatus: (status) => status < 500,
-      });
-      if (fallbackRes.status < 400 && fallbackRes.data != null) {
-        activities = extractActivitiesFromPayload(fallbackRes.data);
-        logger.info(`[FFA SYNC][EMS] Fallback limit=${fallbackLimit} fetched ${activities.length} activities`);
-      }
+      activities = await fetchWithLimit(fallbackLimit);
+      logger.info(`[FFA SYNC][EMS] Fallback limit=${fallbackLimit} fetched ${activities.length} activities`);
     }
 
     logger.info(`[FFA SYNC][EMS] Fetched ${activities.length} activities`);
@@ -566,7 +565,7 @@ export const fetchEmsActivities = async (
       : error instanceof Error
         ? error.message
         : 'EMS activities request failed';
-    logger.error('[FFA SYNC][EMS] Activities fetch error', { url, message: msg });
+    logger.error('[FFA SYNC][EMS] Activities fetch error', { dateFrom: dateFromParam, limit: safeLimit, message: msg });
     throw new Error(msg);
   }
 };

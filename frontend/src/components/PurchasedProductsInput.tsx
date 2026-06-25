@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, X, Search } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Plus, X } from 'lucide-react';
 import UnitDropdown from './UnitDropdown';
 
 interface PurchasedProduct {
@@ -10,12 +10,34 @@ interface PurchasedProduct {
 
 interface PurchasedProductsInputProps {
   products: string[];
+  activityProducts?: string[];
+  suggestedProducts?: string[];
   selectedProducts: PurchasedProduct[];
   onUpdate: (products: PurchasedProduct[]) => void;
 }
 
+const mergeUniqueProducts = (...lists: (string[] | undefined)[]): string[] => {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const list of lists) {
+    for (const product of list ?? []) {
+      const trimmed = product?.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(trimmed);
+    }
+  }
+
+  return merged;
+};
+
 const PurchasedProductsInput: React.FC<PurchasedProductsInputProps> = ({
   products,
+  activityProducts = [],
+  suggestedProducts = [],
   selectedProducts,
   onUpdate,
 }) => {
@@ -23,13 +45,23 @@ const PurchasedProductsInput: React.FC<PurchasedProductsInputProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [customProduct, setCustomProduct] = useState('');
 
-  const filteredProducts = products.filter(product =>
-    product.toLowerCase().includes(searchTerm.toLowerCase()) &&
-    !selectedProducts.some(sp => sp.product.toLowerCase() === product.toLowerCase())
+  const searchableProducts = useMemo(
+    () => mergeUniqueProducts(activityProducts, suggestedProducts, products),
+    [activityProducts, suggestedProducts, products]
   );
 
+  const isProductSelected = (productName: string) =>
+    selectedProducts.some((sp) => sp.product.toLowerCase() === productName.toLowerCase());
+
+  const filteredProducts = searchableProducts.filter(
+    (product) =>
+      product.toLowerCase().includes(searchTerm.toLowerCase()) && !isProductSelected(product)
+  );
+
+  const availableActivityProducts = activityProducts.filter((product) => !isProductSelected(product));
+
   const handleAddProduct = (productName: string) => {
-    if (!selectedProducts.some(sp => sp.product.toLowerCase() === productName.toLowerCase())) {
+    if (!isProductSelected(productName)) {
       onUpdate([...selectedProducts, { product: productName, quantity: '', unit: 'kg' }]);
     }
     setSearchTerm('');
@@ -64,8 +96,25 @@ const PurchasedProductsInput: React.FC<PurchasedProductsInputProps> = ({
     }
   };
 
+  const hasSearchText = Boolean(searchTerm || customProduct);
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 overflow-visible">
+      {availableActivityProducts.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {availableActivityProducts.map((product) => (
+            <button
+              key={product}
+              type="button"
+              onClick={() => handleAddProduct(product)}
+              className="px-4 py-2 rounded-full text-xs font-medium border transition-all active:scale-95 min-h-[32px] bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+            >
+              {product}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Selected Products List */}
       {selectedProducts.length > 0 && (
         <div className="space-y-2">
@@ -109,9 +158,9 @@ const PurchasedProductsInput: React.FC<PurchasedProductsInputProps> = ({
           Add Product
         </button>
       ) : (
-        <div className="relative inline-block">
+        <div className="relative inline-block overflow-visible">
           <div className="flex items-center gap-1.5">
-            <div className="relative">
+            <div className="relative overflow-visible">
               <input
                 type="text"
                 value={searchTerm || customProduct}
@@ -133,13 +182,13 @@ const PurchasedProductsInput: React.FC<PurchasedProductsInputProps> = ({
                 className="min-h-12 px-4 py-3 text-sm font-medium border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 min-w-[180px] max-w-[250px]"
                 autoFocus
               />
-              {/* Show matching products as suggestions */}
-              {(searchTerm || customProduct) && filteredProducts.length > 0 && (
-                <div className="dropdown-suggestions absolute z-10 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-32 overflow-y-auto min-w-[200px]">
-                  {filteredProducts.slice(0, 5).map((product) => (
+              {hasSearchText && filteredProducts.length > 0 && (
+                <div className="dropdown-suggestions absolute z-50 bottom-full mb-1 left-0 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto min-w-[240px] w-max max-w-[320px]">
+                  {filteredProducts.map((product) => (
                     <button
                       key={product}
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => handleAddProduct(product)}
                       className="w-full px-4 py-3 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
                     >
@@ -148,8 +197,8 @@ const PurchasedProductsInput: React.FC<PurchasedProductsInputProps> = ({
                   ))}
                 </div>
               )}
-              {filteredProducts.length === 0 && (searchTerm || customProduct) && (
-                <div className="dropdown-suggestions absolute z-10 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg min-w-[200px]">
+              {hasSearchText && filteredProducts.length === 0 && (
+                <div className="dropdown-suggestions absolute z-50 bottom-full mb-1 left-0 bg-white border border-slate-200 rounded-xl shadow-lg min-w-[240px]">
                   <div className="px-4 py-3 text-sm text-slate-500 italic font-normal">
                     Press Enter to add "{customProduct}"
                   </div>
@@ -187,4 +236,3 @@ const PurchasedProductsInput: React.FC<PurchasedProductsInputProps> = ({
 };
 
 export default PurchasedProductsInput;
-

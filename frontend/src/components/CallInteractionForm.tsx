@@ -465,13 +465,15 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                                 </div>
 
                                 {formData.hasPurchased === true && (
-                                  <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500" ref={purchasedProductsRef}>
-                                    <div>
+                                  <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-visible" ref={purchasedProductsRef}>
+                                    <div className="overflow-visible">
                                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">
                                         What did they purchase?
                                       </label>
                                       <PurchasedProductsInput
                                         products={masterProducts}
+                                        activityProducts={AgriProducts}
+                                        suggestedProducts={formData.productsDiscussed}
                                         selectedProducts={formData.purchasedProducts || []}
                                         onUpdate={(products) => setFormData((p: any) => ({ ...p, purchasedProducts: products }))}
                                       />

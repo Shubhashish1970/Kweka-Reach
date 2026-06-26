@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Edit2, Loader2, Download, Search, CheckCircle, XCircle, Globe, Check, Trash2, CheckSquare, Square, Filter } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 import StyledSelect from '../../shared/StyledSelect';
@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import ExcelUploadFlow from '../../shared/ExcelUploadFlow';
 import { STATE_LANGUAGE_MAP_FIELDS } from '../../../constants/excelUploadFields';
 import { formatDateIST } from '../../../utils/dateRangeUtils';
+import { useMasterLanguages } from '../../../hooks/useMasterLanguages';
 
 interface StateLanguageMapping {
   _id: string;
@@ -31,23 +32,12 @@ const getAuthHeaders = () => {
   };
 };
 
-// Fallback languages in case API fails
-const FALLBACK_LANGUAGES = [
-  'Hindi',
-  'Telugu',
-  'Marathi',
-  'Kannada',
-  'Tamil',
-  'Bengali',
-  'Oriya',
-  'English',
-  'Malayalam',
-];
+// Fallback languages in case API fails - used only for default form value
+const DEFAULT_PRIMARY_LANGUAGE = 'Hindi';
 
 const StateLanguageMappingView: React.FC = () => {
   const { showSuccess, showError } = useToast();
   const [mappings, setMappings] = useState<StateLanguageMapping[]>([]);
-  const [availableLanguages, setAvailableLanguages] = useState<string[]>(FALLBACK_LANGUAGES);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showInactive, setShowInactive] = useState(false);
@@ -68,19 +58,19 @@ const StateLanguageMappingView: React.FC = () => {
   const [importTotal, setImportTotal] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
 
-  const fetchLanguages = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/master-data/languages`, {
-        headers: getAuthHeaders(),
-      });
-      const data = await response.json();
-      if (data.success && data.data.languages.length > 0) {
-        setAvailableLanguages(data.data.languages.map((l: any) => l.name));
-      }
-    } catch (error) {
-      console.warn('Failed to fetch languages from API, using fallback');
-    }
-  };
+  const mappedLanguages = useMemo(
+    () =>
+      mappings.flatMap((mapping) => [
+        mapping.primaryLanguage,
+        ...(mapping.secondaryLanguages || []),
+      ]),
+    [mappings]
+  );
+  const { languages: availableLanguages } = useMasterLanguages([
+    formData.primaryLanguage,
+    ...formData.secondaryLanguages,
+    ...mappedLanguages,
+  ]);
 
   const fetchMappings = async () => {
     setIsLoading(true);
@@ -102,7 +92,6 @@ const StateLanguageMappingView: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchLanguages();
     fetchMappings();
   }, []);
 

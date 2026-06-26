@@ -67,7 +67,6 @@ const UserSchema = new Schema<IUser>(
     languageCapabilities: {
       type: [String],
       default: [],
-      enum: ['Hindi', 'Telugu', 'Marathi', 'Kannada', 'Tamil', 'Bengali', 'Oriya', 'English', 'Malayalam'],
     },
     assignedTerritories: {
       type: [String],

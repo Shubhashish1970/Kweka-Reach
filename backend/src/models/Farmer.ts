@@ -33,7 +33,7 @@ const FarmerSchema = new Schema<IFarmer>(
     preferredLanguage: {
       type: String,
       required: [true, 'Preferred language is required'],
-      enum: ['Hindi', 'Telugu', 'Marathi', 'Kannada', 'Tamil', 'Bengali', 'Oriya', 'English', 'Malayalam'],
+      trim: true,
     },
     territory: {
       type: String,

@@ -1,5 +1,18 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MasterLanguage } from '../src/models/MasterData.js';
+
+const TEST_MASTER_LANGUAGES = [
+  { name: 'Hindi', code: 'HI', displayOrder: 1, isActive: true },
+  { name: 'Telugu', code: 'TE', displayOrder: 2, isActive: true },
+  { name: 'Marathi', code: 'MR', displayOrder: 3, isActive: true },
+  { name: 'Kannada', code: 'KN', displayOrder: 4, isActive: true },
+  { name: 'Tamil', code: 'TA', displayOrder: 5, isActive: true },
+  { name: 'Bengali', code: 'BN', displayOrder: 6, isActive: true },
+  { name: 'Oriya', code: 'OR', displayOrder: 7, isActive: true },
+  { name: 'English', code: 'EN', displayOrder: 8, isActive: true },
+  { name: 'Malayalam', code: 'ML', displayOrder: 9, isActive: true },
+];
 
 let mongo: MongoMemoryServer | null = null;
 
@@ -20,6 +33,8 @@ beforeEach(async () => {
     // eslint-disable-next-line no-await-in-loop
     await c.deleteMany({});
   }
+
+  await MasterLanguage.insertMany(TEST_MASTER_LANGUAGES);
 });
 
 afterAll(async () => {

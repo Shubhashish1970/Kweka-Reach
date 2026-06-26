@@ -1,22 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Check, Loader2 } from 'lucide-react';
-
-// Fallback languages in case API fails
-export const FALLBACK_LANGUAGES = [
-  'Hindi',
-  'Telugu',
-  'Marathi',
-  'Kannada',
-  'Tamil',
-  'Bengali',
-  'Oriya',
-  'English',
-  'Malayalam',
-] as const;
-
-export type Language = string;
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import { useMasterLanguages } from '../../hooks/useMasterLanguages';
 
 interface LanguageSelectorProps {
   selectedLanguages: string[];
@@ -31,32 +15,7 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   required = false,
   disabled = false,
 }) => {
-  const [availableLanguages, setAvailableLanguages] = useState<string[]>([...FALLBACK_LANGUAGES]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchLanguages = async () => {
-      try {
-        const token = localStorage.getItem('authToken');
-        const response = await fetch(`${API_BASE}/master-data/languages`, {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token && { Authorization: `Bearer ${token}` }),
-          },
-        });
-        const data = await response.json();
-        if (data.success && data.data.languages.length > 0) {
-          setAvailableLanguages(data.data.languages.map((l: any) => l.name));
-        }
-      } catch (error) {
-        console.warn('Failed to fetch languages from API, using fallback');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchLanguages();
-  }, []);
+  const { languages: availableLanguages, isLoading } = useMasterLanguages(selectedLanguages);
 
   const handleToggle = (language: string) => {
     if (disabled) return;

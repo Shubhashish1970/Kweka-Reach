@@ -21,11 +21,11 @@ const StateLanguageMappingSchema = new Schema<IStateLanguageMapping>(
     primaryLanguage: {
       type: String,
       required: [true, 'Primary language is required'],
-      enum: ['Hindi', 'Telugu', 'Marathi', 'Kannada', 'Tamil', 'Bengali', 'Oriya', 'English', 'Malayalam'],
+      trim: true,
     },
     secondaryLanguages: [{
       type: String,
-      enum: ['Hindi', 'Telugu', 'Marathi', 'Kannada', 'Tamil', 'Bengali', 'Oriya', 'English', 'Malayalam'],
+      trim: true,
     }],
     isActive: {
       type: Boolean,

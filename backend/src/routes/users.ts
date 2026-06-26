@@ -6,6 +6,7 @@ import { authenticate } from '../middleware/auth.js';
 import { requireRole, requirePermission } from '../middleware/rbac.js';
 import { AppError } from '../middleware/errorHandler.js';
 import logger from '../config/logger.js';
+import { assertActiveMasterLanguages } from '../utils/masterLanguageValidation.js';
 
 const router = express.Router();
 
@@ -178,6 +179,11 @@ router.post(
 
       const { name, email, password, role, roles, employeeId, languageCapabilities = [], assignedTerritories = [], teamLeadId } = req.body;
 
+      const normalizedLanguageCapabilities = await assertActiveMasterLanguages(
+        languageCapabilities,
+        'Language capability'
+      );
+
       // Check if email already exists
       const existingUser = await User.findOne({ $or: [{ email }, { employeeId }] });
       if (existingUser) {
@@ -213,7 +219,7 @@ router.post(
         role,
         roles: userRoles,
         employeeId,
-        languageCapabilities,
+        languageCapabilities: normalizedLanguageCapabilities,
         assignedTerritories,
         teamLeadId: teamLeadId || undefined,
       });
@@ -285,7 +291,12 @@ router.put(
         }
         updateData.roles = userRoles;
       }
-      if (req.body.languageCapabilities) updateData.languageCapabilities = req.body.languageCapabilities;
+      if (req.body.languageCapabilities !== undefined) {
+        updateData.languageCapabilities = await assertActiveMasterLanguages(
+          req.body.languageCapabilities,
+          'Language capability'
+        );
+      }
       if (req.body.assignedTerritories) updateData.assignedTerritories = req.body.assignedTerritories;
       if (req.body.teamLeadId !== undefined) {
         if (req.body.teamLeadId) {

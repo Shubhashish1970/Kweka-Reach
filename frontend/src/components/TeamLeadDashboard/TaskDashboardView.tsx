@@ -10,18 +10,9 @@ import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } fro
 import { getTaskStatusLabel, TASK_STATUS_LABELS } from '../../utils/taskStatusLabels';
 import TaskQueueTable from './TaskQueueTable';
 
-const LANGUAGE_ORDER = [
-  'Hindi',
-  'Telugu',
-  'Marathi',
-  'Kannada',
-  'Tamil',
-  'Bengali',
-  'Oriya',
-  'Malayalam',
-  'English',
-  'Unknown',
-] as const;
+import { useMasterLanguages } from '../../hooks/useMasterLanguages';
+
+const LANGUAGE_FALLBACK_ORDER = ['Unknown'] as const;
 
 const TASK_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const TASK_PAGE_SIZE_DEFAULT = 20;
@@ -83,6 +74,11 @@ interface LanguageQueueDetailForTL {
 
 const TaskDashboardView: React.FC = () => {
   const toast = useToast();
+  const { languages: masterLanguages } = useMasterLanguages();
+  const languageOrder = useMemo(
+    () => [...masterLanguages, ...LANGUAGE_FALLBACK_ORDER],
+    [masterLanguages]
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [allocRun, setAllocRun] = useState<any>(null);
@@ -219,7 +215,7 @@ const TaskDashboardView: React.FC = () => {
   const unassignedRows = useMemo(() => {
     const rows = Array.isArray(data?.unassignedByLanguage) ? [...data.unassignedByLanguage] : [];
     const rank = (l: string) => {
-      const idx = LANGUAGE_ORDER.indexOf(l as any);
+      const idx = languageOrder.findIndex((name) => name.toLowerCase() === String(l).toLowerCase());
       return idx === -1 ? 999 : idx;
     };
     rows.sort((a: any, b: any) => {
@@ -229,7 +225,7 @@ const TaskDashboardView: React.FC = () => {
       return String(a.language).localeCompare(String(b.language));
     });
     return rows;
-  }, [data]);
+  }, [data, languageOrder]);
 
   const unassignedTotalByLanguage = useMemo(() => {
     const map = new Map<string, number>();

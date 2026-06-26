@@ -6,6 +6,10 @@ import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { requireRole, requirePermission } from '../middleware/rbac.js';
 import { AppError } from '../middleware/errorHandler.js';
 import logger from '../config/logger.js';
+import {
+  assertActiveMasterLanguage,
+  assertActiveMasterLanguages,
+} from '../utils/masterLanguageValidation.js';
 
 const router = express.Router();
 
@@ -1059,6 +1063,12 @@ router.post(
 
       const { state, primaryLanguage, secondaryLanguages = [], isActive = true } = req.body;
 
+      const normalizedPrimary = await assertActiveMasterLanguage(primaryLanguage, 'Primary language');
+      const normalizedSecondary = await assertActiveMasterLanguages(
+        secondaryLanguages,
+        'Secondary language'
+      ).then((langs) => langs.filter((lang) => lang.toLowerCase() !== normalizedPrimary.toLowerCase()));
+
       // Check if state already exists (active)
       const existingActive = await StateLanguageMapping.findOne({ 
         state: { $regex: new RegExp(`^${state}$`, 'i') },
@@ -1075,8 +1085,8 @@ router.post(
 
       const mapping = new StateLanguageMapping({
         state,
-        primaryLanguage,
-        secondaryLanguages,
+        primaryLanguage: normalizedPrimary,
+        secondaryLanguages: normalizedSecondary,
         isActive,
       });
 
@@ -1154,8 +1164,18 @@ router.put(
         mapping.state = state;
       }
 
-      if (primaryLanguage !== undefined) mapping.primaryLanguage = primaryLanguage;
-      if (secondaryLanguages !== undefined) mapping.secondaryLanguages = secondaryLanguages;
+      if (primaryLanguage !== undefined) {
+        mapping.primaryLanguage = await assertActiveMasterLanguage(primaryLanguage, 'Primary language');
+      }
+      if (secondaryLanguages !== undefined) {
+        const normalizedSecondary = await assertActiveMasterLanguages(
+          secondaryLanguages,
+          'Secondary language'
+        );
+        mapping.secondaryLanguages = normalizedSecondary.filter(
+          (lang) => lang.toLowerCase() !== mapping.primaryLanguage.toLowerCase()
+        );
+      }
       if (isActive !== undefined) mapping.isActive = isActive;
 
       try {

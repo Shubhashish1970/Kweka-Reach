@@ -1,12 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Check, X, Users as UsersIcon, Loader2 } from 'lucide-react';
-import { usersAPI, getAuthHeaders } from '../../services/api';
+import { usersAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-
-// Fallback languages in case API fails
-const FALLBACK_LANGUAGES = ['Hindi', 'Telugu', 'Marathi', 'Kannada', 'Tamil', 'Bengali', 'Oriya', 'English', 'Malayalam'];
+import { useMasterLanguages } from '../../hooks/useMasterLanguages';
 
 interface Agent {
   _id: string;
@@ -19,35 +15,17 @@ interface Agent {
 const AgentLanguageMatrix: React.FC = () => {
   const { showError } = useToast();
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [availableLanguages, setAvailableLanguages] = useState<string[]>(FALLBACK_LANGUAGES);
   const [isLoading, setIsLoading] = useState(false);
 
+  const agentLanguages = useMemo(
+    () => agents.flatMap((agent) => agent.languageCapabilities || []),
+    [agents]
+  );
+  const { languages: availableLanguages, isLoading: isLoadingLanguages } = useMasterLanguages(agentLanguages);
+
   useEffect(() => {
-    fetchLanguages();
     fetchAgents();
   }, []);
-
-  const fetchLanguages = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/master-data/languages`, {
-        headers: getAuthHeaders(),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.data) {
-          const activeLanguages = data.data
-            .filter((lang: any) => lang.isActive)
-            .sort((a: any, b: any) => a.displayOrder - b.displayOrder)
-            .map((lang: any) => lang.name);
-          if (activeLanguages.length > 0) {
-            setAvailableLanguages(activeLanguages);
-          }
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to fetch languages, using fallback:', error);
-    }
-  };
 
   const fetchAgents = async () => {
     setIsLoading(true);
@@ -67,7 +45,7 @@ const AgentLanguageMatrix: React.FC = () => {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || isLoadingLanguages) {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="text-center">

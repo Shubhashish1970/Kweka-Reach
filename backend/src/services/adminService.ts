@@ -568,6 +568,7 @@ export type ActivitySamplingExportRow = {
   date: Date;
   territory: string;
   zone: string;
+  state: string;
   region: string;
   bu: string;
   officerName: string;
@@ -724,6 +725,7 @@ export const getActivitiesSamplingExportRows = async (filters?: {
       date: a.date ? new Date(a.date) : new Date(0),
       territory: String((a.territoryName || a.territory || '')).trim(),
       zone: String((a.zoneName || '')).trim(),
+      state: String((a.state || '')).trim(),
       region: String((a as any).regionName || '').trim(),
       bu: String((a.buName || '')).trim(),
       officerName: String((a.officerName || '')).trim(),

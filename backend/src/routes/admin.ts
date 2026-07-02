@@ -266,6 +266,7 @@ router.get(
         Date: fmtDate(r.date),
         Territory: r.territory,
         Zone: r.zone,
+        State: r.state,
         Region: r.region,
         BU: r.bu,
         Officer: r.officerName,

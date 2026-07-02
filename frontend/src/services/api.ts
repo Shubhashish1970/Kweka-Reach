@@ -440,6 +440,47 @@ export const tasksAPI = {
     return apiRequest(`/tasks/dashboard/agent/${encodeURIComponent(agentId)}${query ? `?${query}` : ''}`);
   },
 
+  downloadDashboardAgentExport: async (
+    agentId: string,
+    language?: string,
+    filters?: { dateFrom?: string; dateTo?: string; bu?: string; state?: string; status?: string; fda?: string }
+  ) => {
+    const headers = getAuthHeaders();
+    const params = new URLSearchParams();
+    if (language) params.set('language', language);
+    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
+    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.bu) params.set('bu', filters.bu);
+    if (filters?.state) params.set('state', filters.state);
+    if (filters?.status) params.set('status', filters.status);
+    if (filters?.fda) params.set('fda', filters.fda);
+    const query = params.toString();
+    const res = await fetch(
+      `${API_BASE_URL}/tasks/dashboard/agent/${encodeURIComponent(agentId)}/export${query ? `?${query}` : ''}`,
+      { method: 'GET', headers }
+    );
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => null);
+      const msg = json?.error?.message || json?.message || `Download failed (${res.status})`;
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    const contentDisposition = res.headers.get('content-disposition') || '';
+    const match = contentDisposition.match(/filename="([^"]+)"/i);
+    const filename = match?.[1] || 'agent_tasks_export.xlsx';
+
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
   getDashboardByLanguage: async (
     language: string,
     filters?: { dateFrom?: string; dateTo?: string; bu?: string; state?: string; agentId?: string; status?: string },

@@ -19,7 +19,7 @@ import {
   callTaskNeedsAgentMongoFilter,
 } from '../services/taskService.js';
 import { getOutcomeFromStatus } from '../utils/outcomeHelper.js';
-import { getAgentQueue } from '../services/adminService.js';
+import { exportAgentQueueTasksXlsx, getAgentQueue } from '../services/adminService.js';
 import logger from '../config/logger.js';
 import mongoose from 'mongoose';
 import * as XLSX from 'xlsx';
@@ -2275,6 +2275,86 @@ router.get(
         success: true,
         data: result,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// @route   GET /api/tasks/dashboard/agent/:agentId/export
+// @desc    Team Lead: export agent queue tasks as Excel (matches current filters)
+// @access  Private (Team Lead, MIS Admin)
+router.get(
+  '/dashboard/agent/:agentId/export',
+  requirePermission('tasks.view.team'),
+  [
+    param('agentId').isMongoId().withMessage('Invalid agent ID'),
+    query('language').optional().isString().trim(),
+    query('dateFrom').optional().isISO8601().toDate(),
+    query('dateTo').optional().isISO8601().toDate(),
+    query('bu').optional().isString(),
+    query('state').optional().isString(),
+    query('status').optional().isIn(['unassigned', 'sampled_in_queue', 'in_progress', 'completed', 'not_reachable', 'invalid_number']),
+    query('fda').optional().isString().trim(),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const authReq = req as AuthRequest;
+      const teamLeadId = authReq.user._id.toString();
+      const agentId = req.params.agentId;
+      const language = (req.query.language as string)?.trim() || undefined;
+      const dateFrom = req.query.dateFrom != null ? String(req.query.dateFrom).trim() : undefined;
+      const dateTo = req.query.dateTo != null ? String(req.query.dateTo).trim() : undefined;
+      const bu = (req.query.bu as string)?.trim() || undefined;
+      const state = (req.query.state as string)?.trim() || undefined;
+      const status = (req.query.status as string)?.trim() || undefined;
+      const fda = (req.query.fda as string)?.trim() || undefined;
+
+      const agent = await User.findById(agentId).select('_id role teamLeadId').lean();
+      if (!agent) {
+        return res.status(404).json({
+          success: false,
+          error: { message: 'Agent not found' },
+        });
+      }
+
+      const agentObj = agent as any;
+      if (agentObj.role !== 'cc_agent') {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'User is not a CC agent' },
+        });
+      }
+
+      const agentTeamLeadId = agentObj.teamLeadId?.toString?.() || null;
+      if (agentTeamLeadId !== teamLeadId) {
+        return res.status(403).json({
+          success: false,
+          error: { message: 'Agent is not in your team' },
+        });
+      }
+
+      const { filename, buffer } = await exportAgentQueueTasksXlsx(agentId, {
+        language,
+        dateFrom,
+        dateTo,
+        bu,
+        state,
+        status,
+        fda,
+      });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
     } catch (error) {
       next(error);
     }

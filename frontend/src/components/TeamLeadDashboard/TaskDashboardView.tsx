@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Calendar, Filter, RefreshCw, Loader2, Users as UsersIcon, CheckCircle, Clock, XCircle, AlertCircle, Phone, MapPin, ChevronUp, ChevronDown } from 'lucide-react';
+import { Calendar, Filter, RefreshCw, Loader2, Users as UsersIcon, CheckCircle, Clock, XCircle, AlertCircle, Phone, MapPin, ChevronUp, ChevronDown, ArrowDownToLine } from 'lucide-react';
 import { tasksAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import Modal from '../shared/Modal';
@@ -102,6 +102,7 @@ const TaskDashboardView: React.FC = () => {
   const [isLoadingLanguageQueue, setIsLoadingLanguageQueue] = useState(false);
   const [isLoadingMoreAgent, setIsLoadingMoreAgent] = useState(false);
   const [isLoadingMoreLanguage, setIsLoadingMoreLanguage] = useState(false);
+  const [isExportingAgentTasks, setIsExportingAgentTasks] = useState(false);
   const [showMainFilters, setShowMainFilters] = useState(false);
   const [showLanguageQueueFilters, setShowLanguageQueueFilters] = useState(false);
   const [showAgentDetailFilters, setShowAgentDetailFilters] = useState(false);
@@ -986,6 +987,41 @@ const TaskDashboardView: React.FC = () => {
               >
                 <Filter size={16} />
                 {showAgentDetailFilters ? 'Hide filters' : 'Filters'}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!selectedAgentId) return;
+                  setIsExportingAgentTasks(true);
+                  try {
+                    await tasksAPI.downloadDashboardAgentExport(
+                      selectedAgentId,
+                      selectedLanguage ?? undefined,
+                      {
+                        dateFrom: filters.dateFrom || undefined,
+                        dateTo: filters.dateTo || undefined,
+                        bu: filters.bu || undefined,
+                        state: filters.state || undefined,
+                        status: agentDetailFilters.status || undefined,
+                        fda: agentDetailFilters.fda || undefined,
+                      }
+                    );
+                    toast.showSuccess('Excel downloaded');
+                  } catch (err: any) {
+                    toast.showError(err?.message || 'Failed to download excel');
+                  } finally {
+                    setIsExportingAgentTasks(false);
+                  }
+                }}
+                disabled={isExportingAgentTasks || isLoadingDetail}
+                className={`inline-flex items-center justify-center h-10 w-10 rounded-xl border transition-colors ${
+                  isExportingAgentTasks
+                    ? 'bg-green-50 border-green-200 text-green-700'
+                    : 'bg-white border-slate-200 text-green-700 hover:bg-slate-50'
+                } disabled:opacity-50`}
+                title="Download Excel (matches current filters)"
+              >
+                <ArrowDownToLine size={18} className={isExportingAgentTasks ? 'animate-spin' : ''} />
               </button>
               <button
                 type="button"

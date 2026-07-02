@@ -5,6 +5,18 @@ import { User } from '../models/User.js';
 import { Farmer } from '../models/Farmer.js';
 import mongoose from 'mongoose';
 import logger from '../config/logger.js';
+import * as XLSX from 'xlsx';
+
+const AGENT_QUEUE_EXPORT_MAX = 5000;
+
+const TASK_STATUS_LABELS: Record<string, string> = {
+  unassigned: 'Unassigned',
+  sampled_in_queue: 'Sampled - in queue',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  not_reachable: 'Not Reachable',
+  invalid_number: 'Invalid Number',
+};
 
 export interface ActivitySamplingStatus {
   activity: IActivity;
@@ -91,8 +103,12 @@ export interface AgentQueueDetail {
       territory: string;
       zone?: string;
       bu?: string;
+      crops?: string[];
+      products?: string[];
     };
     status: TaskStatus;
+    outcome?: string | null;
+    sentiment?: string | null;
     scheduledDate: Date;
     createdAt: Date;
   }>;
@@ -1494,5 +1510,76 @@ export const getAgentQueue = async (
     logger.error(`Error fetching agent queue for ${agentId}:`, error);
     throw error;
   }
+};
+
+export const exportAgentQueueTasksXlsx = async (
+  agentId: string,
+  options?: {
+    language?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    bu?: string;
+    state?: string;
+    status?: string;
+    fda?: string;
+    territory?: string;
+  }
+): Promise<{ filename: string; buffer: Buffer }> => {
+  const queue = await getAgentQueue(agentId, options);
+  const agent = queue.agent;
+  const tasks = (queue.tasks || []).slice(0, AGENT_QUEUE_EXPORT_MAX);
+
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const fmtDate = (v: unknown) => {
+    const d = v ? new Date(v as string | Date) : null;
+    if (!d || Number.isNaN(d.getTime())) return '';
+    return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+  };
+  const fmtDateTime = (v: unknown) => {
+    const d = v ? new Date(v as string | Date) : null;
+    if (!d || Number.isNaN(d.getTime())) return '';
+    return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+  const statusLabel = (status: string) => TASK_STATUS_LABELS[status] || status;
+
+  const rows = tasks.map((task) => ({
+    'Task ID': task.taskId,
+    Status: statusLabel(task.status),
+    Outcome: task.outcome || '',
+    Sentiment: task.sentiment || '',
+    'Scheduled Date': fmtDate(task.scheduledDate),
+    'Created At': fmtDateTime(task.createdAt),
+    'Farmer Name': task.farmer?.name || '',
+    'Farmer Mobile': task.farmer?.mobileNumber || '',
+    'Farmer Location': task.farmer?.location || '',
+    'Farmer Language': task.farmer?.preferredLanguage || '',
+    'Activity Type': task.activity?.type || '',
+    'Activity Date': fmtDate(task.activity?.date),
+    Territory: task.activity?.territory || '',
+    Zone: task.activity?.zone || '',
+    BU: task.activity?.bu || '',
+    Officer: task.activity?.officerName || '',
+    Crops: Array.isArray(task.activity?.crops) ? task.activity.crops.join(', ') : '',
+    Products: Array.isArray(task.activity?.products) ? task.activity.products.join(', ') : '',
+    'Agent Name': agent.agentName,
+    'Agent Email': agent.agentEmail,
+    'Agent Employee ID': agent.employeeId,
+  }));
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Tasks');
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+  const safeAgent = String(agent.agentName || 'agent')
+    .replace(/[^\w\-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  const now = new Date();
+  const filename = `agent_tasks_${safeAgent || agent.agentId}_${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(
+    now.getDate()
+  )}_${pad2(now.getHours())}${pad2(now.getMinutes())}.xlsx`;
+
+  return { filename, buffer };
 };
 

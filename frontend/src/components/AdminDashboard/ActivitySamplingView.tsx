@@ -214,6 +214,7 @@ const ActivitySamplingView: React.FC = () => {
   const [dataBatchesLoading, setDataBatchesLoading] = useState(false);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<string | null>(null);
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
+  const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
   const [ffaAdminSchedule, setFfaAdminSchedule] = useState<{
     scheduleEnabled?: boolean;
     scheduledSyncActive?: boolean;
@@ -1000,6 +1001,18 @@ const ActivitySamplingView: React.FC = () => {
       showError(err?.message || 'Failed to delete batch');
     } finally {
       setDeletingBatchId(null);
+    }
+  };
+
+  const handleDownloadBatchExport = async (batchId: string) => {
+    setExportingBatchId(batchId);
+    try {
+      await ffaAPI.downloadDataBatchExport(batchId);
+      showSuccess('Batch Excel download started.');
+    } catch (err: any) {
+      showError(err?.message || 'Failed to download batch export');
+    } finally {
+      setExportingBatchId(null);
     }
   };
 
@@ -1794,22 +1807,38 @@ const ActivitySamplingView: React.FC = () => {
                           {b.batchId}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {b.canDelete ? (
+                          <div className="flex flex-col items-end gap-1.5">
                             <button
                               type="button"
-                              onClick={() => setBatchDeleteConfirm(b.batchId)}
-                              disabled={!!deletingBatchId}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold text-red-700 hover:bg-red-50 border border-red-200 disabled:opacity-50"
-                              title="Delete this batch"
+                              onClick={() => handleDownloadBatchExport(b.batchId)}
+                              disabled={!!exportingBatchId || !!deletingBatchId}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold text-green-800 hover:bg-green-50 border border-green-200 disabled:opacity-50"
+                              title="Download Excel with all API fields for this batch"
                             >
-                              {deletingBatchId === b.batchId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                              Delete batch
+                              {exportingBatchId === b.batchId ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : (
+                                <ArrowDownToLine size={14} />
+                              )}
+                              Download Excel
                             </button>
-                          ) : (
-                            <span className="text-xs text-slate-500 text-left inline-block max-w-[220px]" title={b.blockReason}>
-                              Not available{b.blockReason ? `: ${b.blockReason}` : ''}
-                            </span>
-                          )}
+                            {b.canDelete ? (
+                              <button
+                                type="button"
+                                onClick={() => setBatchDeleteConfirm(b.batchId)}
+                                disabled={!!deletingBatchId || !!exportingBatchId}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold text-red-700 hover:bg-red-50 border border-red-200 disabled:opacity-50"
+                                title="Delete this batch"
+                              >
+                                {deletingBatchId === b.batchId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                Delete batch
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-500 text-left inline-block max-w-[220px]" title={b.blockReason}>
+                                Delete not available{b.blockReason ? `: ${b.blockReason}` : ''}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                       );

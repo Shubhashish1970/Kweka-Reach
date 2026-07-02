@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import * as XLSX from 'xlsx';
 import { Activity } from '../models/Activity.js';
 import { Farmer } from '../models/Farmer.js';
 import { CallTask } from '../models/CallTask.js';
@@ -201,4 +202,116 @@ export async function deleteDataBatch(batchId: string): Promise<{
     deletedAudits: auditDel.deletedCount || 0,
     deletedFarmers,
   };
+}
+
+const formatActivityDateForExport = (d: Date): string => {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(d.getFullYear());
+  return `${dd}/${mm}/${yyyy}`;
+};
+
+const joinCsv = (values?: string[] | null): string =>
+  Array.isArray(values) ? values.filter(Boolean).join(',') : '';
+
+export type DataBatchActivityExportRow = {
+  activityId: string;
+  type: string;
+  date: string;
+  officerId: string;
+  officerName: string;
+  location: string;
+  territory: string;
+  state: string;
+  territoryName: string;
+  zoneName: string;
+  buName: string;
+  tmEmpCode: string;
+  tmName: string;
+  crops: string;
+  products: string;
+};
+
+export type DataBatchFarmerExportRow = {
+  activityId: string;
+  farmerId: string;
+  name: string;
+  mobileNumber: string;
+  location: string;
+  photoUrl: string;
+  crops: string;
+};
+
+/** Reconstruct API/Excel-shaped rows for all activities in an ingest batch. */
+export async function buildDataBatchExportRows(batchId: string): Promise<{
+  activities: DataBatchActivityExportRow[];
+  farmers: DataBatchFarmerExportRow[];
+}> {
+  const trimmed = (batchId || '').trim();
+  if (!trimmed) throw new Error('batchId is required');
+
+  const activities = await Activity.find({ dataBatchId: trimmed }).sort({ date: -1, activityId: 1 }).lean();
+  if (activities.length === 0) throw new Error('No activities found for this batch');
+
+  const farmerOidSet = new Set<string>();
+  for (const a of activities) {
+    for (const fid of a.farmerIds || []) {
+      farmerOidSet.add(String(fid));
+    }
+  }
+
+  const farmerDocs =
+    farmerOidSet.size > 0
+      ? await Farmer.find({ _id: { $in: [...farmerOidSet].map((id) => new mongoose.Types.ObjectId(id)) } }).lean()
+      : [];
+  const farmerMap = new Map(farmerDocs.map((f) => [String(f._id), f]));
+
+  const activityRows: DataBatchActivityExportRow[] = [];
+  const farmerRows: DataBatchFarmerExportRow[] = [];
+
+  for (const a of activities) {
+    activityRows.push({
+      activityId: String(a.activityId || ''),
+      type: String(a.type || ''),
+      date: a.date ? formatActivityDateForExport(new Date(a.date)) : '',
+      officerId: String(a.officerId || ''),
+      officerName: String(a.officerName || ''),
+      location: String(a.location || ''),
+      territory: String(a.territory || a.territoryName || ''),
+      state: String(a.state || ''),
+      territoryName: String(a.territoryName || a.territory || ''),
+      zoneName: String(a.zoneName || ''),
+      buName: String(a.buName || ''),
+      tmEmpCode: String(a.tmEmpCode || ''),
+      tmName: String(a.tmName || ''),
+      crops: joinCsv(a.crops),
+      products: joinCsv(a.products),
+    });
+
+    for (const fid of a.farmerIds || []) {
+      const farmer = farmerMap.get(String(fid));
+      if (!farmer) continue;
+      farmerRows.push({
+        activityId: String(a.activityId || ''),
+        farmerId: '',
+        name: String(farmer.name || ''),
+        mobileNumber: String(farmer.mobileNumber || ''),
+        location: String(farmer.location || ''),
+        photoUrl: String(farmer.photoUrl || ''),
+        crops: '',
+      });
+    }
+  }
+
+  return { activities: activityRows, farmers: farmerRows };
+}
+
+export async function exportDataBatchXlsxBuffer(batchId: string): Promise<Buffer> {
+  const { activities, farmers } = await buildDataBatchExportRows(batchId);
+  const wb = XLSX.utils.book_new();
+  const wsActivities = XLSX.utils.json_to_sheet(activities, { skipHeader: false });
+  const wsFarmers = XLSX.utils.json_to_sheet(farmers, { skipHeader: false });
+  XLSX.utils.book_append_sheet(wb, wsActivities, 'Activities');
+  XLSX.utils.book_append_sheet(wb, wsFarmers, 'Farmers');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }

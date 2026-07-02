@@ -23,7 +23,7 @@ import { AllocationRun } from '../models/AllocationRun.js';
 import { InboundQuery } from '../models/InboundQuery.js';
 import { User } from '../models/User.js';
 import { getImportExcelProgress, startImportExcelJob } from '../services/excelImport.js';
-import { deleteDataBatch, listDataBatches } from '../services/dataBatchService.js';
+import { deleteDataBatch, exportDataBatchXlsxBuffer, listDataBatches } from '../services/dataBatchService.js';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { getLanguageForState } from '../utils/stateLanguageMapper.js';
@@ -496,6 +496,43 @@ router.get('/data-batches', requirePermission('config.ffa'), async (req: Request
     next(error);
   }
 });
+
+// @route   GET /api/ffa/data-batches/:batchId/export
+// @desc    Download Excel export of batch activities + farmers (API field layout)
+// @access  Private (MIS Admin)
+router.get(
+  '/data-batches/:batchId/export',
+  requirePermission('config.ffa'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const batchId = String(req.params.batchId || '').trim();
+      if (!batchId) {
+        return res.status(400).json({ success: false, error: { message: 'batchId is required' } });
+      }
+
+      const buffer = await exportDataBatchXlsxBuffer(batchId);
+      const safeId = batchId.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 80);
+      const now = new Date();
+      const pad2 = (n: number) => String(n).padStart(2, '0');
+      const filename = `batch_export_${safeId}_${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}_${pad2(
+        now.getHours()
+      )}${pad2(now.getMinutes())}.xlsx`;
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      if (msg.includes('No activities found')) {
+        return res.status(404).json({ success: false, error: { message: msg } });
+      }
+      if (msg.includes('batchId is required')) {
+        return res.status(400).json({ success: false, error: { message: msg } });
+      }
+      next(error);
+    }
+  }
+);
 
 // @route   POST /api/ffa/delete-data-batch
 // @desc    Delete all activities (and orphan farmers) for a batch; blocked if sampling audit or tasks exist

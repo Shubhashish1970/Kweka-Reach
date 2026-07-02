@@ -1429,6 +1429,35 @@ export const ffaAPI = {
     );
   },
 
+  downloadDataBatchExport: async (batchId: string) => {
+    const headers = getAuthHeaders();
+    const encoded = encodeURIComponent(batchId);
+    const res = await fetch(`${API_BASE_URL}/ffa/data-batches/${encoded}/export`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => null);
+      const msg = json?.error?.message || json?.message || `Download failed (${res.status})`;
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    const contentDisposition = res.headers.get('content-disposition') || '';
+    const match = contentDisposition.match(/filename="([^"]+)"/i);
+    const filename = match?.[1] || `batch_export_${batchId}.xlsx`;
+
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
   downloadExcelTemplate: async () => {
     const headers = getAuthHeaders();
     const res = await fetch(`${API_BASE_URL}/ffa/excel-template`, {

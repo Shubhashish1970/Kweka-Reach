@@ -3,7 +3,7 @@ import { Activity } from '../../src/models/Activity.js';
 import { Farmer } from '../../src/models/Farmer.js';
 import { SamplingAudit } from '../../src/models/SamplingAudit.js';
 import { CallTask } from '../../src/models/CallTask.js';
-import { deleteDataBatch } from '../../src/services/dataBatchService.js';
+import { deleteDataBatch, buildDataBatchExportRows } from '../../src/services/dataBatchService.js';
 import { makeFarmer, makeActivity } from '../helpers/factories.js';
 
 describe('dataBatchService.deleteDataBatch', () => {
@@ -139,5 +139,65 @@ describe('dataBatchService.deleteDataBatch', () => {
 
     expect(res.deletedActivities).toBe(2);
     expect(res.deletedFarmers).toBe(2);
+  });
+});
+
+describe('dataBatchService.buildDataBatchExportRows', () => {
+  test('returns API-shaped activity and farmer rows for a batch', async () => {
+    const batchId = 'sync-export-test';
+
+    const f1 = await Farmer.create({
+      name: 'Ravi',
+      mobileNumber: '9000000099',
+      location: 'Village A',
+      preferredLanguage: 'Kannada',
+      territory: 'Mysore',
+      photoUrl: 'https://example.com/photo.jpg',
+    });
+
+    await Activity.create({
+      activityId: 'ACT-EXPORT-1',
+      type: 'FieldVisit',
+      date: new Date(2026, 5, 26),
+      officerId: 'FDA-1',
+      officerName: 'SASHANK M E',
+      location: 'Mysore',
+      territory: 'Mysore',
+      territoryName: 'Mysore',
+      zoneName: 'Hassan',
+      buName: 'SBU',
+      state: 'Karnataka',
+      tmEmpCode: 'TM-1',
+      tmName: 'TM One',
+      farmerIds: [f1._id],
+      crops: ['Rice', 'Wheat'],
+      products: ['ATONIK'],
+      syncedAt: new Date(),
+      dataBatchId: batchId,
+    });
+
+    const { activities, farmers } = await buildDataBatchExportRows(batchId);
+
+    expect(activities).toHaveLength(1);
+    expect(activities[0]).toMatchObject({
+      activityId: 'ACT-EXPORT-1',
+      type: 'FieldVisit',
+      date: '26/06/2026',
+      officerId: 'FDA-1',
+      officerName: 'SASHANK M E',
+      state: 'Karnataka',
+      zoneName: 'Hassan',
+      crops: 'Rice,Wheat',
+      products: 'ATONIK',
+    });
+
+    expect(farmers).toHaveLength(1);
+    expect(farmers[0]).toMatchObject({
+      activityId: 'ACT-EXPORT-1',
+      name: 'Ravi',
+      mobileNumber: '9000000099',
+      location: 'Village A',
+      photoUrl: 'https://example.com/photo.jpg',
+    });
   });
 });

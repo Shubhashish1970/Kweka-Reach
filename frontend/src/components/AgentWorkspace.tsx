@@ -82,30 +82,11 @@ const AgentWorkspace: React.FC = () => {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showTaskSelectionModal, setShowTaskSelectionModal] = useState(false);
   const [isAIPanelExpanded, setIsAIPanelExpanded] = useState(false);
-  const aiPanelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMarkedInProgressRef = useRef(false);
 
-  const openAIPanel = () => {
-    if (aiPanelCloseTimerRef.current) {
-      clearTimeout(aiPanelCloseTimerRef.current);
-      aiPanelCloseTimerRef.current = null;
-    }
-    setIsAIPanelExpanded(true);
+  const toggleAIPanel = () => {
+    setIsAIPanelExpanded((prev) => !prev);
   };
-
-  const scheduleCloseAIPanel = () => {
-    if (aiPanelCloseTimerRef.current) clearTimeout(aiPanelCloseTimerRef.current);
-    aiPanelCloseTimerRef.current = setTimeout(() => {
-      setIsAIPanelExpanded(false);
-      aiPanelCloseTimerRef.current = null;
-    }, 220);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (aiPanelCloseTimerRef.current) clearTimeout(aiPanelCloseTimerRef.current);
-    };
-  }, []);
   const [formData, setFormData] = useState({
     callStatus: '',
     didAttend: null as string | null,
@@ -627,6 +608,23 @@ const AgentWorkspace: React.FC = () => {
                 <HeaderRoleSwitcher />
               </div>
             )}
+            {activeSection === 'dialer' && (
+              <button
+                type="button"
+                onClick={toggleAIPanel}
+                className={`hidden lg:flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-xl transition-all ${
+                  isAIPanelExpanded
+                    ? 'text-lime-400 bg-lime-500/15 hover:bg-lime-500/25'
+                    : 'text-slate-300 hover:text-lime-400 hover:bg-slate-800'
+                }`}
+                title={isAIPanelExpanded ? 'Hide Notetaker' : 'Show Notetaker'}
+                aria-pressed={isAIPanelExpanded}
+                aria-label={isAIPanelExpanded ? 'Hide Notetaker' : 'Show Notetaker'}
+              >
+                <Zap size={18} fill={isAIPanelExpanded ? 'currentColor' : 'none'} />
+                <span className="hidden xl:inline">Notetaker</span>
+              </button>
+            )}
             <button
               onClick={logout}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all"
@@ -669,22 +667,11 @@ const AgentWorkspace: React.FC = () => {
                 onOutboundStatusSelected={handleOutboundStatusSelected}
               />
 
-          {/* Edge-only hover strip: opens Notetaker only when cursor reaches the viewport edge (not a wide margin). */}
-          <div
-            className="hidden lg:block fixed right-0 top-20 bottom-0 w-1.5 z-[45] pointer-events-auto"
-            onMouseEnter={openAIPanel}
-            onMouseLeave={scheduleCloseAIPanel}
-            title="Show Notetaker"
-            aria-hidden
-          />
-
-          {/* AI Copilot (AI) - Slides in from the right; stays open while pointer is on panel or edge strip */}
+          {/* AI Copilot (AI) - Slides in from the right; toggled from header Notetaker icon */}
           <div
             className={`hidden lg:block fixed right-0 top-20 bottom-0 z-50 transition-transform duration-300 ease-in-out ${
               isAIPanelExpanded ? 'translate-x-0' : 'translate-x-full pointer-events-none'
             }`}
-            onMouseEnter={openAIPanel}
-            onMouseLeave={scheduleCloseAIPanel}
             aria-hidden={!isAIPanelExpanded}
           >
             <AICopilotPanel

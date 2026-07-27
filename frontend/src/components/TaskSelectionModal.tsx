@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, Phone, PhoneCall, MapPin, Loader2, Search, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { tasksAPI } from '../services/api';
 import { formatDateIST } from '../utils/dateRangeUtils';
+import SearchableMultiSelect from './SearchableMultiSelect';
 
 interface Task {
   taskId: string;
@@ -48,14 +49,14 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'in_progress' | 'sampled_in_queue' | 'completed'>('sampled_in_queue');
   const [filterBy, setFilterBy] = useState<'' | 'territory' | 'tm' | 'fda'>('');
-  const [filterValue, setFilterValue] = useState('');
+  const [filterValues, setFilterValues] = useState<string[]>([]);
 
   useEffect(() => {
     if (isOpen) {
       fetchAvailableTasks();
       setSearchQuery('');
       setFilterBy('');
-      setFilterValue('');
+      setFilterValues([]);
     }
   }, [isOpen]);
 
@@ -135,14 +136,15 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
   }, [filterBy, territoryOptions, tmOptions, fdaOptions]);
 
   const tasksByFilter = useMemo(() => {
-    if (!filterBy || !filterValue) return tasks;
+    if (!filterBy || filterValues.length === 0) return tasks;
+    const selected = new Set(filterValues.map(norm));
     return tasks.filter(t => {
-      if (filterBy === 'territory') return norm(t.activity?.territory) === filterValue;
-      if (filterBy === 'tm') return norm(t.activity?.tmName) === filterValue;
-      if (filterBy === 'fda') return norm(t.activity?.officerName) === filterValue;
+      if (filterBy === 'territory') return selected.has(norm(t.activity?.territory));
+      if (filterBy === 'tm') return selected.has(norm(t.activity?.tmName));
+      if (filterBy === 'fda') return selected.has(norm(t.activity?.officerName));
       return true;
     });
-  }, [tasks, filterBy, filterValue]);
+  }, [tasks, filterBy, filterValues]);
 
   const { inProgressCount, queueCount, completedCount } = useMemo(() => {
     let inProgress = 0, queue = 0, completed = 0;
@@ -156,7 +158,13 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
 
   const handleFilterByChange = (value: '' | 'territory' | 'tm' | 'fda') => {
     setFilterBy(value);
-    setFilterValue('');
+    setFilterValues([]);
+  };
+
+  const toggleFilterValue = (item: string) => {
+    setFilterValues((prev) =>
+      prev.includes(item) ? prev.filter((v) => v !== item) : [...prev, item]
+    );
   };
 
   const filteredTasks = tasksByFilter.filter(task => {
@@ -269,26 +277,28 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
               </select>
             </div>
             {filterBy && (
-              <div className="flex items-center gap-2">
-                <label className="text-[11px] font-bold text-slate-500 whitespace-nowrap w-16">
-                  {filterBy === 'territory' ? 'Territory' : filterBy === 'tm' ? 'TM Name' : 'FDA Name'}
-                </label>
-                <select
-                  value={filterValue}
-                  onChange={(e) => setFilterValue(e.target.value)}
-                  className="flex-1 min-w-0 h-9 pl-3 pr-8 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 appearance-none bg-no-repeat bg-right"
-                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364758b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundPosition: 'right 8px center' }}
-                >
-                  <option value="">
-                    {filterBy === 'territory' ? 'All Territories' : filterBy === 'tm' ? 'All TMs' : 'All FDAs'}
-                  </option>
-                  {nameOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-                <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap" title="In progress / Queue / Completed">
-                  ({inProgressCount} / {queueCount} / {completedCount})
-                </span>
+              <div className="space-y-1">
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <SearchableMultiSelect
+                      label={filterBy === 'territory' ? 'Territory' : filterBy === 'tm' ? 'TM Name' : 'FDA Name'}
+                      items={nameOptions}
+                      selected={filterValues}
+                      onToggle={toggleFilterValue}
+                      color="green"
+                      placeholder={
+                        filterBy === 'territory'
+                          ? 'Select territories...'
+                          : filterBy === 'tm'
+                            ? 'Select TMs...'
+                            : 'Select FDAs...'
+                      }
+                    />
+                  </div>
+                  <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap pt-8" title="In progress / Queue / Completed">
+                    ({inProgressCount} / {queueCount} / {completedCount})
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -355,10 +365,10 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
             <div className="text-center py-20 px-6">
               <Phone size={48} className="mx-auto text-slate-300 mb-4" />
               <p className="text-slate-600 font-medium text-lg mb-2">
-                {searchQuery || filterValue ? 'No matches found' : 'No tasks available'}
+                {searchQuery || filterValues.length > 0 ? 'No matches found' : 'No tasks available'}
               </p>
               <p className="text-sm text-slate-500">
-                {searchQuery || filterValue
+                {searchQuery || filterValues.length > 0
                   ? 'Try adjusting your search or filters'
                   : 'All tasks have been completed or are not yet due'}
               </p>
@@ -575,7 +585,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                 <>
                   <span className="font-bold text-slate-700">{sortedTasks.length}</span> contact
                   {sortedTasks.length !== 1 ? 's' : ''} available
-                  {(searchQuery || filterValue) && tasks.length > sortedTasks.length && (
+                  {(searchQuery || filterValues.length > 0) && tasks.length > sortedTasks.length && (
                     <span> (filtered from {tasks.length})</span>
                   )}
                 </>

@@ -143,7 +143,7 @@ const CallReviewModal: React.FC<CallReviewModalProps> = ({
                         ? 'bg-red-600 text-white'
                         : 'bg-slate-200 text-slate-600'
                     }`}>
-                      {formData.didRecall === true ? 'Yes' : formData.didRecall === false ? 'No' : 'Not selected'}
+                      {formData.didRecall === true ? 'Yes / Reminded' : formData.didRecall === false ? 'No' : 'Not selected'}
                     </span>
                   </div>
                 </div>

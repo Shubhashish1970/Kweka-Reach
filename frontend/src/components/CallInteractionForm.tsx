@@ -325,21 +325,25 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                       <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">3. Do they recall the content?</h3>
                       <div className="flex justify-center">
                         <div className="grid grid-cols-2 gap-2 max-w-md w-full">
-                          {['Yes', 'No'].map(option => {
-                            const isSelected = formData.didRecall === (option === 'Yes');
+                          {([
+                            { value: true, label: 'Yes / Reminded' },
+                            { value: false, label: 'No' },
+                          ] as const).map(({ value, label }) => {
+                            const isSelected = formData.didRecall === value;
                             return (
                               <button
-                                key={option}
-                                onClick={() => setFormData((p: any) => ({ ...p, didRecall: isSelected ? null : (option === 'Yes') }))}
-                                className={`py-2 px-2.5 rounded-lg border text-[9px] font-black uppercase tracking-tighter transition-all min-h-[32px] flex items-center justify-center ${
+                                key={label}
+                                type="button"
+                                onClick={() => setFormData((p: any) => ({ ...p, didRecall: isSelected ? null : value }))}
+                                className={`py-2 px-2.5 rounded-lg border text-[9px] font-black tracking-tighter transition-all min-h-[32px] flex items-center justify-center ${
                                   isSelected
-                                    ? option === 'Yes'
+                                    ? value
                                       ? 'bg-green-700 text-white border-green-700 shadow-sm'
                                       : 'bg-red-600 text-white border-red-600 shadow-sm'
                                     : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
                               >
-                                {option}
+                                {label}
                               </button>
                             );
                           })}

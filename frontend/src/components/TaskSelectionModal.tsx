@@ -337,9 +337,10 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
             </button>
           </div>
           <p className="text-[10px] text-slate-500 mt-2 leading-snug">
-            Up to 300 earliest-scheduled tasks (language-matched). &quot;Done&quot; includes successful and unsuccessful
-            outcomes — use the <span className="font-semibold text-slate-600">phone icon</span> on the right to reopen a
-            task in the dialer (same as History). History uses the selected date range and may show different totals.
+            Up to 300 earliest-scheduled open tasks (language-matched). &quot;Done&quot; shows successful and unsuccessful
+            outcomes completed <span className="font-semibold text-slate-600">today (IST)</span> and resets each day —
+            use the <span className="font-semibold text-slate-600">phone icon</span> to reopen a task. Full history uses
+            the History date range and may show different totals.
           </p>
         </div>
 

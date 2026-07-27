@@ -1,3 +1,20 @@
+const IST_TZ = 'Asia/Kolkata';
+
+/** Calendar-day bounds in IST (India), returned as UTC Date instants. */
+export function getIstCalendarDayBounds(now: Date = new Date()): { day: string; start: Date; end: Date } {
+  const day = new Intl.DateTimeFormat('en-CA', {
+    timeZone: IST_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  return {
+    day,
+    start: new Date(`${day}T00:00:00.000+05:30`),
+    end: new Date(`${day}T23:59:59.999+05:30`),
+  };
+}
+
 /** Parse YYYY-MM-DD query param as local start-of-day (for activity.date $gte). */
 export function parseQueryDateFrom(value?: string | Date): Date | undefined {
   if (!value) return undefined;

@@ -5,6 +5,7 @@ import { Activity } from '../models/Activity.js';
 import mongoose from 'mongoose';
 import logger from '../config/logger.js';
 import * as XLSX from 'xlsx';
+import { getIstCalendarDayBounds } from '../utils/dateRangeQuery.js';
 
 export interface TaskAssignmentOptions {
   agentId?: string;
@@ -29,10 +30,14 @@ export const callTaskNeedsAgentMongoFilter = (): Record<string, unknown> => ({
   ...callTaskNoAgentAssignedMatch(),
 });
 
+const OPEN_DIALER_STATUSES: TaskStatus[] = ['sampled_in_queue', 'in_progress'];
+const TERMINAL_DIALER_STATUSES: TaskStatus[] = ['completed', 'not_reachable', 'invalid_number'];
+
 /**
- * Get all tasks for an agent that can be shown in the dialer (queue/in-progress + completed outcomes)
+ * Get all tasks for an agent that can be shown in the dialer (queue/in-progress + today's Done)
  * Returns list of tasks sorted by scheduledDate (earliest first)
  * Note: Returns lean documents (plain objects) for better performance
+ * Done (terminal) tasks are limited to the current IST calendar day so the Done tab resets daily.
  */
 export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]> => {
   try {
@@ -42,19 +47,39 @@ export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]>
       throw new Error('Invalid or inactive agent');
     }
 
-    // Get tasks assigned to agent with correct status
-    // Note: Removed scheduledDate filter to show all tasks regardless of due date
-    // Agents should be able to see and work on tasks immediately after sampling
-    const tasks = await CallTask.find({
-      assignedAgentId: new mongoose.Types.ObjectId(agentId),
-      status: { $in: ['sampled_in_queue', 'in_progress', 'completed', 'not_reachable', 'invalid_number'] },
-    })
-      .populate('farmerId', 'name location preferredLanguage mobileNumber photoUrl')
-      // Agent view needs: FDA (officerName), TM, Territory, State (+ optional legacy territory)
-      .populate('activityId', 'type date officerName tmName location territory territoryName state crops products')
-      .sort({ scheduledDate: 1 }) // Earliest first
-      .limit(300) // Enough for typical agent load; History uses full list + date filters
-      .lean(); // Performance: return plain objects for read-only display
+    const agentObjectId = new mongoose.Types.ObjectId(agentId);
+    const { start: todayStart, end: todayEnd, day: istDay } = getIstCalendarDayBounds();
+    const populateFarmer = { path: 'farmerId', select: 'name location preferredLanguage mobileNumber photoUrl' };
+    const populateActivity = {
+      path: 'activityId',
+      select: 'type date officerName tmName location territory territoryName state crops products',
+    };
+
+    // Open work: no date filter. Done: only terminal outcomes updated today (IST).
+    // Fetch separately so today's Done is not crowded out by a large open queue under a shared 300 cap.
+    const [openTasks, doneTodayTasks] = await Promise.all([
+      CallTask.find({
+        assignedAgentId: agentObjectId,
+        status: { $in: OPEN_DIALER_STATUSES },
+      })
+        .populate(populateFarmer)
+        .populate(populateActivity)
+        .sort({ scheduledDate: 1 })
+        .limit(300)
+        .lean(),
+      CallTask.find({
+        assignedAgentId: agentObjectId,
+        status: { $in: TERMINAL_DIALER_STATUSES },
+        updatedAt: { $gte: todayStart, $lte: todayEnd },
+      })
+        .populate(populateFarmer)
+        .populate(populateActivity)
+        .sort({ updatedAt: -1 })
+        .limit(300)
+        .lean(),
+    ]);
+
+    const tasks = [...openTasks, ...doneTodayTasks];
 
     // Filter tasks by agent's language capabilities
     const languageFilteredTasks = tasks.filter((task) => {
@@ -75,6 +100,9 @@ export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]>
       agentLanguages: agent.languageCapabilities,
       totalTasks: tasks.length,
       languageFiltered: languageFilteredTasks.length,
+      istDay,
+      openCount: openTasks.length,
+      doneTodayCount: doneTodayTasks.length,
       statusBreakdown: {
         sampled_in_queue: tasks.filter(t => t.status === 'sampled_in_queue').length,
         in_progress: tasks.filter(t => t.status === 'in_progress').length,

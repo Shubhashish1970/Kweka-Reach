@@ -2,9 +2,8 @@ name: Verify FFA API Configuration
 
 on:
   workflow_dispatch:
-  schedule:
-    # Run daily at 2 AM UTC to verify configuration
-    - cron: '0 2 * * *'
+  # Daily schedule removed: real NACL FFA API has no /health endpoint (mock-era check).
+  # Keep manual runs via Actions → Verify FFA API Configuration → Run workflow.
   push:
     branches:
       - main

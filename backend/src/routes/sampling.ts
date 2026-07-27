@@ -123,7 +123,7 @@ async function getLaterRunEligibleCount(userId: mongoose.Types.ObjectId): Promis
   return { count, range: autoRange };
 }
 
-/** Group activities by FDA (officerId); allocate proportional target sample size per FDA. Every FDA gets at least 1 (mandatory representation). */
+/** Group activities by MDO (officerId); allocate proportional target sample size per MDO. Every MDO gets at least 1 (mandatory representation). */
 type FdaGroupDoc = { _id: mongoose.Types.ObjectId; officerId: string; officerName?: string; farmerIds?: unknown[] };
 async function buildFdaGroups(
   docs: FdaGroupDoc[],

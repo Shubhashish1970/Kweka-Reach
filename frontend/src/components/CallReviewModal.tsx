@@ -194,14 +194,14 @@ const CallReviewModal: React.FC<CallReviewModalProps> = ({
                 </div>
               )}
 
-              {/* 4B. Activity Quality - FDA holistic crop solution */}
+              {/* 4B. Activity Quality - MDO holistic crop solution */}
               {formData.didRecall === true && (
                 <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4">
                   <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">
                     4B. Activity Quality
                   </h3>
                   <div className="bg-white p-4 rounded-xl border border-slate-200">
-                    <label className="text-xs font-bold text-slate-600 mb-2 block">Did the FDA understand your problem and offer a holistic crop solution?</label>
+                    <label className="text-xs font-bold text-slate-600 mb-2 block">Did the MDO understand your problem and offer a holistic crop solution?</label>
                     {formData.activityQuality != null && formData.activityQuality >= 1 && formData.activityQuality <= 5 ? (
                       <span
                         className={`px-4 py-2 rounded-lg text-sm font-bold inline-flex items-center gap-2 border shadow-sm ${

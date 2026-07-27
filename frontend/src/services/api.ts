@@ -1212,7 +1212,7 @@ export const reportsAPI = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
-  /** Task-level detail Excel: Officer Name, FDA, farmer name, territory, Activity/Task details, dates, agent, responses, final status */
+  /** Task-level detail Excel: Officer Name, MDO, farmer name, territory, Activity/Task details, dates, agent, responses, final status */
   downloadTaskDetailsExport: async (filters?: EmsProgressFilters) => {
     const params = new URLSearchParams();
     if (filters?.dateFrom) params.append('dateFrom', filters.dateFrom);

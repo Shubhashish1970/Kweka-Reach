@@ -699,7 +699,7 @@ const DataManagementView: React.FC = () => {
           </div>
           <div>
             <h3 className="text-lg font-black text-slate-900">Generate data via Mock FFA API</h3>
-            <p className="text-xs text-slate-600">Set activity and farmer counts; optionally upload Sales Hierarchy Excel (Territory Name, Region, Zone Name, BU). Generate &amp; Sync does not clear any existing data—it creates more activities and farmers in the same territories with the same TM and FDA names already in the database, so data stays close to reality. Data uses Indian names.</p>
+            <p className="text-xs text-slate-600">Set activity and farmer counts; optionally upload Sales Hierarchy Excel (Territory Name, Region, Zone Name, BU). Generate &amp; Sync does not clear any existing data—it creates more activities and farmers in the same territories with the same TM and MDO names already in the database, so data stays close to reality. Data uses Indian names.</p>
           </div>
         </div>
         <div className="p-6 space-y-6">

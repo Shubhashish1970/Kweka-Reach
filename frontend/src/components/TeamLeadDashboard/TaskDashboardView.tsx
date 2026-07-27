@@ -1163,7 +1163,7 @@ const TaskDashboardView: React.FC = () => {
               />
             </div>
             <div className="min-w-0 md:min-w-[200px]">
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">FDA</label>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">MDO</label>
               <StyledSelect
                 value={agentDetailFilters.fda}
                 onChange={(value) => setAgentDetailFilters((p) => ({ ...p, fda: value }))}

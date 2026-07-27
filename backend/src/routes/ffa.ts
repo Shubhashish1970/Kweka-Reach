@@ -308,8 +308,8 @@ router.get(
         ['• activityId     = Unique activity ID (required)'],
         ['• type          = Field Day | Group Meeting | Demo Visit | OFM | Other (required)'],
         ['• date          = Activity date – use DD/MM/YYYY or YYYY-MM-DD (required)'],
-        ['• officerId     = FDA / Officer code (required)'],
-        ['• officerName   = FDA / Officer name (required)'],
+        ['• officerId     = MDO / Officer code (required)'],
+        ['• officerName   = MDO / Officer name (required)'],
         ['• location      = Village / location name (required)'],
         ['• territory     = Territory name (required)'],
         ['• state         = State name – used for language (required)'],
@@ -997,7 +997,7 @@ router.post(
         }
       }
 
-      // Do not clear existing data: generate more data in same territories with same TM & FDA names when possible
+      // Do not clear existing data: generate more data in same territories with same TM & MDO names when possible
       const existingRows = await Activity.aggregate<{ _id: { territoryName: string; tmName: string; officerName: string }; territory: string; zoneName: string; buName: string }>([
         { $match: { $or: [{ territoryName: { $exists: true, $ne: '' } }, { territory: { $exists: true, $ne: '' } }] } },
         { $project: { territoryName: { $ifNull: ['$territoryName', '$territory'] }, territory: 1, tmName: { $ifNull: ['$tmName', ''] }, officerName: 1, zoneName: { $ifNull: ['$zoneName', ''] }, buName: { $ifNull: ['$buName', ''] } } },
@@ -1018,7 +1018,7 @@ router.post(
           })
         : undefined;
       if (existingTerritoryTmFda?.length) {
-        logger.info('[FFA] Using %d existing territory/TM/FDA combinations for new data (no data cleared)', existingTerritoryTmFda.length);
+        logger.info('[FFA] Using %d existing territory/TM/MDO combinations for new data (no data cleared)', existingTerritoryTmFda.length);
       }
 
       const baseUrl = (process.env.FFA_API_URL || 'http://localhost:4000/api').replace(/\/$/, '');
@@ -1057,7 +1057,7 @@ router.post(
           return res.json({
             success: true,
             message: existingTerritoryTmFda?.length
-              ? 'More data generated using existing territory/TM/FDA names and synced. No existing data was cleared.'
+              ? 'More data generated using existing territory/TM/MDO names and synced. No existing data was cleared.'
               : 'Data generated from your hierarchy file and synced to EMS. No existing data was cleared.',
             data: {
               seed: seedData?.data ?? {},
@@ -1080,7 +1080,7 @@ router.post(
       res.json({
         success: true,
         message: existingTerritoryTmFda?.length
-          ? 'More data generated using existing territory/TM/FDA. Full sync started. No existing data was cleared.'
+          ? 'More data generated using existing territory/TM/MDO. Full sync started. No existing data was cleared.'
           : 'Data generated via Mock FFA and full sync started. No existing data was cleared. Poll /api/ffa/sync-progress for progress.',
         data: {
           seed: seedData?.data ?? {},

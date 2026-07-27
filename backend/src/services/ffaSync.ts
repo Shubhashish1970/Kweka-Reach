@@ -24,8 +24,8 @@ interface FFAActivity {
   activityId: string;
   type: string;
   date: string;
-  officerId: string; // FDA empCode
-  officerName: string; // FDA name
+  officerId: string; // MDO empCode
+  officerName: string; // MDO name
   location: string;
   territory: string; // legacy / fallback
   territoryName?: string; // Activity API v2 preferred

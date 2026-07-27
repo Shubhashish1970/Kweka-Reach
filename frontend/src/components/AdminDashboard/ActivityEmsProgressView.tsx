@@ -85,7 +85,7 @@ export type EmsTotals = {
 };
 
 const EMS_REPORT_GROUP_BY_OPTIONS: { value: EmsReportGroupBy; label: string }[] = [
-  { value: 'fda', label: 'By FDA' },
+  { value: 'fda', label: 'By MDO' },
   { value: 'territory', label: 'By Territory' },
   { value: 'region', label: 'By Region' },
   { value: 'zone', label: 'By Zone' },
@@ -101,7 +101,7 @@ const TREND_BUCKET_OPTIONS: { value: EmsTrendBucket; label: string }[] = [
 
 const GROUP_BY_OPTIONS: { value: EmsReportGroupBy; label: string }[] = [
   { value: 'tm', label: 'TM' },
-  { value: 'fda', label: 'FDA' },
+  { value: 'fda', label: 'MDO' },
   { value: 'territory', label: 'Territory' },
   { value: 'zone', label: 'Zone' },
   { value: 'region', label: 'Region' },
@@ -1365,7 +1365,7 @@ const ActivityEmsProgressView: React.FC = () => {
       </div>
 
       <p className="text-xs text-slate-500">
-        For a detailed activity list with the same filters, use the <strong>Activity Monitoring</strong> tab. Use <strong>EMS report</strong> to export by FDA, Territory, Region, Zone, BU, or TM. Click a row in the Performance Table to drill down to call-level details.
+        For a detailed activity list with the same filters, use the <strong>Activity Monitoring</strong> tab. Use <strong>EMS report</strong> to export by MDO, Territory, Region, Zone, BU, or TM. Click a row in the Performance Table to drill down to call-level details.
       </p>
 
       {/* Drill-down: Call-Level View modal */}
@@ -1391,7 +1391,7 @@ const ActivityEmsProgressView: React.FC = () => {
                     <tr className="bg-slate-100 text-left text-slate-600 font-medium">
                       <th className="px-3 py-2">Farmer Name</th>
                       <th className="px-3 py-2">Farmer Mobile</th>
-                      <th className="px-3 py-2">Officer (FDA)</th>
+                      <th className="px-3 py-2">Officer (MDO)</th>
                       <th className="px-3 py-2">TM</th>
                       <th className="px-3 py-2">Territory</th>
                       <th className="px-3 py-2 text-center">Connected</th>

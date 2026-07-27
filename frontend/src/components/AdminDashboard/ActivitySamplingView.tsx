@@ -2164,15 +2164,15 @@ const ActivitySamplingView: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* FDA & TM Details */}
+                        {/* MDO & TM Details */}
                         <div>
                           <h4 className="text-xs font-black text-slate-700 mb-1 flex items-center gap-1.5">
                             <UserIcon size={14} className="text-slate-500" />
-                            FDA & TM Details
+                            MDO & TM Details
                           </h4>
                           <div className="flex flex-wrap gap-4 p-2 bg-slate-50 rounded-lg border border-slate-200">
                             <div>
-                              <p className="text-[10px] text-slate-500 font-medium mb-0.5">FDA</p>
+                              <p className="text-[10px] text-slate-500 font-medium mb-0.5">MDO</p>
                               <p className="text-xs font-bold text-slate-900">
                                 {item.activity.officerName || '-'}
                                 {item.activity.officerId && (

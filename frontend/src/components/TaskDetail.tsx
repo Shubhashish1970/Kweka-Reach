@@ -266,7 +266,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, onBack, onTaskUpdated }) 
               <p className="text-sm font-medium text-slate-700">{formatDate(fullTask.activityId.date)}</p>
             </div>
             <div>
-              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">FDA</p>
+              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">MDO</p>
               <p className="text-sm font-medium text-slate-700">{fullTask.activityId.officerName}</p>
             </div>
             <div>
@@ -378,7 +378,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, onBack, onTaskUpdated }) 
               )}
               {fullTask.callLog.activityQuality != null && fullTask.callLog.activityQuality >= 1 && fullTask.callLog.activityQuality <= 5 && (
                 <div>
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">4B. Activity Quality – FDA holistic crop solution</p>
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">4B. Activity Quality – MDO holistic crop solution</p>
                   <span
                     className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold border ${
                       fullTask.callLog.activityQuality <= 2

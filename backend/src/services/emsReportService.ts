@@ -121,7 +121,7 @@ function buildRelativeRemarks(meetingValidityPct: number, meetingConversionPct: 
 }
 
 /**
- * EMS Report summary: one row per group (TM, FDA, BU, Zone, Region, Territory).
+ * EMS Report summary: one row per group (TM, MDO, BU, Zone, Region, Territory).
  * Includes all attempted calls: status completed (Connected), not_reachable (Disconnected/Incoming N/A/No Answer), invalid_number (Invalid).
  * When dateFrom/dateTo are provided, tasks are filtered by scheduledDate so totals tally with Team Lead Task Allocation (same scope).
  * Connected = callLog.callStatus === 'Connected' and progressed to next stage or beyond.

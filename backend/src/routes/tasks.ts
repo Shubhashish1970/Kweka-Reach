@@ -70,8 +70,8 @@ router.get(
           activity: {
             type: activity?.type || 'Unknown',
             date: activity?.date || task.createdAt,
-            // Agent-facing: FDA + TM + Territory + State
-            officerName: activity?.officerName || 'Unknown', // FDA
+            // Agent-facing: MDO + TM + Territory + State
+            officerName: activity?.officerName || 'Unknown', // MDO
             tmName: activity?.tmName || '',
             location: activity?.location || 'Unknown',
             territory: activity?.territoryName || activity?.territory || 'Unknown',
@@ -2196,7 +2196,7 @@ router.get(
 // @desc    Team Lead: get agent queue detail for an agent in their team (opens Agent Queue detail view)
 // @query   language - optional: filter tasks by farmer preferredLanguage
 // @query   page, limit - optional: lazy load tasks (default limit 30, max 100)
-// @query   dateFrom, dateTo, bu, state, status, fda - optional: filter by scheduled date, activity, task status, FDA (officer)
+// @query   dateFrom, dateTo, bu, state, status, fda - optional: filter by scheduled date, activity, task status, MDO (officer)
 // @access  Private (Team Lead, MIS Admin)
 router.get(
   '/dashboard/agent/:agentId',

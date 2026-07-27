@@ -260,7 +260,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
             />
           </div>
 
-          {/* Filter By: first select dimension (Territory / TM / FDA), then select name */}
+          {/* Filter By: first select dimension (Territory / TM / MDO), then select name */}
           <div className="space-y-2 mb-3">
             <div className="flex items-center gap-2">
               <label className="text-[11px] font-bold text-slate-500 whitespace-nowrap w-16">Filter By</label>
@@ -273,7 +273,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                 <option value="">—</option>
                 <option value="territory">Territory</option>
                 <option value="tm">TM</option>
-                <option value="fda">FDA</option>
+                <option value="fda">MDO</option>
               </select>
             </div>
             {filterBy && (
@@ -281,7 +281,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                 <div className="flex items-start gap-2">
                   <div className="flex-1 min-w-0">
                     <SearchableMultiSelect
-                      label={filterBy === 'territory' ? 'Territory' : filterBy === 'tm' ? 'TM Name' : 'FDA Name'}
+                      label={filterBy === 'territory' ? 'Territory' : filterBy === 'tm' ? 'TM Name' : 'MDO Name'}
                       items={nameOptions}
                       selected={filterValues}
                       onToggle={toggleFilterValue}
@@ -291,7 +291,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                           ? 'Select territories...'
                           : filterBy === 'tm'
                             ? 'Select TMs...'
-                            : 'Select FDAs...'
+                            : 'Select MDOs...'
                       }
                     />
                   </div>
@@ -475,10 +475,10 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                         </span>
                       </div>
 
-                      {/* Field context - FDA/TM/Territory/State */}
+                      {/* Field context - MDO/TM/Territory/State */}
                       <div className="mt-1">
                         <span className="text-[11px] text-slate-500 font-medium truncate block">
-                          FDA: {task.activity.officerName}
+                          MDO: {task.activity.officerName}
                           {task.activity.tmName ? ` • TM: ${task.activity.tmName}` : ''}
                           {task.activity.territory ? ` • ${task.activity.territory}` : ''}
                           {task.activity.state ? ` • ${task.activity.state}` : ''}

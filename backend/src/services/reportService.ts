@@ -14,8 +14,8 @@ export interface TaskDetailExportRow {
   activityId: string;
   activityType: string;
   activityDate: string;
-  officerName: string;       // FDA name
-  officerId: string;         // FDA ID
+  officerName: string;       // MDO name
+  officerId: string;         // MDO ID
   tmName: string;
   tmEmpCode: string;
   activityLocation: string;

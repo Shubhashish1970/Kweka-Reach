@@ -135,7 +135,7 @@ const emsReportGroupByValues: EmsReportGroupBy[] = ['tm', 'fda', 'bu', 'zone', '
 
 /**
  * GET /api/reports/ems
- * EMS report: summary or line-level rows grouped by TM, FDA, BU, Zone, Region, Territory.
+ * EMS report: summary or line-level rows grouped by TM, MDO, BU, Zone, Region, Territory.
  * Query: groupBy (required), level=summary|line (default summary), + filters.
  */
 router.get(
@@ -331,7 +331,7 @@ router.get(
           ['EMS Score', ...summaryRows.map((r) => r.emsScore), totalsEmsScore],
         ];
         const headerRow = ['', ...groupLabels, 'Totals'];
-        const groupByLabel = { tm: 'TM', fda: 'FDA', bu: 'BU', zone: 'Zone', region: 'Region', territory: 'Territory' }[groupBy] || groupBy;
+        const groupByLabel = { tm: 'TM', fda: 'MDO', bu: 'BU', zone: 'Zone', region: 'Region', territory: 'Territory' }[groupBy] || groupBy;
         const groupByNote = `Group By: ${groupByLabel}`;
         const taskAllocNote =
           'When date range is used, EMS uses task scheduled date so Total calls = Completed + Not reachable + Invalid from Team Lead Task Allocation (same scope).';
@@ -346,7 +346,7 @@ router.get(
             'Activity Date',
             'Farmer Name',
             'Farmer Mobile',
-            'Officer (FDA)',
+            'Officer (MDO)',
             'TM',
             'Territory',
             'Zone',
@@ -485,8 +485,8 @@ router.get('/tasks-detail-export', filterValidators, async (req: Request, res: R
       'Activity ID',
       'Activity Type',
       'Activity Date',
-      'Officer Name (FDA)',
-      'Officer ID (FDA)',
+      'Officer Name (MDO)',
+      'Officer ID (MDO)',
       'TM Name',
       'TM Emp Code',
       'Activity Location',

@@ -134,7 +134,7 @@ const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({ taskData, isActive 
               <div className="grid grid-cols-2 gap-2 text-[10px]">
                 <div className="flex items-center gap-1.5">
                   <User size={10} className="text-slate-400" />
-                  <span className="text-slate-400 font-bold">FDA:</span>
+                  <span className="text-slate-400 font-bold">MDO:</span>
                   <span className="text-slate-700 font-medium truncate">{taskData.activity.officer}</span>
                 </div>
                 {taskData.activity.tm && (
@@ -269,14 +269,14 @@ const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({ taskData, isActive 
                 </div>
               )}
 
-              {/* 4B. Activity Quality - FDA holistic crop solution */}
+              {/* 4B. Activity Quality - MDO holistic crop solution */}
               {taskData.callLog.callStatus === 'Connected' && taskData.callLog.didRecall === true && taskData.callLog.activityQuality != null && taskData.callLog.activityQuality >= 1 && taskData.callLog.activityQuality <= 5 && (
                 <div>
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block">
                     4B. Activity Quality
                   </label>
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <p className="text-[9px] text-slate-400 font-bold uppercase mb-1">FDA holistic crop solution</p>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase mb-1">MDO holistic crop solution</p>
                     <span
                       className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
                         taskData.callLog.activityQuality <= 2

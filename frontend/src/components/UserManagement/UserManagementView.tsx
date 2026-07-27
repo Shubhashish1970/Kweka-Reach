@@ -228,7 +228,7 @@ const UserManagementView: React.FC = () => {
   return (
     <div className="space-y-6">
       <InfoBanner title="User Management - Call Centre Employees Only">
-        Field Sales employees (FDA, TM, RM, ZM, BU Head, RDM) and hierarchy information are
+        Field Sales employees (MDO, TM, RM, ZM, BU Head, RDM) and hierarchy information are
         managed via the Activity API and used for reporting purposes.
       </InfoBanner>
 

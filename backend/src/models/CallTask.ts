@@ -32,7 +32,7 @@ export interface ICallLog {
   purchasedProducts: Array<{ product: string; quantity: string; unit: string }>;
   farmerComments: string; // Replaces agentObservations
   sentiment: 'Positive' | 'Negative' | 'Neutral' | 'N/A'; // Sentiment indicator
-  activityQuality?: number; // 1-5: FDA holistic crop solution understanding (4B. Activity Quality)
+  activityQuality?: number; // 1-5: MDO holistic crop solution understanding (4B. Activity Quality)
 }
 
 export type Outcome = 

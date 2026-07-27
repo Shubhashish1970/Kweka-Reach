@@ -1186,7 +1186,7 @@ const TASK_PAGE_SIZE_MAX = 100;
  * @param options.language - optional: filter tasks by farmer preferredLanguage
  * @param options.page - optional: 1-based page for lazy load (requires limit)
  * @param options.limit - optional: page size (default 30, max 100)
- * @param options.dateFrom, dateTo, bu, state, status, fda - optional: filter by scheduled date, activity, task status, FDA (officer)
+ * @param options.dateFrom, dateTo, bu, state, status, fda - optional: filter by scheduled date, activity, task status, MDO (officer)
  */
 export const getAgentQueue = async (
   agentId: string,
@@ -1371,7 +1371,7 @@ export const getAgentQueue = async (
         createdAt: t.createdAt,
       }));
 
-      // Distinct FDA (officer) names for this agent's tasks (same date/bu/state, no status filter)
+      // Distinct MDO (officer) names for this agent's tasks (same date/bu/state, no status filter)
       const activityFilterForOfficers: Record<string, string> = {};
       if (options?.bu) activityFilterForOfficers['activity.buName'] = String(options.bu).trim();
       if (options?.state) activityFilterForOfficers['activity.state'] = String(options.state).trim();

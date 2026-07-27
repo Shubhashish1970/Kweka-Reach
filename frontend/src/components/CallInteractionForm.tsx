@@ -387,13 +387,13 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                           </div>
                         </div>
 
-                        {/* 4B. Activity Quality - FDA holistic crop solution (after 4A, before Commercial Conversion) */}
+                        {/* 4B. Activity Quality - MDO holistic crop solution (after 4A, before Commercial Conversion) */}
                         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                           <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                             4B. Activity Quality
                           </h3>
                           <p className="text-sm font-medium text-slate-700">
-                            Did the FDA understand your problem and offer a holistic crop solution?
+                            Did the MDO understand your problem and offer a holistic crop solution?
                           </p>
                           <div className="flex flex-wrap gap-2">
                             {[

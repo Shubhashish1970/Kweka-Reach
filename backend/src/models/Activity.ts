@@ -23,7 +23,7 @@ export interface IActivity extends Document {
   state?: string; // Source-of-truth for language derivation (required once Activity API v2 is stable)
 
   // Field Sales hierarchy (Activity API v2)
-  // Note: `officerId`/`officerName` represent FDA; we store TM separately.
+  // Note: `officerId`/`officerName` represent MDO; we store TM separately.
   tmEmpCode?: string;
   tmName?: string;
   farmerIds: mongoose.Types.ObjectId[];

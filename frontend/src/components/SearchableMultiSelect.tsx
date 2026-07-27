@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, X, Search, Check } from 'lucide-react';
+import { ChevronDown, X, Search } from 'lucide-react';
 
 interface SearchableMultiSelectProps {
   label: string;
   items: string[];
   selected: string[];
   onToggle: (item: string) => void;
-  color: 'green' | 'indigo';
+  /** Kept for API compatibility; Select Contact uses a neutral Filter By theme. */
+  color?: 'green' | 'indigo';
   placeholder?: string;
   activityItems?: string[]; // Items from activity to highlight
 }
@@ -16,7 +17,6 @@ const SearchableMultiSelect: React.FC<SearchableMultiSelectProps> = ({
   items,
   selected,
   onToggle,
-  color,
   placeholder = 'Search and select...',
   activityItems = [],
 }) => {
@@ -25,12 +25,10 @@ const SearchableMultiSelect: React.FC<SearchableMultiSelectProps> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Filter items based on search query
   const filteredItems = items.filter((item) =>
     item.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -43,101 +41,70 @@ const SearchableMultiSelect: React.FC<SearchableMultiSelectProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Focus input when dropdown opens
   useEffect(() => {
     if (isOpen && inputRef.current) {
       inputRef.current.focus();
     }
   }, [isOpen]);
 
-  const handleToggle = (item: string) => {
-    onToggle(item);
-    // Keep dropdown open for multiple selections
-  };
-
   const isActivityItem = (item: string) => activityItems.includes(item);
   const isSelected = (item: string) => selected.includes(item);
 
-  const getButtonStyle = (item: string) => {
-    const selected = isSelected(item);
-    const isActivity = isActivityItem(item);
-    
-    if (selected) {
-      return color === 'green'
-        ? 'bg-green-700 text-white border-green-700'
-        : 'bg-indigo-700 text-white border-indigo-700';
-    }
-    
-    if (isActivity) {
-      return 'bg-blue-50 text-blue-700 border-blue-200';
-    }
-    
-    return 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50';
-  };
-
   return (
-    <div className="space-y-3">
-      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-        {label}
-      </label>
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-bold text-slate-500">{label}</label>
 
-      {/* Selected Items Display */}
       {selected.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-2">
+        <div className="flex flex-wrap gap-1.5">
           {selected.map((item) => (
             <span
               key={item}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold border flex items-center gap-2 ${
-                color === 'green'
-                  ? 'bg-green-700 text-white border-green-700'
-                  : 'bg-indigo-700 text-white border-indigo-700'
-              }`}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200"
             >
               <span>{item}</span>
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggle(item);
                 }}
-                className="hover:bg-white/20 rounded-full p-0.5 transition-all"
+                className="text-slate-400 hover:text-slate-700 rounded p-0.5 transition-colors"
+                aria-label={`Remove ${item}`}
               >
-                <X size={12} />
+                <X size={11} />
               </button>
             </span>
           ))}
         </div>
       )}
 
-      {/* Dropdown */}
       <div className="relative" ref={dropdownRef}>
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className={`w-full min-h-12 px-4 py-3 rounded-xl border text-left text-sm font-medium flex items-center justify-between transition-all ${
+          className={`w-full h-9 pl-3 pr-8 py-1.5 bg-white border rounded-lg text-xs font-medium text-left flex items-center gap-2 transition-colors appearance-none ${
             isOpen
-              ? 'border-lime-400 ring-2 ring-lime-400/20'
-              : 'border-slate-200 hover:border-lime-300'
-          } focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 ${selected.length === 0 ? 'text-slate-400' : 'text-slate-900'}`}
+              ? 'border-lime-400 ring-2 ring-lime-400 focus:outline-none'
+              : 'border-slate-200 hover:border-slate-300'
+          } ${selected.length === 0 ? 'text-slate-400' : 'text-slate-900'}`}
         >
-          <span className="flex items-center gap-2">
-            <Search size={16} className="text-slate-400" />
-            <span>{selected.length > 0 ? `${selected.length} selected` : placeholder}</span>
+          <Search size={14} className="text-slate-400 shrink-0" />
+          <span className="truncate flex-1">
+            {selected.length > 0 ? `${selected.length} selected` : placeholder}
           </span>
           <ChevronDown
-            size={16}
-            className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            size={12}
+            className={`absolute right-2.5 text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`}
           />
         </button>
 
-        {/* Dropdown Menu */}
         {isOpen && (
-          <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl max-h-64 overflow-hidden">
-            {/* Search Input */}
-            <div className="p-2 border-b border-slate-200">
+          <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-hidden">
+            <div className="p-1.5 border-b border-slate-200">
               <div className="relative">
                 <Search
-                  size={16}
-                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
                 />
                 <input
                   ref={inputRef}
@@ -145,49 +112,54 @@ const SearchableMultiSelect: React.FC<SearchableMultiSelectProps> = ({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search..."
-                  className="w-full min-h-12 pl-10 pr-4 py-3 border border-slate-200 rounded-xl bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                  className="w-full h-9 pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg bg-white text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
                 />
               </div>
             </div>
 
-            {/* Items List */}
             <div className="overflow-y-auto max-h-48">
               {filteredItems.length === 0 ? (
-                <div className="p-4 text-center text-sm text-slate-500">
-                  No items found
-                </div>
+                <div className="px-3 py-2.5 text-center text-xs text-slate-500">No items found</div>
               ) : (
                 filteredItems.map((item) => {
-                  const selected = isSelected(item);
+                  const checked = isSelected(item);
                   const isActivity = isActivityItem(item);
-                  
+
                   return (
                     <button
                       key={item}
                       type="button"
-                      onClick={() => handleToggle(item)}
-                      className={`w-full px-4 py-3 text-left text-sm font-medium border-b border-slate-100 last:border-b-0 flex items-center justify-between transition-colors ${getButtonStyle(item)}`}
+                      onClick={() => onToggle(item)}
+                      className="w-full px-3 py-2 text-left text-xs font-medium text-slate-900 border-b border-slate-100 last:border-b-0 flex items-center gap-2.5 hover:bg-slate-50 transition-colors"
                     >
-                      <div className="flex items-center gap-2">
-                        {selected && (
-                          <Check size={16} className={color === 'green' ? 'text-white' : 'text-white'} />
+                      <span
+                        className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded border shrink-0 ${
+                          checked
+                            ? 'bg-slate-800 border-slate-800 text-white'
+                            : 'bg-white border-slate-300'
+                        }`}
+                        aria-hidden
+                      >
+                        {checked && (
+                          <svg viewBox="0 0 12 12" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M2.5 6.5L5 9l4.5-5.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
                         )}
-                        <span>{item}</span>
-                        {isActivity && !selected && (
-                          <span className="text-[10px] text-blue-600 font-bold">(from activity)</span>
-                        )}
-                      </div>
+                      </span>
+                      <span className="truncate">{item}</span>
+                      {isActivity && !checked && (
+                        <span className="text-[10px] text-blue-600 font-bold shrink-0">(from activity)</span>
+                      )}
                     </button>
                   );
                 })
               )}
             </div>
 
-            {/* Activity Items Hint */}
             {activityItems.length > 0 && (
-              <div className="p-2 border-t border-slate-200 bg-blue-50">
-                <p className="text-[10px] text-blue-700 font-bold">
-                  💡 Items marked "(from activity)" are from the Field Officer's report
+              <div className="p-2 border-t border-slate-200 bg-slate-50">
+                <p className="text-[10px] text-slate-600 font-medium">
+                  Items marked &quot;(from activity)&quot; are from the Field Officer&apos;s report
                 </p>
               </div>
             )}
@@ -199,5 +171,3 @@ const SearchableMultiSelect: React.FC<SearchableMultiSelectProps> = ({
 };
 
 export default SearchableMultiSelect;
-
-

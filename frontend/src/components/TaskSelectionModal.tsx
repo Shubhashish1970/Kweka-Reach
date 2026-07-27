@@ -295,7 +295,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                       }
                     />
                   </div>
-                  <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap pt-8" title="In progress / Queue / Completed">
+                  <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap self-end pb-2" title="In progress / Queue / Completed">
                     ({inProgressCount} / {queueCount} / {completedCount})
                   </span>
                 </div>

@@ -333,7 +333,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Done ({completedCount})
+              Done (Today) ({completedCount})
             </button>
           </div>
           <p className="text-[10px] text-slate-500 mt-2 leading-snug">

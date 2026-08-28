@@ -5,7 +5,7 @@ import { Activity } from '../models/Activity.js';
 import mongoose from 'mongoose';
 import logger from '../config/logger.js';
 import * as XLSX from 'xlsx';
-import { getIstCalendarDayBounds } from '../utils/dateRangeQuery.js';
+import { getIstCalendarDayBounds, parseQueryDateFrom, parseQueryDateTo } from '../utils/dateRangeQuery.js';
 
 export interface TaskAssignmentOptions {
   agentId?: string;
@@ -26,12 +26,12 @@ export const callTaskNoAgentAssignedMatch = (): Record<string, unknown> => ({
  * Tasks that still need assignment: no agent (see `callTaskNoAgentAssignedMatch`) and not in a terminal call outcome.
  */
 export const callTaskNeedsAgentMongoFilter = (): Record<string, unknown> => ({
-  status: { $nin: ['completed', 'not_reachable', 'invalid_number'] },
+  status: { $nin: ['completed', 'not_reachable', 'invalid_number', 'cancelled'] },
   ...callTaskNoAgentAssignedMatch(),
 });
 
 const OPEN_DIALER_STATUSES: TaskStatus[] = ['sampled_in_queue', 'in_progress'];
-const TERMINAL_DIALER_STATUSES: TaskStatus[] = ['completed', 'not_reachable', 'invalid_number'];
+const TERMINAL_DIALER_STATUSES: TaskStatus[] = ['completed', 'not_reachable', 'invalid_number', 'cancelled'];
 
 /**
  * Get all tasks for an agent that can be shown in the dialer (queue/in-progress + today's Done)
@@ -798,7 +798,7 @@ export const assignTaskToAgent = async (
     }
 
     // Prevent reopening terminal tasks
-    const terminalStatuses: ICallTask['status'][] = ['completed', 'not_reachable', 'invalid_number'];
+    const terminalStatuses: ICallTask['status'][] = ['completed', 'not_reachable', 'invalid_number', 'cancelled'];
     if (terminalStatuses.includes(task.status)) {
       const err: any = new Error(`Cannot reassign a task in terminal state "${task.status}"`);
       err.statusCode = 400;
@@ -948,4 +948,244 @@ export const updateTaskStatus = async (
     logger.error('Error updating task status:', error);
     throw error;
   }
+};
+
+export interface BulkCancelInput {
+  taskIds?: string[];
+  agentId?: string;
+  supersedeActivities?: boolean;
+  activityDateFrom?: string | Date;
+  activityDateTo?: string | Date;
+}
+
+export interface BulkCancelPreviewResult {
+  tasksToCancel: number;
+  tasksSkippedInProgress: number;
+  tasksSkippedOther: number;
+  activitiesToSupersede: number;
+}
+
+export interface BulkCancelResult {
+  cancelled: number;
+  skippedInProgress: number;
+  skippedOther: number;
+  supersededActivities: number;
+}
+
+const getTeamAgentObjectIds = async (teamLeadId: string): Promise<mongoose.Types.ObjectId[]> => {
+  const agents = await User.find({
+    teamLeadId: new mongoose.Types.ObjectId(teamLeadId),
+    role: 'cc_agent',
+    isActive: true,
+  })
+    .select('_id')
+    .lean();
+  return agents.map((a) => a._id as mongoose.Types.ObjectId);
+};
+
+const assertAgentInTeam = async (agentId: string, teamLeadId: string): Promise<void> => {
+  const agent = await User.findById(agentId).select('_id role teamLeadId').lean();
+  if (!agent) {
+    const err: any = new Error('Agent not found');
+    err.statusCode = 404;
+    throw err;
+  }
+  if ((agent as any).role !== 'cc_agent') {
+    const err: any = new Error('User is not a CC agent');
+    err.statusCode = 400;
+    throw err;
+  }
+  const agentTeamLeadId = (agent as any).teamLeadId?.toString?.() || null;
+  if (agentTeamLeadId !== teamLeadId) {
+    const err: any = new Error('Agent is not in your team');
+    err.statusCode = 403;
+    throw err;
+  }
+};
+
+const assertTasksInTeam = async (taskIds: string[], teamLeadId: string): Promise<void> => {
+  const teamAgentIds = await getTeamAgentObjectIds(teamLeadId);
+  const teamAgentIdSet = new Set(teamAgentIds.map((id) => id.toString()));
+  const tasks = await CallTask.find({ _id: { $in: taskIds.map((id) => new mongoose.Types.ObjectId(id)) } })
+    .select('assignedAgentId')
+    .lean();
+
+  if (tasks.length !== taskIds.length) {
+    const err: any = new Error('One or more tasks were not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  for (const task of tasks) {
+    const assignedId = (task as any).assignedAgentId?.toString?.() || null;
+    if (!assignedId || !teamAgentIdSet.has(assignedId)) {
+      const err: any = new Error('One or more tasks are not in your team scope');
+      err.statusCode = 403;
+      throw err;
+    }
+  }
+};
+
+const buildBulkCancelScopeQuery = (input: BulkCancelInput): Record<string, unknown> => {
+  const { taskIds, agentId } = input;
+  if (!agentId && (!taskIds || taskIds.length === 0)) {
+    const err: any = new Error('Either agentId or taskIds is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const query: Record<string, unknown> = {};
+  if (agentId) {
+    query.assignedAgentId = new mongoose.Types.ObjectId(agentId);
+  }
+  if (taskIds && taskIds.length > 0) {
+    query._id = { $in: taskIds.map((id) => new mongoose.Types.ObjectId(id)) };
+  }
+  return query;
+};
+
+const countActivitiesToSupersede = async (
+  supersedeActivities?: boolean,
+  activityDateFrom?: string | Date,
+  activityDateTo?: string | Date
+): Promise<number> => {
+  if (!supersedeActivities) return 0;
+
+  const fromDate = parseQueryDateFrom(activityDateFrom);
+  const toDate = parseQueryDateTo(activityDateTo);
+  if (!fromDate || !toDate) {
+    const err: any = new Error('activityDateFrom and activityDateTo are required when supersedeActivities is true');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (fromDate > toDate) {
+    const err: any = new Error('activityDateFrom must be on or before activityDateTo');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return Activity.countDocuments({
+    lifecycleStatus: 'active',
+    date: { $gte: fromDate, $lte: toDate },
+  });
+};
+
+const supersedeActiveActivitiesInRange = async (
+  activityDateFrom?: string | Date,
+  activityDateTo?: string | Date
+): Promise<number> => {
+  const fromDate = parseQueryDateFrom(activityDateFrom);
+  const toDate = parseQueryDateTo(activityDateTo);
+  if (!fromDate || !toDate) {
+    const err: any = new Error('activityDateFrom and activityDateTo are required when supersedeActivities is true');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const result = await Activity.updateMany(
+    {
+      lifecycleStatus: 'active',
+      date: { $gte: fromDate, $lte: toDate },
+    },
+    {
+      $set: {
+        lifecycleStatus: 'superseded',
+        lifecycleUpdatedAt: new Date(),
+      },
+    }
+  );
+
+  return result.modifiedCount || 0;
+};
+
+export const previewBulkCancelTasks = async (
+  input: BulkCancelInput,
+  actor: { role: string; userId: string }
+): Promise<BulkCancelPreviewResult> => {
+  const scopeQuery = buildBulkCancelScopeQuery(input);
+
+  if (actor.role === 'team_lead') {
+    if (input.agentId) {
+      await assertAgentInTeam(input.agentId, actor.userId);
+    }
+    if (input.taskIds?.length) {
+      await assertTasksInTeam(input.taskIds, actor.userId);
+    }
+  }
+
+  const baseMatch = { ...scopeQuery };
+  const [tasksToCancel, tasksSkippedInProgress, tasksSkippedOther, activitiesToSupersede] = await Promise.all([
+    CallTask.countDocuments({ ...baseMatch, status: 'sampled_in_queue' }),
+    CallTask.countDocuments({ ...baseMatch, status: 'in_progress' }),
+    CallTask.countDocuments({
+      ...baseMatch,
+      status: { $nin: ['sampled_in_queue', 'in_progress'] },
+    }),
+    countActivitiesToSupersede(input.supersedeActivities, input.activityDateFrom, input.activityDateTo),
+  ]);
+
+  return {
+    tasksToCancel,
+    tasksSkippedInProgress,
+    tasksSkippedOther,
+    activitiesToSupersede,
+  };
+};
+
+export const bulkCancelTasks = async (
+  input: BulkCancelInput,
+  actor: { role: string; userId: string }
+): Promise<BulkCancelResult> => {
+  const scopeQuery = buildBulkCancelScopeQuery(input);
+
+  if (actor.role === 'team_lead') {
+    if (input.agentId) {
+      await assertAgentInTeam(input.agentId, actor.userId);
+    }
+    if (input.taskIds?.length) {
+      await assertTasksInTeam(input.taskIds, actor.userId);
+    }
+  }
+
+  const preview = await previewBulkCancelTasks(input, actor);
+  const now = new Date();
+
+  const cancelResult = await CallTask.updateMany(
+    { ...scopeQuery, status: 'sampled_in_queue' },
+    {
+      $set: { status: 'cancelled' },
+      $push: {
+        interactionHistory: {
+          timestamp: now,
+          status: 'cancelled',
+          notes: input.agentId
+            ? `Bulk cancel queue for agent ${input.agentId}`
+            : 'Bulk cancel selected tasks',
+        },
+      },
+    }
+  );
+
+  let supersededActivities = 0;
+  if (input.supersedeActivities) {
+    supersededActivities = await supersedeActiveActivitiesInRange(
+      input.activityDateFrom,
+      input.activityDateTo
+    );
+  }
+
+  logger.info('Bulk cancel completed', {
+    actorId: actor.userId,
+    actorRole: actor.role,
+    cancelled: cancelResult.modifiedCount || 0,
+    skippedInProgress: preview.tasksSkippedInProgress,
+    supersededActivities,
+  });
+
+  return {
+    cancelled: cancelResult.modifiedCount || 0,
+    skippedInProgress: preview.tasksSkippedInProgress,
+    skippedOther: preview.tasksSkippedOther,
+    supersededActivities,
+  };
 };

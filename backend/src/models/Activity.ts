@@ -4,7 +4,7 @@ export interface IActivity extends Document {
   activityId: string; // FFA App activity ID
   type: string;
   date: Date;
-  lifecycleStatus?: 'active' | 'sampled' | 'inactive' | 'not_eligible';
+  lifecycleStatus?: 'active' | 'sampled' | 'inactive' | 'not_eligible' | 'superseded';
   lifecycleUpdatedAt?: Date;
   lastSamplingRunAt?: Date;
   /** True once this activity has been processed in a first-sample run; never reset by ad-hoc runs */
@@ -55,7 +55,7 @@ const ActivitySchema = new Schema<IActivity>(
     },
     lifecycleStatus: {
       type: String,
-      enum: ['active', 'sampled', 'inactive', 'not_eligible'],
+      enum: ['active', 'sampled', 'inactive', 'not_eligible', 'superseded'],
       default: 'active',
       index: true,
     },

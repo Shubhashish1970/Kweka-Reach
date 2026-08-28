@@ -52,7 +52,7 @@ export interface ActivityOverrides {
   activityId?: string;
   type?: 'Field Day' | 'Group Meeting' | 'Demo Visit' | 'OFM' | 'Other';
   date?: Date;
-  lifecycleStatus?: 'active' | 'sampled' | 'inactive' | 'not_eligible';
+  lifecycleStatus?: 'active' | 'sampled' | 'inactive' | 'not_eligible' | 'superseded';
   officerId?: string;
   officerName?: string;
   location?: string;
@@ -130,7 +130,7 @@ export const makeAgent = (
 
 // ─── CallTask ─────────────────────────────────────────────────────────────────
 export interface TaskOverrides {
-  status?: 'unassigned' | 'sampled_in_queue' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number';
+  status?: 'unassigned' | 'sampled_in_queue' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number' | 'cancelled';
   assignedAgentId?: mongoose.Types.ObjectId | null;
   callbackNumber?: number;
   isCallback?: boolean;

@@ -7,6 +7,7 @@ import Button from './shared/Button';
 import StyledSelect from './shared/StyledSelect';
 import TaskDetail from './TaskDetail';
 import ReassignModal from './ReassignModal';
+import BulkCancelModal from './shared/BulkCancelModal';
 import InfoBanner from './shared/InfoBanner';
 import { getTaskStatusLabel, TaskStatus } from '../utils/taskStatusLabels';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } from '../utils/dateRangeUtils';
@@ -152,6 +153,7 @@ const TaskList: React.FC = () => {
   const [showBulkActions, setShowBulkActions] = useState(false);
   const [showBulkReassignModal, setShowBulkReassignModal] = useState(false);
   const [showBulkStatusModal, setShowBulkStatusModal] = useState(false);
+  const [showBulkCancelModal, setShowBulkCancelModal] = useState(false);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   // Export dropdown removed (Excel download moved to stats header)
 
@@ -962,6 +964,14 @@ const TaskList: React.FC = () => {
                   >
                     Update Status
                   </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setShowBulkCancelModal(true)}
+                    disabled={isBulkProcessing}
+                  >
+                    Cancel Selected
+                  </Button>
                 </div>
                 <Button
                   variant="ghost"
@@ -1207,6 +1217,21 @@ const TaskList: React.FC = () => {
                 isProcessing={isBulkProcessing}
               />
             )}
+
+            <BulkCancelModal
+              isOpen={showBulkCancelModal}
+              onClose={() => setShowBulkCancelModal(false)}
+              taskIds={Array.from(selectedTasks)}
+              onCancelled={({ cancelled, supersededActivities }) => {
+                setSelectedTasks(new Set());
+                setShowBulkActions(false);
+                setShowBulkCancelModal(false);
+                handleRefresh();
+                toast.showSuccess(
+                  `Cancelled ${cancelled} task(s)${supersededActivities ? `; superseded ${supersededActivities} activit${supersededActivities === 1 ? 'y' : 'ies'}` : ''}`
+                );
+              }}
+            />
           </>
         )}
       </div>

@@ -559,6 +559,36 @@ export const tasksAPI = {
       body: JSON.stringify({ taskIds, status, notes }),
     });
   },
+
+  previewBulkCancel: async (payload: {
+    agentId?: string;
+    taskIds?: string[];
+    supersedeActivities?: boolean;
+    activityDateFrom?: string;
+    activityDateTo?: string;
+  }) => {
+    const params = new URLSearchParams();
+    if (payload.agentId) params.append('agentId', payload.agentId);
+    if (payload.taskIds?.length) params.append('taskIds', payload.taskIds.join(','));
+    if (payload.supersedeActivities) params.append('supersedeActivities', 'true');
+    if (payload.activityDateFrom) params.append('activityDateFrom', payload.activityDateFrom);
+    if (payload.activityDateTo) params.append('activityDateTo', payload.activityDateTo);
+    const query = params.toString();
+    return apiRequest(`/tasks/bulk/cancel-preview${query ? `?${query}` : ''}`);
+  },
+
+  bulkCancel: async (payload: {
+    agentId?: string;
+    taskIds?: string[];
+    supersedeActivities?: boolean;
+    activityDateFrom?: string;
+    activityDateTo?: string;
+  }) => {
+    return apiRequest('/tasks/bulk/cancel', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
 // Sampling Control API (Team Lead)

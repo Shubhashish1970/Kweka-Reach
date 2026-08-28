@@ -4,6 +4,7 @@ import { tasksAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import Modal from '../shared/Modal';
 import ConfirmationModal from '../shared/ConfirmationModal';
+import BulkCancelModal from '../shared/BulkCancelModal';
 import Button from '../shared/Button';
 import StyledSelect from '../shared/StyledSelect';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } from '../../utils/dateRangeUtils';
@@ -88,6 +89,7 @@ const TaskDashboardView: React.FC = () => {
   const [allocCount, setAllocCount] = useState<number>(0);
   const [isAllocConfirmOpen, setIsAllocConfirmOpen] = useState(false);
   const [reallocateAgent, setReallocateAgent] = useState<{ agentId: string; name: string; sampledInQueue: number } | null>(null);
+  const [cancelAgent, setCancelAgent] = useState<{ agentId: string; name: string; sampledInQueue: number } | null>(null);
   const [isReallocating, setIsReallocating] = useState(false);
 
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
@@ -1315,6 +1317,24 @@ const TaskDashboardView: React.FC = () => {
         isLoading={isReallocating}
       />
 
+      <BulkCancelModal
+        isOpen={cancelAgent !== null}
+        onClose={() => setCancelAgent(null)}
+        agentId={cancelAgent?.agentId}
+        agentName={cancelAgent?.name}
+        onCancelled={async ({ cancelled, supersededActivities }) => {
+          const closedAgentId = cancelAgent?.agentId;
+          toast.showSuccess(
+            `Cancelled ${cancelled} task(s)${supersededActivities ? `; superseded ${supersededActivities} activit${supersededActivities === 1 ? 'y' : 'ies'}` : ''}`
+          );
+          setCancelAgent(null);
+          await Promise.all([loadDashboard(), loadLatestAllocationStatus()]);
+          if (selectedAgentId && selectedAgentId === closedAgentId) {
+            setAgentDetail(null);
+          }
+        }}
+      />
+
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -1782,13 +1802,22 @@ const TaskDashboardView: React.FC = () => {
                   <td className="px-4 py-3 font-black text-slate-900">{a.totalOpen ?? 0}</td>
                   <td className="px-4 py-3">
                     {Number(a.sampledInQueue || 0) > 0 ? (
-                      <button
-                        onClick={() => setReallocateAgent({ agentId: a.agentId, name: a.name, sampledInQueue: a.sampledInQueue })}
-                        disabled={isReallocating || isAllocRunning}
-                        className="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Reallocate
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setReallocateAgent({ agentId: a.agentId, name: a.name, sampledInQueue: a.sampledInQueue })}
+                          disabled={isReallocating || isAllocRunning}
+                          className="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Reallocate
+                        </button>
+                        <button
+                          onClick={() => setCancelAgent({ agentId: a.agentId, name: a.name, sampledInQueue: a.sampledInQueue })}
+                          disabled={isReallocating || isAllocRunning}
+                          className="px-3 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Cancel Queue
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-xs text-slate-400">—</span>
                     )}

@@ -10,6 +10,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   completed: 'Completed',
   not_reachable: 'Not Reachable',
   invalid_number: 'Invalid Number',
+  cancelled: 'Cancelled',
 };
 
 /**

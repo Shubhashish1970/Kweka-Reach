@@ -17,6 +17,8 @@ import {
   assignTaskToAgent,
   updateTaskStatus,
   callTaskNeedsAgentMongoFilter,
+  previewBulkCancelTasks,
+  bulkCancelTasks,
 } from '../services/taskService.js';
 import { getOutcomeFromStatus } from '../utils/outcomeHelper.js';
 import { exportAgentQueueTasksXlsx, getAgentQueue } from '../services/adminService.js';
@@ -3207,6 +3209,108 @@ router.post(
 // CRITICAL: Bulk routes MUST be defined BEFORE parameterized routes (/:id/*)
 // Express matches routes in order, so /bulk/status must come before /:id/status
 // ============================================================================
+
+// @route   GET /api/tasks/bulk/cancel-preview
+// @desc    Preview bulk cancel (sampled_in_queue → cancelled; in_progress skipped)
+// @access  Private (Team Lead, MIS Admin)
+router.get(
+  '/bulk/cancel-preview',
+  requirePermission('tasks.reassign'),
+  [
+    query('agentId').optional().isMongoId().withMessage('Invalid agent ID'),
+    query('taskIds').optional().isString().trim(),
+    query('supersedeActivities').optional().isIn(['true', 'false']),
+    query('activityDateFrom').optional().isISO8601(),
+    query('activityDateTo').optional().isISO8601(),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const authReq = req as AuthRequest;
+      const taskIdsRaw = (req.query.taskIds as string | undefined)?.trim();
+      const taskIds = taskIdsRaw
+        ? taskIdsRaw.split(',').map((id) => id.trim()).filter(Boolean)
+        : undefined;
+
+      const preview = await previewBulkCancelTasks(
+        {
+          agentId: (req.query.agentId as string | undefined)?.trim() || undefined,
+          taskIds,
+          supersedeActivities: req.query.supersedeActivities === 'true',
+          activityDateFrom: (req.query.activityDateFrom as string | undefined)?.trim() || undefined,
+          activityDateTo: (req.query.activityDateTo as string | undefined)?.trim() || undefined,
+        },
+        {
+          role: authReq.user.role,
+          userId: authReq.user._id.toString(),
+        }
+      );
+
+      res.json({ success: true, data: preview });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// @route   PUT /api/tasks/bulk/cancel
+// @desc    Bulk cancel tasks (sampled_in_queue → cancelled; in_progress skipped)
+// @access  Private (Team Lead, MIS Admin)
+router.put(
+  '/bulk/cancel',
+  requirePermission('tasks.reassign'),
+  [
+    body('agentId').optional().isMongoId().withMessage('Invalid agent ID'),
+    body('taskIds').optional().isArray().withMessage('taskIds must be an array'),
+    body('taskIds.*').optional().isMongoId().withMessage('Each task ID must be valid'),
+    body('supersedeActivities').optional().isBoolean(),
+    body('activityDateFrom').optional().isISO8601(),
+    body('activityDateTo').optional().isISO8601(),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const authReq = req as AuthRequest;
+      const { agentId, taskIds, supersedeActivities, activityDateFrom, activityDateTo } = req.body;
+
+      const result = await bulkCancelTasks(
+        {
+          agentId,
+          taskIds,
+          supersedeActivities: supersedeActivities === true,
+          activityDateFrom,
+          activityDateTo,
+        },
+        {
+          role: authReq.user.role,
+          userId: authReq.user._id.toString(),
+        }
+      );
+
+      res.json({
+        success: true,
+        message: `Cancelled ${result.cancelled} task(s)${result.supersededActivities ? `; superseded ${result.supersededActivities} activit${result.supersededActivities === 1 ? 'y' : 'ies'}` : ''}`,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // @route   PUT /api/tasks/bulk/reassign
 // @desc    Bulk reassign tasks to an agent

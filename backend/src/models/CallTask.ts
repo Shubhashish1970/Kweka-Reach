@@ -6,7 +6,8 @@ export type TaskStatus =
   | 'in_progress'
   | 'completed'
   | 'not_reachable'
-  | 'invalid_number';
+  | 'invalid_number'
+  | 'cancelled';
 export type CallStatus =
   | 'Connected'
   | 'Disconnected'
@@ -148,7 +149,7 @@ const InteractionHistorySchema = new Schema({
   },
   status: {
     type: String,
-    enum: ['unassigned', 'sampled_in_queue', 'in_progress', 'completed', 'not_reachable', 'invalid_number'],
+    enum: ['unassigned', 'sampled_in_queue', 'in_progress', 'completed', 'not_reachable', 'invalid_number', 'cancelled'],
     required: true,
   },
   notes: {
@@ -171,7 +172,7 @@ const CallTaskSchema = new Schema<ICallTask>(
     },
     status: {
       type: String,
-      enum: ['unassigned', 'sampled_in_queue', 'in_progress', 'completed', 'not_reachable', 'invalid_number'],
+      enum: ['unassigned', 'sampled_in_queue', 'in_progress', 'completed', 'not_reachable', 'invalid_number', 'cancelled'],
       default: 'unassigned',
     },
     outcome: {

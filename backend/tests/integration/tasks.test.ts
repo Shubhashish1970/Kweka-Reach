@@ -8,6 +8,7 @@
 import request from 'supertest';
 import app from '../helpers/testApp.js';
 import { CallTask } from '../../src/models/CallTask.js';
+import { Activity } from '../../src/models/Activity.js';
 import { makeFarmer, makeActivity, makeAdmin, makeAgent, makeTeamLead, makeTask } from '../helpers/factories.js';
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
@@ -352,5 +353,114 @@ describe('T9: agent can load terminal tasks for follow-up', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+  });
+});
+
+// ─── T10: bulk cancel ────────────────────────────────────────────────────────
+
+describe('T10: bulk cancel tasks', () => {
+  test('cancels sampled_in_queue tasks by agentId and skips in_progress', async () => {
+    const teamLead = await makeTeamLead();
+    const teamLeadToken = await login(teamLead.email);
+    const agent = await makeAgent(teamLead._id);
+    const farmer1 = await makeFarmer();
+    const farmer2 = await makeFarmer();
+    const activity1 = await makeActivity([farmer1._id]);
+    const activity2 = await makeActivity([farmer2._id]);
+
+    const queued = await makeTask(farmer1._id, activity1._id, {
+      status: 'sampled_in_queue',
+      assignedAgentId: agent._id,
+    });
+    const inProgress = await makeTask(farmer2._id, activity2._id, {
+      status: 'in_progress',
+      assignedAgentId: agent._id,
+    });
+
+    const preview = await request(app)
+      .get(`/api/tasks/bulk/cancel-preview?agentId=${agent._id}`)
+      .set('Authorization', `Bearer ${teamLeadToken}`);
+
+    expect(preview.status).toBe(200);
+    expect(preview.body.data.tasksToCancel).toBe(1);
+    expect(preview.body.data.tasksSkippedInProgress).toBe(1);
+
+    const res = await request(app)
+      .put('/api/tasks/bulk/cancel')
+      .set('Authorization', `Bearer ${teamLeadToken}`)
+      .send({ agentId: agent._id.toString() });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.cancelled).toBe(1);
+
+    const updatedQueued = await CallTask.findById(queued._id);
+    const updatedInProgress = await CallTask.findById(inProgress._id);
+    expect(updatedQueued?.status).toBe('cancelled');
+    expect(updatedInProgress?.status).toBe('in_progress');
+  });
+
+  test('team lead cannot cancel tasks for agent outside their team', async () => {
+    const teamLead = await makeTeamLead();
+    const otherTeamLead = await makeTeamLead();
+    const teamLeadToken = await login(teamLead.email);
+    const outsiderAgent = await makeAgent(otherTeamLead._id);
+
+    const res = await request(app)
+      .put('/api/tasks/bulk/cancel')
+      .set('Authorization', `Bearer ${teamLeadToken}`)
+      .send({ agentId: outsiderAgent._id.toString() });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('supersedes active activities in date range when requested', async () => {
+    const admin = await makeAdmin();
+    const adminToken = await login(admin.email);
+    const farmer = await makeFarmer();
+    const inRangeDate = new Date('2026-01-15T12:00:00.000Z');
+
+    const activeActivity = await makeActivity([farmer._id], {
+      date: inRangeDate,
+      lifecycleStatus: 'active',
+    });
+    const sampledActivity = await makeActivity([farmer._id], {
+      date: inRangeDate,
+      lifecycleStatus: 'sampled',
+    });
+
+    const res = await request(app)
+      .put('/api/tasks/bulk/cancel')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        taskIds: [],
+        agentId: undefined,
+        supersedeActivities: true,
+        activityDateFrom: '2026-01-01',
+        activityDateTo: '2026-01-31',
+      });
+
+    expect(res.status).toBe(400);
+
+    const queuedTask = await makeTask(farmer._id, activeActivity._id, {
+      status: 'sampled_in_queue',
+    });
+
+    const cancelRes = await request(app)
+      .put('/api/tasks/bulk/cancel')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        taskIds: [queuedTask._id.toString()],
+        supersedeActivities: true,
+        activityDateFrom: '2026-01-01',
+        activityDateTo: '2026-01-31',
+      });
+
+    expect(cancelRes.status).toBe(200);
+    expect(cancelRes.body.data.supersededActivities).toBe(1);
+
+    const updatedActive = await Activity.findById(activeActivity._id);
+    const updatedSampled = await Activity.findById(sampledActivity._id);
+    expect(updatedActive?.lifecycleStatus).toBe('superseded');
+    expect(updatedSampled?.lifecycleStatus).toBe('sampled');
   });
 });

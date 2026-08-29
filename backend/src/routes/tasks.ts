@@ -1719,7 +1719,7 @@ router.get(
       if (bu) activityFilter['activity.buName'] = String(bu);
       if (state) activityFilter['activity.state'] = String(state);
 
-      // Scope for dashboard: all task statuses so totals add up (unassigned, sampled_in_queue, in_progress, completed, not_reachable, invalid_number)
+      // Scope for dashboard: all task statuses (cancelled counted separately; not included in Total)
       const allMatch: any = { ...dateMatch };
       const openMatch: any = {
         ...dateMatch,
@@ -1774,7 +1774,7 @@ router.get(
 
       const totalUnassigned = byLanguage.reduce((sum: number, r: any) => sum + (r.unassigned || 0), 0);
 
-      // 2) By-language breakdown: all statuses so Total = unassigned + sampled_in_queue + in_progress + completed + not_reachable + invalid_number
+      // 2) By-language breakdown: Total excludes cancelled (shown separately)
       const openByLanguage = await CallTask.aggregate([
         { $match: allMatch },
         {
@@ -1799,26 +1799,29 @@ router.get(
         {
           $group: {
             _id: { $ifNull: ['$farmer.preferredLanguage', 'Unknown'] },
-            total: { $sum: 1 },
             unassigned: { $sum: { $cond: [{ $eq: ['$status', 'unassigned'] }, 1, 0] } },
             sampledInQueue: { $sum: { $cond: [{ $eq: ['$status', 'sampled_in_queue'] }, 1, 0] } },
             inProgress: { $sum: { $cond: [{ $eq: ['$status', 'in_progress'] }, 1, 0] } },
             completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
             notReachable: { $sum: { $cond: [{ $eq: ['$status', 'not_reachable'] }, 1, 0] } },
             invalidNumber: { $sum: { $cond: [{ $eq: ['$status', 'invalid_number'] }, 1, 0] } },
+            cancelled: { $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] } },
           },
         },
         {
           $project: {
             _id: 0,
             language: '$_id',
-            total: 1,
             unassigned: 1,
             sampledInQueue: 1,
             inProgress: 1,
             completed: 1,
             notReachable: 1,
             invalidNumber: 1,
+            cancelled: 1,
+            total: {
+              $add: ['$unassigned', '$sampledInQueue', '$inProgress', '$completed', '$notReachable', '$invalidNumber'],
+            },
           },
         },
       ]);
@@ -1832,18 +1835,19 @@ router.get(
           acc.completed += r.completed || 0;
           acc.notReachable += r.notReachable || 0;
           acc.invalidNumber += r.invalidNumber || 0;
+          acc.cancelled += r.cancelled || 0;
           return acc;
         },
-        { total: 0, unassigned: 0, sampledInQueue: 0, inProgress: 0, completed: 0, notReachable: 0, invalidNumber: 0 }
+        { total: 0, unassigned: 0, sampledInQueue: 0, inProgress: 0, completed: 0, notReachable: 0, invalidNumber: 0, cancelled: 0 }
       );
 
-      // 3) Agent workload: all statuses (sampled_in_queue, in_progress, completed, not_reachable, invalid_number) so Total adds up
+      // 3) Agent workload: include cancelled (shown separately; not part of Total)
       const workloadAgg = agentIds.length
         ? await CallTask.aggregate([
             {
               $match: {
                 assignedAgentId: { $in: agentIds },
-                status: { $in: ['sampled_in_queue', 'in_progress', 'completed', 'not_reachable', 'invalid_number'] },
+                status: { $in: ['sampled_in_queue', 'in_progress', 'completed', 'not_reachable', 'invalid_number', 'cancelled'] },
                 ...dateMatch,
               },
             },
@@ -1866,22 +1870,29 @@ router.get(
           ])
         : [];
 
-      type WorkloadCounts = { sampled_in_queue: number; in_progress: number; completed: number; not_reachable: number; invalid_number: number };
+      type WorkloadCounts = {
+        sampled_in_queue: number;
+        in_progress: number;
+        completed: number;
+        not_reachable: number;
+        invalid_number: number;
+        cancelled: number;
+      };
       const workloadMap = new Map<string, WorkloadCounts>();
       for (const row of workloadAgg) {
         const agentId = row._id?.agentId?.toString();
         const status = row._id?.status as keyof WorkloadCounts;
         if (!agentId) continue;
         const current = workloadMap.get(agentId) || {
-          sampled_in_queue: 0, in_progress: 0, completed: 0, not_reachable: 0, invalid_number: 0,
+          sampled_in_queue: 0, in_progress: 0, completed: 0, not_reachable: 0, invalid_number: 0, cancelled: 0,
         };
-        if (current.hasOwnProperty(status)) current[status] = row.count || 0;
+        if (Object.prototype.hasOwnProperty.call(current, status)) current[status] = row.count || 0;
         workloadMap.set(agentId, current);
       }
 
       const agentWorkload = agents.map((a) => {
         const c = workloadMap.get(a._id.toString()) || {
-          sampled_in_queue: 0, in_progress: 0, completed: 0, not_reachable: 0, invalid_number: 0,
+          sampled_in_queue: 0, in_progress: 0, completed: 0, not_reachable: 0, invalid_number: 0, cancelled: 0,
         };
         const total = c.sampled_in_queue + c.in_progress + c.completed + c.not_reachable + c.invalid_number;
         return {
@@ -1895,6 +1906,7 @@ router.get(
           completed: c.completed,
           notReachable: c.not_reachable,
           invalidNumber: c.invalid_number,
+          cancelled: c.cancelled,
           totalOpen: total,
         };
       });
@@ -1966,6 +1978,7 @@ router.get(
             completed: openTotals.completed,
             notReachable: openTotals.notReachable,
             invalidNumber: openTotals.invalidNumber,
+            cancelled: openTotals.cancelled,
           },
           openByLanguage,
           agentWorkload,

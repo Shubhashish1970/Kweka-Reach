@@ -14,7 +14,7 @@ export interface ISamplingConfig extends Document {
   autoRunEnabled?: boolean;
   /** Run when unsampled (active, never sampled) activities in auto range >= this (default 200) */
   autoRunThreshold?: number;
-  /** Cron will only trigger a run on or after this date (ISO date string); null = no restriction */
+  /** Activities on/after this activity date are considered for sampling; earlier eligible activities are left alone (with confirm). */
   autoRunActivateFrom?: Date | null;
   /** Task due date = today + this many days (0 = today). Used for both Sampling Run and Adhoc Run. */
   taskDueInDays?: number;

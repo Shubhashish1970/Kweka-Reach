@@ -14,45 +14,94 @@ import logger from '../config/logger.js';
 import mongoose from 'mongoose';
 import { syncFFAData } from '../services/ffaSync.js';
 import {
-  getFfaEmsDefaultDateFromDisplay,
-  getFfaEmsDefaultDateFromIso,
-  isEmsFfaApiEnabled,
   parseFfaEmsDefaultDateFrom,
+  isEmsFfaApiEnabled,
 } from '../services/emsFfaClient.js';
 
 const router = express.Router();
 
-/** Activate-from for auto-run: locked to FFA_EMS_DEFAULT_DATE_FROM when set in env. */
-const getAutoRunActivateFromConfig = (config: { autoRunActivateFrom?: Date | string | null } | null) => {
-  const displayDdMmYyyy = getFfaEmsDefaultDateFromDisplay();
-  if (displayDdMmYyyy) {
-    const activateStart = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
-    activateStart.setHours(0, 0, 0, 0);
-    return { activateStart, displayDate: displayDdMmYyyy, locked: true };
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Sample-activities-from floor (activity date): Team Lead editable.
+ * Activities before this date are excluded from sampling runs (option A).
+ * Not locked to FFA env — Data Management owns FFA API dateFrom separately.
+ */
+const getSampleActivitiesFromConfig = (config: { autoRunActivateFrom?: Date | string | null } | null) => {
+  if (!config?.autoRunActivateFrom) {
+    return { sampleFrom: null as Date | null, displayDate: '', locked: false };
   }
-  if (config?.autoRunActivateFrom) {
-    const activateStart = new Date(config.autoRunActivateFrom);
-    activateStart.setHours(0, 0, 0, 0);
-    const dd = String(activateStart.getDate()).padStart(2, '0');
-    const mm = String(activateStart.getMonth() + 1).padStart(2, '0');
-    const displayDate = `${dd}/${mm}/${activateStart.getFullYear()}`;
-    return { activateStart, displayDate, locked: false };
+  const raw = config.autoRunActivateFrom;
+  let sampleFrom: Date;
+  if (typeof raw === 'string' && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw.trim())) {
+    sampleFrom = parseFfaEmsDefaultDateFrom(raw);
+  } else if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw.trim())) {
+    const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    sampleFrom = m
+      ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+      : new Date(raw);
+  } else {
+    sampleFrom = new Date(raw);
   }
-  return { activateStart: null as Date | null, displayDate: '', locked: false };
+  if (Number.isNaN(sampleFrom.getTime())) {
+    return { sampleFrom: null as Date | null, displayDate: '', locked: false };
+  }
+  sampleFrom.setHours(0, 0, 0, 0);
+  return { sampleFrom, displayDate: toLocalISODate(sampleFrom), locked: false };
 };
 
 const enrichSamplingConfigResponse = (config: Record<string, unknown> | null) => {
   const base = config ? { ...config } : {};
-  const { displayDate, locked } = getAutoRunActivateFromConfig(config as { autoRunActivateFrom?: Date | string | null });
+  const { displayDate, locked } = getSampleActivitiesFromConfig(
+    config as { autoRunActivateFrom?: Date | string | null }
+  );
   if (displayDate) {
     base.autoRunActivateFrom = displayDate;
+  } else {
+    base.autoRunActivateFrom = null;
   }
   base.autoRunActivateFromLocked = locked;
-  if (locked) {
-    base.autoRunActivateFromSource = 'FFA_EMS_DEFAULT_DATE_FROM';
-  }
   return base;
 };
+
+async function loadSampleFromFloor(): Promise<Date | null> {
+  const config = await SamplingConfig.findOne({ key: 'default' }).select('autoRunActivateFrom').lean();
+  return getSampleActivitiesFromConfig(config as { autoRunActivateFrom?: Date | string | null } | null).sampleFrom;
+}
+
+function applySampleFromFloor(rangeStart: Date, floor: Date | null): Date {
+  if (!floor) return rangeStart;
+  const start = new Date(rangeStart);
+  start.setHours(0, 0, 0, 0);
+  return start < floor ? new Date(floor) : start;
+}
+
+/** Eligible activities with activity date strictly before the sample-from floor. */
+async function countEligibleBeforeSampleFrom(
+  floor: Date | null,
+  lifecycleStatus: string = 'active'
+): Promise<{ beforeCount: number; oldestBefore: string | null }> {
+  if (!floor) return { beforeCount: 0, oldestBefore: null };
+  const q: Record<string, unknown> = {
+    firstSampleRun: { $ne: true },
+    lifecycleStatus: lifecycleStatus || 'active',
+    date: { $lt: floor },
+    farmerIds: { $exists: true, $ne: [] },
+  };
+  const [beforeCount, oldest] = await Promise.all([
+    Activity.countDocuments(q),
+    Activity.findOne(q).sort({ date: 1 }).select('date').lean(),
+  ]);
+  return {
+    beforeCount,
+    oldestBefore: oldest?.date ? toLocalISODate(new Date(oldest.date)) : null,
+  };
+}
 
 // All routes require authentication
 router.use(authenticate);
@@ -114,13 +163,17 @@ function buildFirstSampleRunQuery(rangeStart: Date, rangeEnd: Date, lifecycleSta
   };
 }
 
-/** Count of activities eligible for a later run (auto range). Returns { count, range } or { count: 0, range: null } if not a later run. */
+/** Count of activities eligible for a later run (auto range, respecting sample-from floor). */
 async function getLaterRunEligibleCount(userId: mongoose.Types.ObjectId): Promise<{ count: number; range: { dateFrom: Date; dateTo: Date } | null }> {
   const autoRange = await getFirstSampleAutoRange(userId);
   if (!autoRange) return { count: 0, range: null };
-  const q = buildFirstSampleRunQuery(autoRange.dateFrom, autoRange.dateTo);
+  const floor = await loadSampleFromFloor();
+  const dateFrom = applySampleFromFloor(autoRange.dateFrom, floor);
+  if (dateFrom > autoRange.dateTo) return { count: 0, range: { dateFrom, dateTo: autoRange.dateTo } };
+  const range = { dateFrom, dateTo: autoRange.dateTo };
+  const q = buildFirstSampleRunQuery(range.dateFrom, range.dateTo);
   const count = await Activity.countDocuments(q);
-  return { count, range: autoRange };
+  return { count, range };
 }
 
 /** Group activities by MDO (officerId); allocate proportional target sample size per MDO. Every MDO gets at least 1 (mandatory representation). */
@@ -528,16 +581,6 @@ router.get(
   requirePermission('config.sampling'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const config = await SamplingConfig.findOne({ key: 'default' }).lean();
-      const lockedDisplay = getFfaEmsDefaultDateFromDisplay();
-      if (lockedDisplay) {
-        const activateDate = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
-        await SamplingConfig.findOneAndUpdate(
-          { key: 'default' },
-          { $set: { autoRunActivateFrom: activateDate } },
-          { upsert: true }
-        );
-      }
       const fresh = await SamplingConfig.findOne({ key: 'default' }).lean();
       res.json({
         success: true,
@@ -582,11 +625,20 @@ router.put(
         ...body,
         updatedByUserId: authUserId || null,
       };
-      if (getFfaEmsDefaultDateFromDisplay()) {
-        delete update.autoRunActivateFrom;
-        update.autoRunActivateFrom = parseFfaEmsDefaultDateFrom(process.env.FFA_EMS_DEFAULT_DATE_FROM);
-      } else if (body.autoRunActivateFrom === '' || body.autoRunActivateFrom === null || body.autoRunActivateFrom === undefined) {
+      if (body.autoRunActivateFrom === '' || body.autoRunActivateFrom === null || body.autoRunActivateFrom === undefined) {
         update.autoRunActivateFrom = null;
+      } else if (typeof body.autoRunActivateFrom === 'string') {
+        const raw = body.autoRunActivateFrom.trim();
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) {
+          update.autoRunActivateFrom = parseFfaEmsDefaultDateFrom(raw);
+        } else if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+          const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          update.autoRunActivateFrom = m
+            ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+            : new Date(raw);
+        } else {
+          update.autoRunActivateFrom = new Date(raw);
+        }
       }
 
       const config = await SamplingConfig.findOneAndUpdate(
@@ -831,6 +883,81 @@ router.post(
   }
 );
 
+// @route   GET /api/sampling/sample-from-impact
+// @desc    Count eligible activities before the sample-from floor (for confirm-before-run)
+// @access  Private (Team Lead, MIS Admin)
+router.get(
+  '/sample-from-impact',
+  requirePermission('config.sampling'),
+  [
+    query('lifecycleStatus').optional().isIn(['active', 'sampled', 'inactive', 'not_eligible']),
+    query('dateFrom').optional().isISO8601(),
+    query('dateTo').optional().isISO8601(),
+    query('runType').optional().isIn(['first_sample', 'adhoc']),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const lifecycleStatus = ((req.query.lifecycleStatus as string) || 'active') as string;
+      const floor = await loadSampleFromFloor();
+      const before = await countEligibleBeforeSampleFrom(floor, lifecycleStatus);
+
+      let inRangeCount = 0;
+      let effectiveDateFrom: string | null = floor ? toLocalISODate(floor) : null;
+      let effectiveDateTo: string | null = null;
+
+      const dateFromQ = req.query.dateFrom as string | undefined;
+      const dateToQ = req.query.dateTo as string | undefined;
+      if (dateFromQ && dateToQ) {
+        let start = new Date(dateFromQ);
+        const end = new Date(dateToQ);
+        start = applySampleFromFloor(start, floor);
+        effectiveDateFrom = toLocalISODate(start);
+        effectiveDateTo = toLocalISODate(end);
+        if (start <= end) {
+          const q: Record<string, unknown> =
+            req.query.runType === 'adhoc'
+              ? {
+                  date: { $gte: start, $lte: end },
+                  farmerIds: { $exists: true, $ne: [] },
+                  ...(lifecycleStatus ? { lifecycleStatus } : {}),
+                }
+              : buildFirstSampleRunQuery(start, end, lifecycleStatus);
+          inRangeCount = await Activity.countDocuments(q);
+        }
+      } else if (floor) {
+        const end = new Date();
+        end.setHours(23, 59, 59, 999);
+        effectiveDateTo = toLocalISODate(end);
+        inRangeCount = await Activity.countDocuments(
+          buildFirstSampleRunQuery(floor, end, lifecycleStatus)
+        );
+      }
+
+      res.json({
+        success: true,
+        data: {
+          sampleFrom: floor ? toLocalISODate(floor) : null,
+          beforeCutoffCount: before.beforeCount,
+          oldestBefore: before.oldestBefore,
+          inRangeCount,
+          effectiveDateFrom,
+          effectiveDateTo,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // @route   GET /api/sampling/first-sample-range
 // @desc    Get range for first-sample run: if previous first_sample run exists, auto range; else isFirstRun=true and suggested range for manual selection.
 // @access  Private (Team Lead, MIS Admin)
@@ -843,28 +970,39 @@ router.get(
       if (!authUserId) {
         return res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
       }
+      const floor = await loadSampleFromFloor();
       const laterRun = await getLaterRunEligibleCount(authUserId);
       if (laterRun.range) {
+        const before = await countEligibleBeforeSampleFrom(floor);
         return res.json({
           success: true,
           data: {
             isFirstRun: false,
-            dateFrom: laterRun.range.dateFrom.toISOString().split('T')[0],
-            dateTo: laterRun.range.dateTo.toISOString().split('T')[0],
+            dateFrom: toLocalISODate(laterRun.range.dateFrom),
+            dateTo: toLocalISODate(laterRun.range.dateTo),
             matchedCount: laterRun.count,
+            sampleFrom: floor ? toLocalISODate(floor) : null,
+            beforeCutoffCount: before.beforeCount,
+            oldestBefore: before.oldestBefore,
           },
         });
       }
       const suggested = await getFirstSampleSuggestedRange();
-      const qSuggested = buildFirstSampleRunQuery(suggested.dateFrom, suggested.dateTo);
+      const dateFrom = applySampleFromFloor(suggested.dateFrom, floor);
+      const dateTo = suggested.dateTo;
+      const qSuggested = buildFirstSampleRunQuery(dateFrom, dateTo);
       const matchedCount = await Activity.countDocuments(qSuggested);
+      const before = await countEligibleBeforeSampleFrom(floor);
       return res.json({
         success: true,
         data: {
           isFirstRun: true,
-          dateFrom: suggested.dateFrom.toISOString().split('T')[0],
-          dateTo: suggested.dateTo.toISOString().split('T')[0],
+          dateFrom: toLocalISODate(dateFrom),
+          dateTo: toLocalISODate(dateTo),
           matchedCount,
+          sampleFrom: floor ? toLocalISODate(floor) : null,
+          beforeCutoffCount: before.beforeCount,
+          oldestBefore: before.oldestBefore,
         },
       });
     } catch (error) {
@@ -874,7 +1012,7 @@ router.get(
 );
 
 // @route   POST /api/sampling/auto-run
-// @desc    Check config (enabled, activate-from date, threshold) and optionally run a later Run Sample. Used by cron/scheduler.
+// @desc    If enabled and unsampled (on/after sample-from floor) >= threshold, run later first_sample. Used by cron.
 // @access  Private (Team Lead, MIS Admin) – call with scheduler service account
 router.post(
   '/auto-run',
@@ -888,7 +1026,7 @@ router.post(
       const config = await SamplingConfig.findOne({ key: 'default' }).lean();
       const autoRunEnabled = (config as any)?.autoRunEnabled === true;
       const autoRunThreshold = Number((config as any)?.autoRunThreshold ?? 200);
-      const { activateStart, displayDate: activateFromDisplay } = getAutoRunActivateFromConfig(
+      const { sampleFrom, displayDate: sampleFromDisplay } = getSampleActivitiesFromConfig(
         config as { autoRunActivateFrom?: Date | string | null } | null
       );
 
@@ -913,24 +1051,25 @@ router.post(
         }
       }
 
-      if (activateStart) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        if (today < activateStart) {
-          return res.json({
-            success: true,
-            ran: false,
-            reason: 'before_activate_date',
-            activateFrom: activateFromDisplay || activateStart.toISOString().split('T')[0],
-          });
-        }
-      }
       const { count, range } = await getLaterRunEligibleCount(authUserId);
       if (!range || count === 0) {
-        return res.json({ success: true, ran: false, reason: 'first_run_or_no_eligible', unsampledCount: count });
+        return res.json({
+          success: true,
+          ran: false,
+          reason: 'first_run_or_no_eligible',
+          unsampledCount: count,
+          sampleFrom: sampleFromDisplay || null,
+        });
       }
       if (count < autoRunThreshold) {
-        return res.json({ success: true, ran: false, reason: 'below_threshold', unsampledCount: count, threshold: autoRunThreshold });
+        return res.json({
+          success: true,
+          ran: false,
+          reason: 'below_threshold',
+          unsampledCount: count,
+          threshold: autoRunThreshold,
+          sampleFrom: sampleFromDisplay || null,
+        });
       }
       const alreadyRunning = await SamplingRun.findOne({
         createdByUserId: authUserId,
@@ -940,7 +1079,21 @@ router.post(
       if (alreadyRunning) {
         return res.json({ success: true, ran: false, reason: 'run_already_in_progress' });
       }
-      req.body = { runType: 'first_sample', trigger: 'scheduled' };
+      // Pass resolved range so run handler applies sample-from floor consistently
+      req.body = {
+        runType: 'first_sample',
+        trigger: 'scheduled',
+        dateFrom: toLocalISODate(range.dateFrom),
+        dateTo: toLocalISODate(range.dateTo),
+      };
+      if (sampleFrom) {
+        logger.info('[auto-run] Using sample-from floor', {
+          sampleFrom: sampleFromDisplay,
+          dateFrom: req.body.dateFrom,
+          dateTo: req.body.dateTo,
+          unsampledCount: count,
+        });
+      }
       return runSamplingHandler(req, res, next);
     } catch (error) {
       next(error);
@@ -988,6 +1141,7 @@ async function runSamplingHandler(req: Request, res: Response, next: NextFunctio
         ids = activityIds;
         matchedCount = activityIds.length;
       } else if (effectiveRunType === 'first_sample') {
+        const floor = await loadSampleFromFloor();
         const autoRange = await getFirstSampleAutoRange(authUserObjId);
         let rangeStart: Date;
         let rangeEnd: Date;
@@ -1002,8 +1156,18 @@ async function runSamplingHandler(req: Request, res: Response, next: NextFunctio
           rangeStart = suggested.dateFrom;
           rangeEnd = suggested.dateTo;
         }
-        resolvedDateFrom = rangeStart.toISOString().split('T')[0];
-        resolvedDateTo = rangeEnd.toISOString().split('T')[0];
+        rangeStart = applySampleFromFloor(rangeStart, floor);
+        if (rangeStart > rangeEnd) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              message:
+                'Sample-from date is after the end of the sampling range. Adjust Sample activities from or the date range.',
+            },
+          });
+        }
+        resolvedDateFrom = toLocalISODate(rangeStart);
+        resolvedDateTo = toLocalISODate(rangeEnd);
         const q: any = buildFirstSampleRunQuery(rangeStart, rangeEnd, lifecycleStatus || 'active');
         matchedCount = await Activity.countDocuments(q);
         const docs = await Activity.find(q)
@@ -1020,10 +1184,23 @@ async function runSamplingHandler(req: Request, res: Response, next: NextFunctio
             error: { message: 'Ad-hoc run requires dateFrom and dateTo' },
           });
         }
-        resolvedDateFrom = dateFrom;
-        resolvedDateTo = dateTo;
+        const floor = await loadSampleFromFloor();
+        let rangeStart = new Date(dateFrom);
+        const rangeEnd = new Date(dateTo);
+        rangeStart = applySampleFromFloor(rangeStart, floor);
+        if (rangeStart > rangeEnd) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              message:
+                'Sample-from date is after the end of the selected range. Adjust Sample activities from or the date range.',
+            },
+          });
+        }
+        resolvedDateFrom = toLocalISODate(rangeStart);
+        resolvedDateTo = toLocalISODate(rangeEnd);
         const q: any = {
-          date: { $gte: new Date(dateFrom), $lte: new Date(dateTo) },
+          date: { $gte: rangeStart, $lte: rangeEnd },
           farmerIds: { $exists: true, $ne: [] },
         };
         if (lifecycleStatus) q.lifecycleStatus = lifecycleStatus;

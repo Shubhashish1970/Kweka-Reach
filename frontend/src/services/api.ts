@@ -650,6 +650,20 @@ export const samplingAPI = {
   getFirstSampleRange: async () => {
     return apiRequest('/sampling/first-sample-range');
   },
+  getSampleFromImpact: async (filters?: {
+    lifecycleStatus?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    runType?: 'first_sample' | 'adhoc';
+  }) => {
+    const params = new URLSearchParams();
+    if (filters?.lifecycleStatus) params.append('lifecycleStatus', filters.lifecycleStatus);
+    if (filters?.dateFrom) params.append('dateFrom', filters.dateFrom);
+    if (filters?.dateTo) params.append('dateTo', filters.dateTo);
+    if (filters?.runType) params.append('runType', filters.runType);
+    const query = params.toString();
+    return apiRequest(`/sampling/sample-from-impact${query ? `?${query}` : ''}`);
+  },
   applyEligibility: async (eligibleActivityTypes: string[]) => {
     // Can take time if updating many activities; allow longer timeout
     return apiRequest('/sampling/apply-eligibility', {

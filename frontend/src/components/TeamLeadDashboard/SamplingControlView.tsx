@@ -101,9 +101,15 @@ const SamplingControlView: React.FC = () => {
   const [autoRunEnabled, setAutoRunEnabled] = useState<boolean>(false);
   const [autoRunThreshold, setAutoRunThreshold] = useState<number>(200);
   const [autoRunActivateFrom, setAutoRunActivateFrom] = useState<string>('');
-  const [autoRunActivateFromLocked, setAutoRunActivateFromLocked] = useState<boolean>(false);
-  /** DD/MM/YYYY from FFA_EMS_DEFAULT_DATE_FROM when integration is configured */
-  const [ffaDefaultActivateFrom, setFfaDefaultActivateFrom] = useState<string>('');
+  const [sampleFromImpact, setSampleFromImpact] = useState<{
+    sampleFrom: string | null;
+    beforeCutoffCount: number;
+    oldestBefore: string | null;
+    inRangeCount: number;
+    effectiveDateFrom: string | null;
+    effectiveDateTo: string | null;
+  } | null>(null);
+  const [isSampleFromImpactLoading, setIsSampleFromImpactLoading] = useState(false);
   const [taskDueInDays, setTaskDueInDays] = useState<number>(0);
 
   const [activityFilters, setActivityFilters] = useState(() => ({
@@ -219,18 +225,18 @@ const SamplingControlView: React.FC = () => {
     setDefaultPercentage(Number(cfg?.defaultPercentage ?? 10));
     setAutoRunEnabled(!!cfg?.autoRunEnabled);
     setAutoRunThreshold(Number(cfg?.autoRunThreshold ?? 200));
-    const activateFrom = cfg?.autoRunActivateFrom
+    const activateFromRaw = cfg?.autoRunActivateFrom
       ? (typeof cfg.autoRunActivateFrom === 'string'
           ? cfg.autoRunActivateFrom.split('T')[0]
           : new Date(cfg.autoRunActivateFrom).toISOString().split('T')[0])
       : '';
-    setAutoRunActivateFrom(activateFrom);
-    const locked = !!cfg?.autoRunActivateFromLocked;
-    setAutoRunActivateFromLocked(locked);
-    setFfaDefaultActivateFrom(locked ? activateFrom : '');
-    if (locked && !!cfg?.autoRunEnabled && activateFrom) {
-      setAutoRunActivateFrom(activateFrom);
+    // Support legacy DD/MM/YYYY if ever returned
+    let activateFrom = activateFromRaw;
+    const ddmmyyyy = activateFromRaw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (ddmmyyyy) {
+      activateFrom = `${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}`;
     }
+    setAutoRunActivateFrom(activateFrom);
     setTaskDueInDays(Math.max(0, Math.min(365, Number(cfg?.taskDueInDays ?? 0))));
   };
 
@@ -417,8 +423,10 @@ const SamplingControlView: React.FC = () => {
         autoRunThreshold: Math.max(1, Math.min(100000, autoRunThreshold)),
         taskDueInDays: Math.max(0, Math.min(365, taskDueInDays)),
       };
-      if (!autoRunActivateFromLocked && autoRunActivateFrom?.trim()) {
+      if (autoRunActivateFrom?.trim()) {
         payload.autoRunActivateFrom = autoRunActivateFrom.trim();
+      } else {
+        payload.autoRunActivateFrom = null;
       }
       await samplingAPI.updateConfig(payload);
       // Requirement: if a type is not selected, activities of that type should move to Not Eligible.
@@ -700,7 +708,7 @@ const SamplingControlView: React.FC = () => {
     return byTypeSort.dir === 'asc' ? ' ▲' : ' ▼';
   };
 
-  const openRunConfirm = () => {
+  const openRunConfirm = async () => {
     if (runType === 'adhoc') {
       if (!activityFilters.dateFrom || !activityFilters.dateTo) {
         toast.showError('Select date range for ad-hoc run');
@@ -717,11 +725,35 @@ const SamplingControlView: React.FC = () => {
     }
     setRunConfirmType(runType);
     setIsRunConfirmOpen(true);
+    setIsSampleFromImpactLoading(true);
+    setSampleFromImpact(null);
+    try {
+      const runDateFrom =
+        runType === 'adhoc'
+          ? activityFilters.dateFrom
+          : firstSampleRange?.dateFrom ?? activityFilters.dateFrom;
+      const runDateTo =
+        runType === 'adhoc'
+          ? activityFilters.dateTo
+          : firstSampleRange?.dateTo ?? activityFilters.dateTo;
+      const res: any = await samplingAPI.getSampleFromImpact({
+        lifecycleStatus: runType === 'adhoc' ? activityFilters.lifecycleStatus : 'active',
+        dateFrom: runDateFrom || undefined,
+        dateTo: runDateTo || undefined,
+        runType,
+      });
+      setSampleFromImpact(res?.data || null);
+    } catch {
+      setSampleFromImpact(null);
+    } finally {
+      setIsSampleFromImpactLoading(false);
+    }
   };
 
   const confirmRunSampling = async () => {
     setIsRunConfirmOpen(false);
     setRunConfirmType(null);
+    setSampleFromImpact(null);
     await handleRunSampling();
   };
 
@@ -729,7 +761,11 @@ const SamplingControlView: React.FC = () => {
     <div className="space-y-6 min-w-0 overflow-x-hidden">
       <Modal
         isOpen={isRunConfirmOpen}
-        onClose={() => { setIsRunConfirmOpen(false); setRunConfirmType(null); }}
+        onClose={() => {
+          setIsRunConfirmOpen(false);
+          setRunConfirmType(null);
+          setSampleFromImpact(null);
+        }}
         title={runConfirmType === 'adhoc' ? 'Confirm Ad-hoc sample' : 'Confirm Run Sample'}
         size="md"
       >
@@ -743,7 +779,7 @@ const SamplingControlView: React.FC = () => {
               </div>
               <ul className="text-sm text-slate-700 space-y-2 list-disc list-inside">
                 <li><strong>Activities:</strong> Only <strong>Active</strong> activities that have <strong>never been sampled</strong>.</li>
-                <li><strong>Date range:</strong> Chosen automatically — first run: earliest to latest activity date; later runs: last run end date (inclusive) to today.</li>
+                <li><strong>Date range:</strong> Chosen automatically — first run: earliest to latest activity date; later runs: last run end date (inclusive) to today. Clamped by <strong>Sample activities from</strong> when set.</li>
                 <li><strong>Lifecycle:</strong> Fixed by the system; you do not select it.</li>
                 <li><strong>Tasks:</strong> Created only for farmers not already sampled for that activity (same farmer is not sampled again).</li>
               </ul>
@@ -759,16 +795,41 @@ const SamplingControlView: React.FC = () => {
               </div>
               <ul className="text-sm text-slate-700 space-y-2 list-disc list-inside">
                 <li><strong>Activities:</strong> All activities in your selected <strong>Lifecycle</strong> and <strong>Date range</strong> (Active, Sampled, Inactive, or Not Eligible). Already-sampled activities are included.</li>
-                <li><strong>Date range:</strong> Your selected start and end date.</li>
+                <li><strong>Date range:</strong> Your selected start and end date (start raised to Sample activities from when set).</li>
                 <li><strong>Lifecycle:</strong> Your selected lifecycle.</li>
                 <li><strong>Tasks:</strong> Created only for farmers not already sampled for that activity (same farmer is not sampled again).</li>
               </ul>
             </>
           )}
+          {isSampleFromImpactLoading && (
+            <p className="text-xs text-slate-500">Checking activities before Sample-from date…</p>
+          )}
+          {!isSampleFromImpactLoading && sampleFromImpact?.sampleFrom && (sampleFromImpact.beforeCutoffCount || 0) > 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-1 text-sm text-amber-950">
+              <p className="font-black">Eligible activities before Sample activities from</p>
+              <p>
+                <strong>{sampleFromImpact.beforeCutoffCount}</strong> eligible activit
+                {sampleFromImpact.beforeCutoffCount === 1 ? 'y' : 'ies'} exist before{' '}
+                <strong>{formatPretty(sampleFromImpact.sampleFrom)}</strong>
+                {sampleFromImpact.oldestBefore ? ` (oldest ${formatPretty(sampleFromImpact.oldestBefore)})` : ''}.
+              </p>
+              <p>
+                This run will <strong>only</strong> sample activities on/after that date
+                {sampleFromImpact.inRangeCount != null ? (
+                  <> (<strong>{sampleFromImpact.inRangeCount}</strong> in range)</>
+                ) : null}
+                . Older ones stay unsampled.
+              </p>
+            </div>
+          )}
           <div className="flex items-center justify-end gap-3 pt-2">
             <button
               type="button"
-              onClick={() => { setIsRunConfirmOpen(false); setRunConfirmType(null); }}
+              onClick={() => {
+                setIsRunConfirmOpen(false);
+                setRunConfirmType(null);
+                setSampleFromImpact(null);
+              }}
               className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-sm font-black"
             >
               Cancel
@@ -778,7 +839,9 @@ const SamplingControlView: React.FC = () => {
               onClick={confirmRunSampling}
               className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-black"
             >
-              Confirm
+              {sampleFromImpact && sampleFromImpact.beforeCutoffCount > 0
+                ? 'Continue with cutoff only'
+                : 'Confirm'}
             </button>
           </div>
         </div>
@@ -960,63 +1023,49 @@ const SamplingControlView: React.FC = () => {
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Sample activities from</p>
+              <p className="text-xs text-slate-600">
+                Only activities with <strong>activity date</strong> on or after this day are considered for Run Sample, Ad-hoc, and auto-run.
+                Eligible activities before this date are left alone (you will be warned before a manual run). Separate from Admin Data Management FFA API date.
+              </p>
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
+                  Sample activities from (activity date)
+                </label>
+                <input
+                  type="date"
+                  value={autoRunActivateFrom}
+                  onChange={(e) => setAutoRunActivateFrom(e.target.value)}
+                  className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
+                />
+                <p className="text-xs text-slate-500 mt-1">Leave empty to include all eligible activity dates. Save &amp; Apply to store.</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
               <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Automatic later run (cron)</p>
               <p className="text-xs text-slate-600">
-                When the scheduler calls POST /api/sampling/auto-run, it syncs activities from the configured FFA/EMS API first, then runs a later Run Sample only if enabled, on or after the activate-from date, and when unsampled activities ≥ threshold.
+                When the scheduler calls POST /api/sampling/auto-run, it syncs from the FFA/EMS API (if configured), then runs a later Run Sample only if enabled and unsampled activities (on/after Sample activities from) ≥ threshold.
               </p>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={autoRunEnabled}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setAutoRunEnabled(checked);
-                    if (checked && autoRunActivateFromLocked && ffaDefaultActivateFrom) {
-                      setAutoRunActivateFrom(ffaDefaultActivateFrom);
-                    }
-                  }}
+                  onChange={(e) => setAutoRunEnabled(e.target.checked)}
                   className="rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                 />
                 <span className="text-sm font-bold text-slate-800">Enable auto-run</span>
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Run when unsampled ≥</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={autoRunThreshold}
-                    onChange={(e) => setAutoRunThreshold(Number(e.target.value) || 200)}
-                    disabled={!autoRunEnabled}
-                    className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                  />
-                </div>
-                {autoRunEnabled && (
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Activate from date (DD/MM/YYYY)</label>
-                    {autoRunActivateFromLocked ? (
-                      <input
-                        type="text"
-                        value={autoRunActivateFrom}
-                        readOnly
-                        className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-slate-100 text-sm font-medium text-slate-900 cursor-not-allowed"
-                        aria-label="Activate from date"
-                      />
-                    ) : (
-                      <input
-                        type="date"
-                        value={autoRunActivateFrom}
-                        onChange={(e) => setAutoRunActivateFrom(e.target.value)}
-                        className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
-                      />
-                    )}
-                    <p className="text-xs text-slate-500 mt-1">
-                      {autoRunActivateFromLocked
-                        ? 'Set from FFA integration (FFA_EMS_DEFAULT_DATE_FROM). Contact your admin to change.'
-                        : 'Leave empty to allow runs immediately when enabled'}
-                    </p>
-                  </div>
-                )}
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Run when unsampled ≥</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={autoRunThreshold}
+                  onChange={(e) => setAutoRunThreshold(Number(e.target.value) || 200)}
+                  disabled={!autoRunEnabled}
+                  className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                />
               </div>
               <p className="text-sm text-slate-700 mt-2">
                 <strong>Last auto-run:</strong>{' '}

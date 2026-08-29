@@ -18,6 +18,10 @@ const LANGUAGE_FALLBACK_ORDER = ['Unknown'] as const;
 const TASK_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const TASK_PAGE_SIZE_DEFAULT = 20;
 
+/** Shared row-action button sizing (Reallocate / Cancel Queue). */
+const ROW_ACTION_BTN =
+  'inline-flex items-center justify-center min-w-[92px] h-8 px-3 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap';
+
 interface AgentQueueDetailForTL {
   agent: {
     agentId: string;
@@ -84,7 +88,10 @@ const TaskDashboardView: React.FC = () => {
   const [data, setData] = useState<any>(null);
   const [allocRun, setAllocRun] = useState<any>(null);
 
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', bu: '', state: '' });
+  const [filters, setFilters] = useState(() => {
+    const r = getPresetRange('Last 7 days');
+    return { dateFrom: r.start, dateTo: r.end, bu: '', state: '' };
+  });
   const [allocLanguage, setAllocLanguage] = useState<string>('ALL');
   const [allocCount, setAllocCount] = useState<number>(0);
   const [isAllocConfirmOpen, setIsAllocConfirmOpen] = useState(false);
@@ -119,16 +126,18 @@ const TaskDashboardView: React.FC = () => {
   // Date range dropdown (same UX as Sampling Dashboard)
   const datePickerRef = useRef<HTMLDivElement | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Custom');
-  const [draftStart, setDraftStart] = useState('');
-  const [draftEnd, setDraftEnd] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 7 days');
+  const [draftStart, setDraftStart] = useState(() => getPresetRange('Last 7 days').start);
+  const [draftEnd, setDraftEnd] = useState(() => getPresetRange('Last 7 days').end);
 
   const getRange = (preset: DateRangePreset) =>
     getPresetRange(preset, filters.dateFrom || undefined, filters.dateTo || undefined);
 
   const syncDraftFromFilters = () => {
-    setDraftStart(filters.dateFrom || '');
-    setDraftEnd(filters.dateTo || '');
+    const start = filters.dateFrom || getRange(selectedPreset).start;
+    const end = filters.dateTo || getRange(selectedPreset).end;
+    setDraftStart(start);
+    setDraftEnd(end);
   };
 
   useEffect(() => {
@@ -245,8 +254,8 @@ const TaskDashboardView: React.FC = () => {
     return Array.isArray(data?.agentWorkload) ? [...data.agentWorkload] : [];
   }, [data]);
 
-  type LanguageTableSortKey = 'language' | 'total' | 'unassigned' | 'sampledInQueue' | 'inProgress' | 'completed' | 'notReachable' | 'invalidNumber';
-  type AgentTableSortKey = 'agent' | 'employeeId' | 'languages' | 'sampledInQueue' | 'inProgress' | 'completed' | 'notReachable' | 'invalidNumber' | 'totalOpen';
+  type LanguageTableSortKey = 'language' | 'total' | 'unassigned' | 'sampledInQueue' | 'inProgress' | 'completed' | 'notReachable' | 'invalidNumber' | 'cancelled';
+  type AgentTableSortKey = 'agent' | 'employeeId' | 'languages' | 'sampledInQueue' | 'inProgress' | 'completed' | 'notReachable' | 'invalidNumber' | 'cancelled' | 'totalOpen';
 
   const [languageTableSort, setLanguageTableSort] = useState<{ key: LanguageTableSortKey; dir: 'asc' | 'desc' }>(() => {
     const raw = localStorage.getItem('teamLead.languageTable.tableSort');
@@ -297,6 +306,8 @@ const TaskDashboardView: React.FC = () => {
         return Number(r.notReachable ?? 0);
       case 'invalidNumber':
         return Number(r.invalidNumber ?? 0);
+      case 'cancelled':
+        return Number(r.cancelled ?? 0);
       default:
         return '';
     }
@@ -319,6 +330,8 @@ const TaskDashboardView: React.FC = () => {
         return Number(a.notReachable ?? 0);
       case 'invalidNumber':
         return Number(a.invalidNumber ?? 0);
+      case 'cancelled':
+        return Number(a.cancelled ?? 0);
       case 'totalOpen':
         return Number(a.totalOpen ?? 0);
       default:
@@ -1336,35 +1349,56 @@ const TaskDashboardView: React.FC = () => {
       />
 
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-black text-slate-900">Task Dashboard</h2>
             <p className="text-sm text-slate-600">
               Unassigned tasks by language + agent workload (Sampled-in-queue and In-progress)
             </p>
           </div>
-          <button
-            onClick={handleRefresh}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold"
-            disabled={isLoading}
-          >
-            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-3">
+            <Button variant="secondary" size="sm" onClick={() => setShowMainFilters((p) => !p)}>
+              <Filter size={16} />
+              {showMainFilters ? 'Hide filters' : 'Filters'}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={isLoading}>
+              <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+              Refresh
+            </Button>
+          </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowMainFilters((p) => !p)}
-          className="flex items-center gap-2 mt-4 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50"
-        >
-          <Filter size={16} />
-          {showMainFilters ? 'Hide filters' : 'Filters'}
-        </button>
         {showMainFilters && (
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="md:col-span-2">
-            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Date Range</label>
+        <div className="mt-3 pt-3 border-t border-slate-200 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">BU</label>
+              <StyledSelect
+                value={filters.bu}
+                onChange={(value) => setFilters((p) => ({ ...p, bu: value }))}
+                options={[
+                  { value: '', label: 'All' },
+                  ...(data?.filterOptions?.buOptions || []).map((b: string) => ({ value: b, label: b })),
+                ]}
+                placeholder="All"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">State</label>
+              <StyledSelect
+                value={filters.state}
+                onChange={(value) => setFilters((p) => ({ ...p, state: value }))}
+                options={[
+                  { value: '', label: 'All' },
+                  ...(data?.filterOptions?.stateOptions || []).map((s: string) => ({ value: s, label: s })),
+                ]}
+                placeholder="All"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Date Range</label>
             <div className="relative" ref={datePickerRef}>
               <button
                 type="button"
@@ -1474,32 +1508,7 @@ const TaskDashboardView: React.FC = () => {
                 </div>
               )}
             </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">BU</label>
-            <StyledSelect
-              value={filters.bu}
-              onChange={(value) => setFilters((p) => ({ ...p, bu: value }))}
-              options={[
-                { value: '', label: 'All' },
-                ...(data?.filterOptions?.buOptions || []).map((b: string) => ({ value: b, label: b })),
-              ]}
-              placeholder="All"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">State</label>
-            <StyledSelect
-              value={filters.state}
-              onChange={(value) => setFilters((p) => ({ ...p, state: value }))}
-              options={[
-                { value: '', label: 'All' },
-                ...(data?.filterOptions?.stateOptions || []).map((s: string) => ({ value: s, label: s })),
-              ]}
-              placeholder="All"
-            />
+            </div>
           </div>
         </div>
         )}
@@ -1528,7 +1537,7 @@ const TaskDashboardView: React.FC = () => {
             </p>
             <ul className="mt-2 list-disc list-inside text-amber-800 space-y-1">
               <li><strong>No agents under you?</strong> Ask an MIS Admin to assign CC agents to you in <strong>User Management</strong> (set each agent&apos;s Team Lead to your user). Until then, you&apos;ll only see unassigned tasks here—and if all tasks are already allocated to other agents, counts will be zero.</li>
-              <li><strong>Date range:</strong> Tasks are filtered by <strong>scheduled date</strong>. Try &quot;Last 30 days&quot; or a range that includes when tasks were created.</li>
+              <li><strong>Date range:</strong> Tasks are filtered by <strong>scheduled date</strong> (default: Last 7 days). Try &quot;Last 30 days&quot; or a wider range if tasks fall outside the current window.</li>
               <li><strong>Create tasks:</strong> Use <strong>Sampling Control</strong> to sample activities and create unassigned tasks, then allocate them from this tab.</li>
             </ul>
           </div>
@@ -1544,7 +1553,7 @@ const TaskDashboardView: React.FC = () => {
             <span className="ml-4 text-slate-500">Total tasks: <span className="font-black text-slate-700">{data?.totals?.total ?? 0}</span></span>
           </div>
         </div>
-        <p className="text-sm text-slate-600 mt-1">Full status breakdown so Total = Unassigned + Sampled-in-queue + In-progress + Completed + Not reachable + Invalid. Click a language to view queue and task list.</p>
+        <p className="text-sm text-slate-600 mt-1">Total = Unassigned + Sampled-in-queue + In-progress + Completed + Not reachable + Invalid (Cancelled is shown separately). Click a language to view queue and task list.</p>
 
         {/* Allocation controls */}
         <div className="mt-4 flex flex-col md:flex-row md:items-end gap-3 md:justify-between">
@@ -1649,8 +1658,19 @@ const TaskDashboardView: React.FC = () => {
           )}
         </div>
 
-        <div className="mt-4 overflow-x-auto border border-slate-200 rounded-2xl">
-          <table className="min-w-[900px] w-full text-sm">
+        <div className="mt-4 overflow-hidden border border-slate-200 rounded-2xl">
+          <table className="table-fixed w-full text-sm">
+            <colgroup>
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '15%' }} />
+            </colgroup>
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 {(
@@ -1663,19 +1683,20 @@ const TaskDashboardView: React.FC = () => {
                     { key: 'completed' as LanguageTableSortKey, label: 'Completed' },
                     { key: 'notReachable' as LanguageTableSortKey, label: 'Not reachable' },
                     { key: 'invalidNumber' as LanguageTableSortKey, label: 'Invalid' },
+                    { key: 'cancelled' as LanguageTableSortKey, label: 'Cancelled' },
                   ] as Array<{ key: LanguageTableSortKey; label: string }>
                 ).map((col) => {
                   const isSorted = languageTableSort.key === col.key;
                   return (
                     <th
                       key={col.key}
-                      className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-widest select-none cursor-pointer hover:bg-slate-100"
+                      className="px-2 py-2 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-widest select-none cursor-pointer hover:bg-slate-100"
                       onClick={() => handleLanguageHeaderClick(col.key)}
                       title="Click to sort"
                     >
-                      <div className="flex items-center gap-2">
-                        <span>{col.label}</span>
-                        {isSorted && (languageTableSort.dir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+                      <div className="flex items-center gap-1 truncate">
+                        <span className="truncate">{col.label}</span>
+                        {isSorted && (languageTableSort.dir === 'asc' ? <ChevronUp size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />)}
                       </div>
                     </th>
                   );
@@ -1685,27 +1706,28 @@ const TaskDashboardView: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {sortedOpenByLanguage.map((r: any) => (
                 <tr key={r.language}>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-2">
                     <button
                       type="button"
                       onClick={() => setSelectedLanguageQueue(r.language)}
-                      className="font-black text-blue-600 hover:text-blue-800 hover:underline text-left"
+                      className="font-black text-blue-600 hover:text-blue-800 hover:underline text-left truncate block max-w-full"
                     >
                       {r.language}
                     </button>
                   </td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{r.total ?? r.totalOpen ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{r.unassigned ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{r.sampledInQueue ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{r.inProgress ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{r.completed ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{r.notReachable ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{r.invalidNumber ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{r.total ?? r.totalOpen ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{r.unassigned ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{r.sampledInQueue ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{r.inProgress ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{r.completed ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{r.notReachable ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{r.invalidNumber ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{r.cancelled ?? 0}</td>
                 </tr>
               ))}
               {sortedOpenByLanguage.length === 0 && (
                 <tr>
-                  <td className="px-4 py-6 text-slate-600" colSpan={8}>
+                  <td className="px-4 py-6 text-slate-600" colSpan={9}>
                     No tasks found for this filter.
                   </td>
                 </tr>
@@ -1718,10 +1740,23 @@ const TaskDashboardView: React.FC = () => {
       {/* Agent workload – full status so Total adds up */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
         <h3 className="text-lg font-black text-slate-900">Agent Workload</h3>
-        <p className="text-sm text-slate-600 mt-1">Total = Sampled-in-queue + In-progress + Completed + Not reachable + Invalid. Click an agent name to view their queue, or click a language to filter.</p>
+        <p className="text-sm text-slate-600 mt-1">Total = Sampled-in-queue + In-progress + Completed + Not reachable + Invalid (Cancelled is shown separately). Click an agent name to view their queue, or click a language to filter.</p>
 
-        <div className="mt-4 overflow-x-auto border border-slate-200 rounded-2xl">
-          <table className="min-w-[980px] w-full text-sm">
+        <div className="mt-4 overflow-hidden border border-slate-200 rounded-2xl">
+          <table className="table-fixed w-full text-sm">
+            <colgroup>
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '12%' }} />
+            </colgroup>
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 {(
@@ -1734,6 +1769,7 @@ const TaskDashboardView: React.FC = () => {
                     { key: 'completed' as AgentTableSortKey, label: 'Completed' },
                     { key: 'notReachable' as AgentTableSortKey, label: 'Not reachable' },
                     { key: 'invalidNumber' as AgentTableSortKey, label: 'Invalid' },
+                    { key: 'cancelled' as AgentTableSortKey, label: 'Cancelled' },
                     { key: 'totalOpen' as AgentTableSortKey, label: 'Total' },
                   ] as Array<{ key: AgentTableSortKey; label: string }>
                 ).map((col) => {
@@ -1741,38 +1777,38 @@ const TaskDashboardView: React.FC = () => {
                   return (
                     <th
                       key={col.key}
-                      className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-widest select-none cursor-pointer hover:bg-slate-100"
+                      className="px-2 py-2 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-widest select-none cursor-pointer hover:bg-slate-100"
                       onClick={() => handleAgentHeaderClick(col.key)}
                       title="Click to sort"
                     >
-                      <div className="flex items-center gap-2">
-                        <span>{col.label}</span>
-                        {isSorted && (agentTableSort.dir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+                      <div className="flex items-center gap-1 truncate">
+                        <span className="truncate">{col.label}</span>
+                        {isSorted && (agentTableSort.dir === 'asc' ? <ChevronUp size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />)}
                       </div>
                     </th>
                   );
                 })}
-                <th className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-widest">Action</th>
+                <th className="px-2 py-2 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sortedAgentRows.map((a: any) => (
                 <tr key={a.agentId}>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-2">
                     <button
                       type="button"
                       onClick={() => {
                         setSelectedAgentId(a.agentId);
                         setSelectedLanguage(null);
                       }}
-                      className="text-left group block w-full"
+                      className="text-left group block w-full min-w-0"
                     >
-                      <div className="font-black text-blue-600 group-hover:text-blue-800 group-hover:underline">{a.name}</div>
-                      <div className="text-xs text-slate-500 group-hover:text-slate-600">{a.email}</div>
+                      <div className="font-black text-blue-600 group-hover:text-blue-800 group-hover:underline truncate">{a.name}</div>
+                      <div className="text-xs text-slate-500 group-hover:text-slate-600 truncate">{a.email}</div>
                     </button>
                   </td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{a.employeeId}</td>
-                  <td className="px-4 py-3 text-xs font-bold text-slate-700">
+                  <td className="px-2 py-2 font-bold text-slate-700 truncate">{a.employeeId}</td>
+                  <td className="px-2 py-2 text-xs font-bold text-slate-700 truncate">
                     {(Array.isArray(a.languageCapabilities) ? a.languageCapabilities : []).length ? (
                       (a.languageCapabilities as string[]).map((lang: string, i: number) => (
                         <span key={lang}>
@@ -1794,26 +1830,29 @@ const TaskDashboardView: React.FC = () => {
                       '—'
                     )}
                   </td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{a.sampledInQueue ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{a.inProgress ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{a.completed ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{a.notReachable ?? 0}</td>
-                  <td className="px-4 py-3 font-bold text-slate-700">{a.invalidNumber ?? 0}</td>
-                  <td className="px-4 py-3 font-black text-slate-900">{a.totalOpen ?? 0}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-2 font-bold text-slate-700">{a.sampledInQueue ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{a.inProgress ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{a.completed ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{a.notReachable ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{a.invalidNumber ?? 0}</td>
+                  <td className="px-2 py-2 font-bold text-slate-700">{a.cancelled ?? 0}</td>
+                  <td className="px-2 py-2 font-black text-slate-900">{a.totalOpen ?? 0}</td>
+                  <td className="px-2 py-2">
                     {Number(a.sampledInQueue || 0) > 0 ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-stretch gap-1">
                         <button
+                          type="button"
                           onClick={() => setReallocateAgent({ agentId: a.agentId, name: a.name, sampledInQueue: a.sampledInQueue })}
                           disabled={isReallocating || isAllocRunning}
-                          className="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className={`${ROW_ACTION_BTN} flex-1 min-w-0 px-2 text-white bg-blue-600 hover:bg-blue-700`}
                         >
                           Reallocate
                         </button>
                         <button
+                          type="button"
                           onClick={() => setCancelAgent({ agentId: a.agentId, name: a.name, sampledInQueue: a.sampledInQueue })}
                           disabled={isReallocating || isAllocRunning}
-                          className="px-3 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className={`${ROW_ACTION_BTN} flex-1 min-w-0 px-2 text-white bg-red-600 hover:bg-red-700`}
                         >
                           Cancel Queue
                         </button>
@@ -1826,7 +1865,7 @@ const TaskDashboardView: React.FC = () => {
               ))}
               {!sortedAgentRows.length && (
                 <tr>
-                  <td className="px-4 py-6 text-slate-600" colSpan={10}>
+                  <td className="px-4 py-6 text-slate-600" colSpan={11}>
                     No agents found for this Team Lead.
                   </td>
                 </tr>

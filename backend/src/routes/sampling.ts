@@ -193,7 +193,9 @@ async function getLaterRunEligibleCount(userId: mongoose.Types.ObjectId): Promis
   return { count, range, lastRunCursor: autoRange.dateFrom, sampleFrom };
 }
 
-/** Group activities by MDO (officerId); allocate proportional target sample size per MDO. Every MDO gets at least 1 (mandatory representation). */
+/** Group activities by MDO (officerId); allocate proportional farmer sample targets
+ * so sum(targets) ≈ ceil(totalFarmers * sampling% / 100). Small MDOs may get 0 this run.
+ */
 type FdaGroupDoc = { _id: mongoose.Types.ObjectId; officerId: string; officerName?: string; farmerIds?: unknown[] };
 async function buildFdaGroups(
   docs: FdaGroupDoc[],
@@ -230,18 +232,29 @@ async function buildFdaGroups(
     resolvedPct = (config as any).defaultPercentage ?? 10;
   }
   const desiredTotal = Math.min(totalWeight, Math.max(1, Math.ceil((totalWeight * resolvedPct) / 100)));
-  const out: { officerId: string; officerName: string; activities: { id: string; farmerCount: number }[]; totalFarmers: number; target: number }[] = [];
-  for (const [officerId, g] of byOfficer.entries()) {
-    const target = Math.max(1, Math.round((g.totalFarmers / totalWeight) * desiredTotal));
-    out.push({
-      officerId,
-      officerName: g.officerName,
-      activities: g.activities,
-      totalFarmers: g.totalFarmers,
-      target,
-    });
+
+  // Largest-remainder allocation so sum(targets) === desiredTotal (honours sampling %)
+  const rows = Array.from(byOfficer.entries()).map(([officerId, g]) => {
+    const exact = (g.totalFarmers / totalWeight) * desiredTotal;
+    const floor = Math.floor(exact);
+    return { officerId, g, floor, frac: exact - floor };
+  });
+  let assigned = rows.reduce((s, r) => s + r.floor, 0);
+  let remaining = desiredTotal - assigned;
+  rows.sort((a, b) => b.frac - a.frac || b.g.totalFarmers - a.g.totalFarmers);
+  for (const r of rows) {
+    if (remaining <= 0) break;
+    r.floor += 1;
+    remaining -= 1;
   }
-  return out;
+
+  return rows.map(({ officerId, g, floor }) => ({
+    officerId,
+    officerName: g.officerName,
+    activities: g.activities,
+    totalFarmers: g.totalFarmers,
+    target: floor,
+  }));
 }
 
 // ============================================================================
@@ -1313,13 +1326,26 @@ async function runSamplingHandler(req: Request, res: Response, next: NextFunctio
 
       if (fdaGroups && fdaGroups.length > 0) {
         for (const group of fdaGroups) {
+          if (group.target <= 0) {
+            // No farmer quota for this MDO this run — leave activities Active for a later run
+            for (const act of group.activities) {
+              skipped++;
+              processed++;
+            }
+            continue;
+          }
           let createdForFDA = 0;
           for (const act of group.activities) {
             try {
               const maxFarmers = Math.max(0, group.target - createdForFDA);
+              // Quota exhausted: do NOT sample further activities (bug was passing undefined = uncapped)
+              if (maxFarmers <= 0) {
+                skipped++;
+                continue;
+              }
               const minFarmers = createdForFDA === 0 ? 1 : undefined;
               const r = await processOne(act.id, {
-                maxFarmersToSample: maxFarmers > 0 ? maxFarmers : undefined,
+                maxFarmersToSample: maxFarmers,
                 minFarmersToSample: minFarmers,
               });
               if (shouldIncludeResults) {

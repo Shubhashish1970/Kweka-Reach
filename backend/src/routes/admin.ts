@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { parseQueryDateFrom, parseQueryDateTo } from '../utils/dateRangeQuery.js';
-import { query, param, validationResult } from 'express-validator';
+import { query, param, body, validationResult } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 import { AppError } from '../middleware/errorHandler.js';
@@ -12,6 +12,15 @@ import {
   getAgentQueues,
   getAgentQueue,
 } from '../services/adminService.js';
+import {
+  ACTIVITY_PARK_KEYS,
+  TASK_PARK_STATUSES,
+  getStockParkingCounts,
+  previewStockParking,
+  applyStockParking,
+  type ActivityParkKey,
+  type TaskParkStatus,
+} from '../services/stockParkingService.js';
 import logger from '../config/logger.js';
 import * as XLSX from 'xlsx';
 
@@ -383,6 +392,148 @@ router.get(
       res.json({
         success: true,
         data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * @route   GET /api/admin/stock-parking/counts
+ * @desc    Activity + task stage counts for a required date range (Admin parking control)
+ * @access  Private (MIS Admin)
+ */
+router.get(
+  '/stock-parking/counts',
+  [
+    query('dateFrom').notEmpty().isISO8601().withMessage('dateFrom is required'),
+    query('dateTo').notEmpty().isISO8601().withMessage('dateTo is required'),
+    query('bu').optional().isString(),
+    query('state').optional().isString(),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const { dateFrom, dateTo, bu, state } = req.query as Record<string, string | undefined>;
+      const data = await getStockParkingCounts({
+        dateFrom: dateFrom!,
+        dateTo: dateTo!,
+        bu,
+        state,
+      });
+
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * @route   POST /api/admin/stock-parking/preview
+ * @desc    Preview park counts for selected activity cohorts / task statuses
+ * @access  Private (MIS Admin)
+ */
+router.post(
+  '/stock-parking/preview',
+  [
+    body('dateFrom').notEmpty().isISO8601(),
+    body('dateTo').notEmpty().isISO8601(),
+    body('bu').optional().isString(),
+    body('state').optional().isString(),
+    body('activityKeys').optional().isArray(),
+    body('activityKeys.*').optional().isIn([...ACTIVITY_PARK_KEYS]),
+    body('taskStatuses').optional().isArray(),
+    body('taskStatuses.*').optional().isIn([...TASK_PARK_STATUSES]),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const { dateFrom, dateTo, bu, state, activityKeys, taskStatuses } = req.body as {
+        dateFrom: string;
+        dateTo: string;
+        bu?: string;
+        state?: string;
+        activityKeys?: ActivityParkKey[];
+        taskStatuses?: TaskParkStatus[];
+      };
+
+      const data = await previewStockParking(
+        { dateFrom, dateTo, bu, state },
+        activityKeys || [],
+        taskStatuses || []
+      );
+
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * @route   POST /api/admin/stock-parking/park
+ * @desc    Park selected activity cohorts → inactive; selected task statuses → cancelled
+ * @access  Private (MIS Admin)
+ */
+router.post(
+  '/stock-parking/park',
+  [
+    body('dateFrom').notEmpty().isISO8601(),
+    body('dateTo').notEmpty().isISO8601(),
+    body('bu').optional().isString(),
+    body('state').optional().isString(),
+    body('activityKeys').optional().isArray(),
+    body('activityKeys.*').optional().isIn([...ACTIVITY_PARK_KEYS]),
+    body('taskStatuses').optional().isArray(),
+    body('taskStatuses.*').optional().isIn([...TASK_PARK_STATUSES]),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Validation failed', errors: errors.array() },
+        });
+      }
+
+      const authReq = req as AuthRequest;
+      const { dateFrom, dateTo, bu, state, activityKeys, taskStatuses } = req.body as {
+        dateFrom: string;
+        dateTo: string;
+        bu?: string;
+        state?: string;
+        activityKeys?: ActivityParkKey[];
+        taskStatuses?: TaskParkStatus[];
+      };
+
+      const data = await applyStockParking(
+        { dateFrom, dateTo, bu, state },
+        activityKeys || [],
+        taskStatuses || [],
+        { userId: authReq.user._id.toString() }
+      );
+
+      res.json({
+        success: true,
+        message: `Parked ${data.activitiesInactivated} activit${data.activitiesInactivated === 1 ? 'y' : 'ies'} to inactive; cancelled ${data.tasksCancelled} task(s)`,
+        data,
       });
     } catch (error) {
       next(error);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Users, Activity as ActivityIcon, List, LogOut, User as UserIcon, Database, Leaf, TrendingUp, Settings2 } from 'lucide-react';
+import { BarChart3, Users, Activity as ActivityIcon, List, LogOut, User as UserIcon, Database, Leaf, TrendingUp, Settings2, Archive } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import HeaderRoleSwitcher from '../shared/HeaderRoleSwitcher';
 import ActivitySamplingView from './ActivitySamplingView';
@@ -9,9 +9,10 @@ import TaskList from '../TaskList';
 import MasterManagementView from './MasterManagement/MasterManagementView';
 import ActivityEmsProgressView from './ActivityEmsProgressView';
 import DataManagementView from './DataManagementView';
+import StockParkingView from './StockParkingView';
 
-type AdminTab = 'activities' | 'queues' | 'tasks' | 'masters' | 'dashboard' | 'data';
-const ADMIN_TAB_VALUES: AdminTab[] = ['activities', 'queues', 'tasks', 'masters', 'dashboard', 'data'];
+type AdminTab = 'activities' | 'queues' | 'tasks' | 'masters' | 'dashboard' | 'data' | 'stock';
+const ADMIN_TAB_VALUES: AdminTab[] = ['activities', 'queues', 'tasks', 'masters', 'dashboard', 'data', 'stock'];
 const ADMIN_ACTIVE_TAB_KEY = 'admin.dashboard.activeTab';
 
 const AdminDashboardContainer: React.FC = () => {
@@ -39,6 +40,7 @@ const AdminDashboardContainer: React.FC = () => {
     { id: 'activities' as const, label: 'Activity Monitoring', icon: ActivityIcon },
     { id: 'queues' as const, label: 'Agent Queues', icon: Users },
     { id: 'tasks' as const, label: 'Task Management', icon: List },
+    { id: 'stock' as const, label: 'Stock Parking', icon: Archive },
     { id: 'masters' as const, label: 'Master Management', icon: Database },
     { id: 'dashboard' as const, label: 'Activity EMS Progress', icon: TrendingUp },
     { id: 'data' as const, label: 'Data Management', icon: Settings2 },
@@ -113,6 +115,7 @@ const AdminDashboardContainer: React.FC = () => {
         {activeTab === 'activities' && <ActivitySamplingView />}
         {activeTab === 'queues' && <AgentQueueView />}
         {activeTab === 'tasks' && <TaskList />}
+        {activeTab === 'stock' && <StockParkingView />}
         {activeTab === 'masters' && <MasterManagementView />}
         {activeTab === 'data' && <DataManagementView />}
       </div>

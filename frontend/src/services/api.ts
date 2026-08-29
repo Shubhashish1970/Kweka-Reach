@@ -918,6 +918,48 @@ export const adminAPI = {
     const q = search.toString();
     return apiRequest(`/admin/agent-queues/${agentId}${q ? `?${q}` : ''}`);
   },
+
+  getStockParkingCounts: async (filters: {
+    dateFrom: string;
+    dateTo: string;
+    bu?: string;
+    state?: string;
+  }) => {
+    const params = new URLSearchParams();
+    params.append('dateFrom', filters.dateFrom);
+    params.append('dateTo', filters.dateTo);
+    if (filters.bu) params.append('bu', filters.bu);
+    if (filters.state) params.append('state', filters.state);
+    return apiRequest(`/admin/stock-parking/counts?${params.toString()}`);
+  },
+
+  previewStockParking: async (body: {
+    dateFrom: string;
+    dateTo: string;
+    bu?: string;
+    state?: string;
+    activityKeys?: string[];
+    taskStatuses?: string[];
+  }) => {
+    return apiRequest(`/admin/stock-parking/preview`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, undefined, 60000);
+  },
+
+  applyStockParking: async (body: {
+    dateFrom: string;
+    dateTo: string;
+    bu?: string;
+    state?: string;
+    activityKeys?: string[];
+    taskStatuses?: string[];
+  }) => {
+    return apiRequest(`/admin/stock-parking/park`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, undefined, 120000);
+  },
 };
 
 // KPI / EMS Progress API (MIS Admin)

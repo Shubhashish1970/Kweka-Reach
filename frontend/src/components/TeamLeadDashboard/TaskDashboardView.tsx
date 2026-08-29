@@ -8,6 +8,7 @@ import BulkCancelModal from '../shared/BulkCancelModal';
 import Button from '../shared/Button';
 import StyledSelect from '../shared/StyledSelect';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } from '../../utils/dateRangeUtils';
+import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../../utils/filterPersistence';
 import { getTaskStatusLabel, TASK_STATUS_LABELS } from '../../utils/taskStatusLabels';
 import TaskQueueTable from './TaskQueueTable';
 
@@ -112,6 +113,63 @@ interface LanguageQueueDetailForTL {
   limit?: number;
 }
 
+const TASK_DASHBOARD_FILTERS_KEY = 'teamLead.taskDashboard.filters';
+
+type SavedTaskDashboardFilters = {
+  dateFrom: string;
+  dateTo: string;
+  bu: string;
+  state: string;
+  selectedPreset: DateRangePreset;
+  showMainFilters: boolean;
+  agentDetailFilters: { status: string; fda: string };
+  languageQueueFilters: { agentId: string; status: string };
+  showLanguageQueueFilters: boolean;
+  showAgentDetailFilters: boolean;
+};
+
+function loadSavedTaskDashboardFilters(): SavedTaskDashboardFilters {
+  const fallback = getPresetRange('Last 7 days');
+  return loadJsonStorage(
+    TASK_DASHBOARD_FILTERS_KEY,
+    () => ({
+      dateFrom: fallback.start,
+      dateTo: fallback.end,
+      bu: '',
+      state: '',
+      selectedPreset: 'Last 7 days' as DateRangePreset,
+      showMainFilters: false,
+      agentDetailFilters: { status: '', fda: '' },
+      languageQueueFilters: { agentId: '', status: '' },
+      showLanguageQueueFilters: false,
+      showAgentDetailFilters: false,
+    }),
+    (parsed, defaults) => {
+      const p = parsed as Record<string, unknown>;
+      const agentDetail = (p.agentDetailFilters as Record<string, unknown>) || {};
+      const languageQueue = (p.languageQueueFilters as Record<string, unknown>) || {};
+      return {
+        dateFrom: parseIsoDate(p.dateFrom, defaults.dateFrom),
+        dateTo: parseIsoDate(p.dateTo, defaults.dateTo),
+        bu: parseString(p.bu, defaults.bu),
+        state: parseString(p.state, defaults.state),
+        selectedPreset: parsePreset(p.selectedPreset, defaults.selectedPreset, COMMON_DATE_RANGE_PRESETS),
+        showMainFilters: parseBoolean(p.showMainFilters, defaults.showMainFilters),
+        agentDetailFilters: {
+          status: parseString(agentDetail.status, defaults.agentDetailFilters.status),
+          fda: parseString(agentDetail.fda, defaults.agentDetailFilters.fda),
+        },
+        languageQueueFilters: {
+          agentId: parseString(languageQueue.agentId, defaults.languageQueueFilters.agentId),
+          status: parseString(languageQueue.status, defaults.languageQueueFilters.status),
+        },
+        showLanguageQueueFilters: parseBoolean(p.showLanguageQueueFilters, defaults.showLanguageQueueFilters),
+        showAgentDetailFilters: parseBoolean(p.showAgentDetailFilters, defaults.showAgentDetailFilters),
+      };
+    }
+  );
+}
+
 const TaskDashboardView: React.FC = () => {
   const toast = useToast();
   const { languages: masterLanguages } = useMasterLanguages();
@@ -119,14 +177,17 @@ const TaskDashboardView: React.FC = () => {
     () => [...masterLanguages, ...LANGUAGE_FALLBACK_ORDER],
     [masterLanguages]
   );
+  const initialDashboardFilters = useMemo(() => loadSavedTaskDashboardFilters(), []);
   const [isLoading, setIsLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [allocRun, setAllocRun] = useState<any>(null);
 
-  const [filters, setFilters] = useState(() => {
-    const r = getPresetRange('Last 7 days');
-    return { dateFrom: r.start, dateTo: r.end, bu: '', state: '' };
-  });
+  const [filters, setFilters] = useState(() => ({
+    dateFrom: initialDashboardFilters.dateFrom,
+    dateTo: initialDashboardFilters.dateTo,
+    bu: initialDashboardFilters.bu,
+    state: initialDashboardFilters.state,
+  }));
   const [allocLanguage, setAllocLanguage] = useState<string>('ALL');
   const [allocCount, setAllocCount] = useState<number>(0);
   const [isAllocConfirmOpen, setIsAllocConfirmOpen] = useState(false);
@@ -137,19 +198,27 @@ const TaskDashboardView: React.FC = () => {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const [agentDetail, setAgentDetail] = useState<AgentQueueDetailForTL | null>(null);
-  const [agentDetailFilters, setAgentDetailFilters] = useState<{ status: string; fda: string }>({ status: '', fda: '' });
+  const [agentDetailFilters, setAgentDetailFilters] = useState<{ status: string; fda: string }>(
+    () => initialDashboardFilters.agentDetailFilters
+  );
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
 
   const [selectedLanguageQueue, setSelectedLanguageQueue] = useState<string | null>(null);
   const [languageQueueDetail, setLanguageQueueDetail] = useState<LanguageQueueDetailForTL | null>(null);
-  const [languageQueueFilters, setLanguageQueueFilters] = useState<{ agentId: string; status: string }>({ agentId: '', status: '' });
+  const [languageQueueFilters, setLanguageQueueFilters] = useState<{ agentId: string; status: string }>(
+    () => initialDashboardFilters.languageQueueFilters
+  );
   const [isLoadingLanguageQueue, setIsLoadingLanguageQueue] = useState(false);
   const [isLoadingMoreAgent, setIsLoadingMoreAgent] = useState(false);
   const [isLoadingMoreLanguage, setIsLoadingMoreLanguage] = useState(false);
   const [isExportingAgentTasks, setIsExportingAgentTasks] = useState(false);
-  const [showMainFilters, setShowMainFilters] = useState(false);
-  const [showLanguageQueueFilters, setShowLanguageQueueFilters] = useState(false);
-  const [showAgentDetailFilters, setShowAgentDetailFilters] = useState(false);
+  const [showMainFilters, setShowMainFilters] = useState(() => initialDashboardFilters.showMainFilters);
+  const [showLanguageQueueFilters, setShowLanguageQueueFilters] = useState(
+    () => initialDashboardFilters.showLanguageQueueFilters
+  );
+  const [showAgentDetailFilters, setShowAgentDetailFilters] = useState(
+    () => initialDashboardFilters.showAgentDetailFilters
+  );
   const [taskPageSize, setTaskPageSize] = useState<number>(() => {
     const raw = localStorage.getItem('teamLead.queueTasks.pageSize');
     const n = raw ? Number(raw) : NaN;
@@ -161,9 +230,9 @@ const TaskDashboardView: React.FC = () => {
   // Date range dropdown (same UX as Sampling Dashboard)
   const datePickerRef = useRef<HTMLDivElement | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 7 days');
-  const [draftStart, setDraftStart] = useState(() => getPresetRange('Last 7 days').start);
-  const [draftEnd, setDraftEnd] = useState(() => getPresetRange('Last 7 days').end);
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>(() => initialDashboardFilters.selectedPreset);
+  const [draftStart, setDraftStart] = useState(() => initialDashboardFilters.dateFrom);
+  const [draftEnd, setDraftEnd] = useState(() => initialDashboardFilters.dateTo);
 
   const getRange = (preset: DateRangePreset) =>
     getPresetRange(preset, filters.dateFrom || undefined, filters.dateTo || undefined);
@@ -186,6 +255,32 @@ const TaskDashboardView: React.FC = () => {
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, [isDatePickerOpen]);
+
+  useEffect(() => {
+    saveJsonStorage(TASK_DASHBOARD_FILTERS_KEY, {
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      bu: filters.bu,
+      state: filters.state,
+      selectedPreset,
+      showMainFilters,
+      agentDetailFilters,
+      languageQueueFilters,
+      showLanguageQueueFilters,
+      showAgentDetailFilters,
+    });
+  }, [
+    filters.dateFrom,
+    filters.dateTo,
+    filters.bu,
+    filters.state,
+    selectedPreset,
+    showMainFilters,
+    agentDetailFilters,
+    languageQueueFilters,
+    showLanguageQueueFilters,
+    showAgentDetailFilters,
+  ]);
 
   const loadDashboard = async () => {
     const res: any = await tasksAPI.getDashboard({

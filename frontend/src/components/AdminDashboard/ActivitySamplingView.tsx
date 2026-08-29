@@ -10,6 +10,7 @@ import { FFA_ACTIVITY_MAP_FIELDS, FFA_FARMER_MAP_FIELDS } from '../../constants/
 import InfoBanner from '../shared/InfoBanner';
 import { getTaskStatusLabel } from '../../utils/taskStatusLabels';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST, formatDateTimeIST, formatConfigDateTimeDisplay, toISODateLocal } from '../../utils/dateRangeUtils';
+import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../../utils/filterPersistence';
 
 interface ActivitySamplingStatus {
   activity: {
@@ -99,8 +100,60 @@ const DEFAULT_ACTIVITY_TABLE_WIDTHS: Record<ActivityTableColumnKey, number> = {
   completed: 110,
 };
 
+const ACTIVITY_SAMPLING_FILTERS_KEY = 'admin.activitySampling.filters';
+type SamplingStatusFilter = 'sampled' | 'not_sampled' | 'partial' | '';
+
+type SavedActivitySamplingFilters = {
+  activityType: string;
+  territory: string;
+  zone: string;
+  bu: string;
+  samplingStatus: SamplingStatusFilter;
+  dateFrom: string;
+  dateTo: string;
+  selectedPreset: DateRangePreset;
+  showFilters: boolean;
+};
+
+function loadSavedActivitySamplingFilters(): SavedActivitySamplingFilters {
+  const fallback = getPresetRange('Last 7 days');
+  const samplingStatuses: SamplingStatusFilter[] = ['', 'sampled', 'not_sampled', 'partial'];
+  return loadJsonStorage(
+    ACTIVITY_SAMPLING_FILTERS_KEY,
+    () => ({
+      activityType: '',
+      territory: '',
+      zone: '',
+      bu: '',
+      samplingStatus: '' as SamplingStatusFilter,
+      dateFrom: fallback.start,
+      dateTo: fallback.end,
+      selectedPreset: 'Last 7 days' as DateRangePreset,
+      showFilters: false,
+    }),
+    (parsed, defaults) => {
+      const p = parsed as Record<string, unknown>;
+      const samplingStatus = (samplingStatuses as readonly string[]).includes(p.samplingStatus as string)
+        ? (p.samplingStatus as SamplingStatusFilter)
+        : defaults.samplingStatus;
+      return {
+        activityType: parseString(p.activityType, defaults.activityType),
+        territory: parseString(p.territory, defaults.territory),
+        zone: parseString(p.zone, defaults.zone),
+        bu: parseString(p.bu, defaults.bu),
+        samplingStatus,
+        dateFrom: parseIsoDate(p.dateFrom, defaults.dateFrom),
+        dateTo: parseIsoDate(p.dateTo, defaults.dateTo),
+        selectedPreset: parsePreset(p.selectedPreset, defaults.selectedPreset, COMMON_DATE_RANGE_PRESETS),
+        showFilters: parseBoolean(p.showFilters, defaults.showFilters),
+      };
+    }
+  );
+}
+
 const ActivitySamplingView: React.FC = () => {
   const { showError, showSuccess, showWarning, showInfo } = useToast();
+  const initialSamplingFilters = useMemo(() => loadSavedActivitySamplingFilters(), []);
   const [isExporting, setIsExporting] = useState(false);
   const [activities, setActivities] = useState<ActivitySamplingStatus[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -108,7 +161,7 @@ const ActivitySamplingView: React.FC = () => {
   const [statsData, setStatsData] = useState<any | null>(null);
   const [isStatsLoading, setIsStatsLoading] = useState(false);
   const [expandedActivity, setExpandedActivity] = useState<string | null>(null);
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(() => initialSamplingFilters.showFilters);
   const [pageSize, setPageSize] = useState<number>(() => {
     const raw = localStorage.getItem('admin.activitySampling.pageSize');
     const n = raw ? Number(raw) : NaN;
@@ -242,26 +295,23 @@ const ActivitySamplingView: React.FC = () => {
     return { ...DEFAULT_ACTIVITY_TABLE_WIDTHS };
   });
   const resizingRef = useRef<{ key: ActivityTableColumnKey; startX: number; startWidth: number } | null>(null);
-  const [filters, setFilters] = useState(() => {
-    const r = getPresetRange('Last 7 days');
-    return {
-      activityType: '',
-      territory: '',
-      zone: '',
-      bu: '',
-      samplingStatus: '' as 'sampled' | 'not_sampled' | 'partial' | '',
-      dateFrom: r.start,
-      dateTo: r.end,
-    };
-  });
+  const [filters, setFilters] = useState(() => ({
+    activityType: initialSamplingFilters.activityType,
+    territory: initialSamplingFilters.territory,
+    zone: initialSamplingFilters.zone,
+    bu: initialSamplingFilters.bu,
+    samplingStatus: initialSamplingFilters.samplingStatus as 'sampled' | 'not_sampled' | 'partial' | '',
+    dateFrom: initialSamplingFilters.dateFrom,
+    dateTo: initialSamplingFilters.dateTo,
+  }));
 
   const getRange = (preset: DateRangePreset) =>
     getPresetRange(preset, filters.dateFrom || undefined, filters.dateTo || undefined);
 
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 7 days');
-  const [draftStart, setDraftStart] = useState(() => getPresetRange('Last 7 days').start);
-  const [draftEnd, setDraftEnd] = useState(() => getPresetRange('Last 7 days').end);
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>(() => initialSamplingFilters.selectedPreset);
+  const [draftStart, setDraftStart] = useState(() => initialSamplingFilters.dateFrom);
+  const [draftEnd, setDraftEnd] = useState(() => initialSamplingFilters.dateTo);
   const datePickerRef = useRef<HTMLDivElement | null>(null);
 
   const syncDraftFromFilters = () => {
@@ -312,6 +362,14 @@ const ActivitySamplingView: React.FC = () => {
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [isDatePickerOpen]);
+
+  useEffect(() => {
+    saveJsonStorage(ACTIVITY_SAMPLING_FILTERS_KEY, {
+      ...filters,
+      selectedPreset,
+      showFilters,
+    });
+  }, [filters, selectedPreset, showFilters]);
 
   useEffect(() => {
     fetchFilterOptions();

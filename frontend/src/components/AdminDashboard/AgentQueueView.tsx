@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useToast } from '../../context/ToastContext';
 import { adminAPI } from '../../services/api';
 import { Loader2, Filter, RefreshCw, Users as UsersIcon, CheckCircle, Clock, XCircle, AlertCircle, ChevronRight, ChevronDown } from 'lucide-react';
@@ -8,6 +8,7 @@ import InfoBanner from '../shared/InfoBanner';
 import { getTaskStatusLabel } from '../../utils/taskStatusLabels';
 import TaskQueueTable from '../TeamLeadDashboard/TaskQueueTable';
 import { type DateRangePreset, getPresetRange, formatPretty } from '../../utils/dateRangeUtils';
+import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../../utils/filterPersistence';
 
 const AGENT_QUEUE_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
@@ -66,36 +67,83 @@ interface AgentQueueDetail {
   territoryOptions?: string[];
 }
 
+const AGENT_QUEUE_FILTERS_KEY = 'admin.agentQueue.filters';
+
+type SavedAgentQueueFilters = {
+  showOnlyActive: boolean;
+  showDetailFilters: boolean;
+  detailFilters: {
+    dateFrom: string;
+    dateTo: string;
+    status: string;
+    language: string;
+    territory: string;
+  };
+  detailDatePreset: DateRangePreset;
+};
+
+function loadSavedAgentQueueFilters(): SavedAgentQueueFilters {
+  const fallback = getPresetRange('Last 7 days');
+  return loadJsonStorage(
+    AGENT_QUEUE_FILTERS_KEY,
+    () => ({
+      showOnlyActive: true,
+      showDetailFilters: false,
+      detailFilters: {
+        dateFrom: fallback.start,
+        dateTo: fallback.end,
+        status: '',
+        language: '',
+        territory: '',
+      },
+      detailDatePreset: 'Last 7 days' as DateRangePreset,
+    }),
+    (parsed, defaults) => {
+      const p = parsed as Record<string, unknown>;
+      const detail = (p.detailFilters as Record<string, unknown>) || {};
+      return {
+        showOnlyActive: parseBoolean(p.showOnlyActive, defaults.showOnlyActive),
+        showDetailFilters: parseBoolean(p.showDetailFilters, defaults.showDetailFilters),
+        detailFilters: {
+          dateFrom: parseIsoDate(detail.dateFrom, defaults.detailFilters.dateFrom),
+          dateTo: parseIsoDate(detail.dateTo, defaults.detailFilters.dateTo),
+          status: parseString(detail.status, defaults.detailFilters.status),
+          language: parseString(detail.language, defaults.detailFilters.language),
+          territory: parseString(detail.territory, defaults.detailFilters.territory),
+        },
+        detailDatePreset: parsePreset(p.detailDatePreset, defaults.detailDatePreset, COMMON_DATE_RANGE_PRESETS),
+      };
+    }
+  );
+}
+
 const AgentQueueView: React.FC = () => {
   const { showError, showSuccess } = useToast();
+  const initialAgentQueueFilters = useMemo(() => loadSavedAgentQueueFilters(), []);
   const [queues, setQueues] = useState<AgentQueueSummary[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentDetail, setAgentDetail] = useState<AgentQueueDetail | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showOnlyActive, setShowOnlyActive] = useState(true);
-  const [showDetailFilters, setShowDetailFilters] = useState(false);
+  const [showOnlyActive, setShowOnlyActive] = useState(() => initialAgentQueueFilters.showOnlyActive);
+  const [showDetailFilters, setShowDetailFilters] = useState(() => initialAgentQueueFilters.showDetailFilters);
 
-  const [detailFilters, setDetailFilters] = useState({
-    dateFrom: '',
-    dateTo: '',
-    status: '',
-    language: '',
-    territory: '',
-  });
-  const [detailDatePreset, setDetailDatePreset] = useState<DateRangePreset>('Last 7 days');
+  const [detailFilters, setDetailFilters] = useState(() => initialAgentQueueFilters.detailFilters);
+  const [detailDatePreset, setDetailDatePreset] = useState<DateRangePreset>(() => initialAgentQueueFilters.detailDatePreset);
   const [isDetailDateOpen, setIsDetailDateOpen] = useState(false);
-  const [draftDateStart, setDraftDateStart] = useState('');
-  const [draftDateEnd, setDraftDateEnd] = useState('');
+  const [draftDateStart, setDraftDateStart] = useState(() => initialAgentQueueFilters.detailFilters.dateFrom);
+  const [draftDateEnd, setDraftDateEnd] = useState(() => initialAgentQueueFilters.detailFilters.dateTo);
   const detailDateRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const r = getPresetRange('Last 7 days');
-    setDetailFilters((f) => ({ ...f, dateFrom: r.start, dateTo: r.end }));
-    setDraftDateStart(r.start);
-    setDraftDateEnd(r.end);
-  }, []);
+    saveJsonStorage(AGENT_QUEUE_FILTERS_KEY, {
+      showOnlyActive,
+      showDetailFilters,
+      detailFilters,
+      detailDatePreset,
+    });
+  }, [showOnlyActive, showDetailFilters, detailFilters, detailDatePreset]);
 
   useEffect(() => {
     if (!isDetailDateOpen) return;

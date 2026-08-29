@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BarChart3, Users, Activity as ActivityIcon, List, LogOut, User as UserIcon, Database, Leaf, TrendingUp, Settings2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -10,8 +10,19 @@ import MasterManagementView from './MasterManagement/MasterManagementView';
 import ActivityEmsProgressView from './ActivityEmsProgressView';
 import DataManagementView from './DataManagementView';
 
+type AdminTab = 'activities' | 'queues' | 'tasks' | 'masters' | 'dashboard' | 'data';
+const ADMIN_TAB_VALUES: AdminTab[] = ['activities', 'queues', 'tasks', 'masters', 'dashboard', 'data'];
+const ADMIN_ACTIVE_TAB_KEY = 'admin.dashboard.activeTab';
+
 const AdminDashboardContainer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'activities' | 'queues' | 'tasks' | 'masters' | 'dashboard' | 'data'>('activities');
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => {
+    const saved = localStorage.getItem(ADMIN_ACTIVE_TAB_KEY);
+    return saved && (ADMIN_TAB_VALUES as readonly string[]).includes(saved) ? (saved as AdminTab) : 'activities';
+  });
+
+  useEffect(() => {
+    localStorage.setItem(ADMIN_ACTIVE_TAB_KEY, activeTab);
+  }, [activeTab]);
   const { user, logout, activeRole } = useAuth();
   const navigate = useNavigate();
 

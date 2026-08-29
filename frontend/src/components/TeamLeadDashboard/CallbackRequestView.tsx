@@ -5,6 +5,7 @@ import StyledSelect from '../shared/StyledSelect';
 import { tasksAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { type DateRangePreset, getPresetRange, formatPretty } from '../../utils/dateRangeUtils';
+import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../../utils/filterPersistence';
 
 interface CallbackTask {
   _id: string;
@@ -60,8 +61,49 @@ const formatDate = (dateStr: string) => {
   }
 };
 
+const CALLBACK_FILTERS_STORAGE_KEY = 'teamLead.callbackRequest.filters';
+
+type SavedCallbackFilters = {
+  dateFrom: string;
+  dateTo: string;
+  outcome: string;
+  callType: string;
+  agentId: string;
+  selectedPreset: DateRangePreset;
+  showFilters: boolean;
+};
+
+function loadSavedCallbackFilters(): SavedCallbackFilters {
+  const fallback = getPresetRange('Last 7 days');
+  return loadJsonStorage(
+    CALLBACK_FILTERS_STORAGE_KEY,
+    () => ({
+      dateFrom: fallback.start,
+      dateTo: fallback.end,
+      outcome: 'all',
+      callType: 'all',
+      agentId: 'all',
+      selectedPreset: 'Last 7 days' as DateRangePreset,
+      showFilters: false,
+    }),
+    (parsed, defaults) => {
+      const p = parsed as Record<string, unknown>;
+      return {
+        dateFrom: parseIsoDate(p.dateFrom, defaults.dateFrom),
+        dateTo: parseIsoDate(p.dateTo, defaults.dateTo),
+        outcome: parseString(p.outcome, defaults.outcome),
+        callType: parseString(p.callType, defaults.callType),
+        agentId: parseString(p.agentId, defaults.agentId),
+        selectedPreset: parsePreset(p.selectedPreset, defaults.selectedPreset, COMMON_DATE_RANGE_PRESETS),
+        showFilters: parseBoolean(p.showFilters, defaults.showFilters),
+      };
+    }
+  );
+}
+
 const CallbackRequestView: React.FC = () => {
   const toast = useToast();
+  const initialCallbackFilters = useMemo(() => loadSavedCallbackFilters(), []);
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [tasks, setTasks] = useState<CallbackTask[]>([]);
@@ -84,21 +126,19 @@ const CallbackRequestView: React.FC = () => {
     return { key: 'date', dir: 'desc' };
   });
 
-  const [showFilters, setShowFilters] = useState(false);
-  // Filters
-  const [filters, setFilters] = useState({
-    dateFrom: '',
-    dateTo: '',
-    outcome: 'all',
-    callType: 'all',
-    agentId: 'all',
-  });
+  const [showFilters, setShowFilters] = useState(() => initialCallbackFilters.showFilters);
+  const [filters, setFilters] = useState(() => ({
+    dateFrom: initialCallbackFilters.dateFrom,
+    dateTo: initialCallbackFilters.dateTo,
+    outcome: initialCallbackFilters.outcome,
+    callType: initialCallbackFilters.callType,
+    agentId: initialCallbackFilters.agentId,
+  }));
 
-  // Date picker state
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 7 days');
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>(() => initialCallbackFilters.selectedPreset);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [draftStart, setDraftStart] = useState('');
-  const [draftEnd, setDraftEnd] = useState('');
+  const [draftStart, setDraftStart] = useState(() => initialCallbackFilters.dateFrom);
+  const [draftEnd, setDraftEnd] = useState(() => initialCallbackFilters.dateTo);
   const datePickerRef = useRef<HTMLDivElement | null>(null);
 
   const getRange = (preset: DateRangePreset) =>
@@ -106,13 +146,13 @@ const CallbackRequestView: React.FC = () => {
 
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Initialize date range
   useEffect(() => {
-    const r = getRange('Last 7 days');
-    setFilters(f => ({ ...f, dateFrom: r.start, dateTo: r.end }));
-    setDraftStart(r.start);
-    setDraftEnd(r.end);
-  }, []);
+    saveJsonStorage(CALLBACK_FILTERS_STORAGE_KEY, {
+      ...filters,
+      selectedPreset,
+      showFilters,
+    });
+  }, [filters, selectedPreset, showFilters]);
 
   // Close date picker on outside click
   useEffect(() => {

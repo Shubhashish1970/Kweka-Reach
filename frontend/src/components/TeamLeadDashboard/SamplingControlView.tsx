@@ -6,6 +6,7 @@ import Modal from '../shared/Modal';
 import StyledSelect from '../shared/StyledSelect';
 import InfoBanner from '../shared/InfoBanner';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateTimeIST } from '../../utils/dateRangeUtils';
+import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../../utils/filterPersistence';
 
 type LifecycleStatus = 'active' | 'sampled' | 'inactive' | 'not_eligible';
 
@@ -32,8 +33,48 @@ type SortKey =
   | 'unassignedTasks';
 type SortDir = 'asc' | 'desc';
 
+const SAMPLING_CONTROL_FILTERS_KEY = 'teamLead.samplingControl.filters';
+const LIFECYCLE_STATUS_VALUES: LifecycleStatus[] = ['active', 'sampled', 'inactive', 'not_eligible'];
+
+type SavedSamplingControlFilters = {
+  lifecycleStatus: LifecycleStatus;
+  dateFrom: string;
+  dateTo: string;
+  selectedPreset: DateRangePreset;
+  runType: 'first_sample' | 'adhoc';
+};
+
+function loadSavedSamplingControlFilters(): SavedSamplingControlFilters {
+  const ytd = getPresetRange('YTD');
+  return loadJsonStorage(
+    SAMPLING_CONTROL_FILTERS_KEY,
+    () => ({
+      lifecycleStatus: 'active' as LifecycleStatus,
+      dateFrom: ytd.start,
+      dateTo: ytd.end,
+      selectedPreset: 'YTD' as DateRangePreset,
+      runType: 'first_sample' as const,
+    }),
+    (parsed, defaults) => {
+      const p = parsed as Record<string, unknown>;
+      const lifecycleStatus = (LIFECYCLE_STATUS_VALUES as readonly string[]).includes(p.lifecycleStatus as string)
+        ? (p.lifecycleStatus as LifecycleStatus)
+        : defaults.lifecycleStatus;
+      const runType = p.runType === 'adhoc' ? 'adhoc' : 'first_sample';
+      return {
+        lifecycleStatus,
+        dateFrom: parseIsoDate(p.dateFrom, defaults.dateFrom),
+        dateTo: parseIsoDate(p.dateTo, defaults.dateTo),
+        selectedPreset: parsePreset(p.selectedPreset, defaults.selectedPreset, COMMON_DATE_RANGE_PRESETS),
+        runType,
+      };
+    }
+  );
+}
+
 const SamplingControlView: React.FC = () => {
   const toast = useToast();
+  const initialSamplingControlFilters = useMemo(() => loadSavedSamplingControlFilters(), []);
 
   const [isLoading, setIsLoading] = useState(false);
   const [config, setConfig] = useState<any>(null);
@@ -65,26 +106,23 @@ const SamplingControlView: React.FC = () => {
   const [ffaDefaultActivateFrom, setFfaDefaultActivateFrom] = useState<string>('');
   const [taskDueInDays, setTaskDueInDays] = useState<number>(0);
 
-  const [activityFilters, setActivityFilters] = useState(() => {
-    const ytd = getPresetRange('YTD');
-    return {
-      lifecycleStatus: 'active' as LifecycleStatus,
-      dateFrom: ytd.start,
-      dateTo: ytd.end,
-    };
-  });
+  const [activityFilters, setActivityFilters] = useState(() => ({
+    lifecycleStatus: initialSamplingControlFilters.lifecycleStatus,
+    dateFrom: initialSamplingControlFilters.dateFrom,
+    dateTo: initialSamplingControlFilters.dateTo,
+  }));
 
   /** first_sample = auto date range (or manual for very first run); adhoc = user picks date range */
-  const [runType, setRunType] = useState<'first_sample' | 'adhoc'>('first_sample');
+  const [runType, setRunType] = useState<'first_sample' | 'adhoc'>(() => initialSamplingControlFilters.runType);
   const [firstSampleRange, setFirstSampleRange] = useState<{ dateFrom: string; dateTo: string; matchedCount?: number } | null>(null);
   const [isFirstSampleRun, setIsFirstSampleRun] = useState<boolean>(false);
 
   // Date range dropdown (same UX as Admin Activity Sampling)
   const datePickerRef = useRef<HTMLDivElement | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('YTD');
-  const [draftStart, setDraftStart] = useState('');
-  const [draftEnd, setDraftEnd] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>(() => initialSamplingControlFilters.selectedPreset);
+  const [draftStart, setDraftStart] = useState(() => initialSamplingControlFilters.dateFrom);
+  const [draftEnd, setDraftEnd] = useState(() => initialSamplingControlFilters.dateTo);
 
   const getRange = (preset: DateRangePreset) =>
     getPresetRange(preset, activityFilters.dateFrom || undefined, activityFilters.dateTo || undefined);
@@ -115,8 +153,17 @@ const SamplingControlView: React.FC = () => {
     };
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDatePickerOpen]);
+
+  useEffect(() => {
+    saveJsonStorage(SAMPLING_CONTROL_FILTERS_KEY, {
+      lifecycleStatus: activityFilters.lifecycleStatus,
+      dateFrom: activityFilters.dateFrom,
+      dateTo: activityFilters.dateTo,
+      selectedPreset,
+      runType,
+    });
+  }, [activityFilters.lifecycleStatus, activityFilters.dateFrom, activityFilters.dateTo, selectedPreset, runType]);
 
   const [stats, setStats] = useState<any>(null);
 

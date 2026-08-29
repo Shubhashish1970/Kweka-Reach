@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sliders, List, LogOut, User as UserIcon, PhoneForwarded, Leaf } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -7,8 +7,19 @@ import SamplingControlView from './SamplingControlView';
 import TaskDashboardView from './TaskDashboardView';
 import CallbackRequestView from './CallbackRequestView';
 
+type TeamLeadTab = 'sampling' | 'tasks' | 'callbacks';
+const TEAM_LEAD_TAB_VALUES: TeamLeadTab[] = ['sampling', 'tasks', 'callbacks'];
+const TEAM_LEAD_ACTIVE_TAB_KEY = 'teamLead.dashboard.activeTab';
+
 const TeamLeadDashboardContainer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'sampling' | 'tasks' | 'callbacks'>('sampling');
+  const [activeTab, setActiveTab] = useState<TeamLeadTab>(() => {
+    const saved = localStorage.getItem(TEAM_LEAD_ACTIVE_TAB_KEY);
+    return saved && (TEAM_LEAD_TAB_VALUES as readonly string[]).includes(saved) ? (saved as TeamLeadTab) : 'sampling';
+  });
+
+  useEffect(() => {
+    localStorage.setItem(TEAM_LEAD_ACTIVE_TAB_KEY, activeTab);
+  }, [activeTab]);
   const { user, logout, activeRole } = useAuth();
   const navigate = useNavigate();
 

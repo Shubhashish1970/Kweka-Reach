@@ -11,6 +11,7 @@ import BulkCancelModal from './shared/BulkCancelModal';
 import InfoBanner from './shared/InfoBanner';
 import { getTaskStatusLabel, TaskStatus } from '../utils/taskStatusLabels';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } from '../utils/dateRangeUtils';
+import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../utils/filterPersistence';
 
 interface Task {
   _id: string;
@@ -77,12 +78,62 @@ const DEFAULT_TASK_TABLE_WIDTHS: Record<TaskTableColumnKey, number> = {
   language: 140,
 };
 
+const TASK_FILTERS_STORAGE_KEY = 'admin.taskManagement.filters';
+
+type SavedTaskListFilters = {
+  status: string;
+  agentId: string;
+  territory: string;
+  zone: string;
+  bu: string;
+  search: string;
+  dateFrom: string;
+  dateTo: string;
+  selectedPreset: DateRangePreset;
+  showFilters: boolean;
+};
+
+function loadSavedTaskListFilters(): SavedTaskListFilters {
+  const fallback = getPresetRange('Last 7 days');
+  return loadJsonStorage(
+    TASK_FILTERS_STORAGE_KEY,
+    () => ({
+      status: '',
+      agentId: '',
+      territory: '',
+      zone: '',
+      bu: '',
+      search: '',
+      dateFrom: fallback.start,
+      dateTo: fallback.end,
+      selectedPreset: 'Last 7 days' as DateRangePreset,
+      showFilters: false,
+    }),
+    (parsed, defaults) => {
+      const p = parsed as Record<string, unknown>;
+      return {
+        status: parseString(p.status, defaults.status),
+        agentId: parseString(p.agentId, defaults.agentId),
+        territory: parseString(p.territory, defaults.territory),
+        zone: parseString(p.zone, defaults.zone),
+        bu: parseString(p.bu, defaults.bu),
+        search: parseString(p.search, defaults.search),
+        dateFrom: parseIsoDate(p.dateFrom, defaults.dateFrom),
+        dateTo: parseIsoDate(p.dateTo, defaults.dateTo),
+        selectedPreset: parsePreset(p.selectedPreset, defaults.selectedPreset, COMMON_DATE_RANGE_PRESETS),
+        showFilters: parseBoolean(p.showFilters, defaults.showFilters),
+      };
+    }
+  );
+}
+
 const TaskList: React.FC = () => {
   const { user, activeRole } = useAuth();
   const toast = useToast();
   
   // Use activeRole for permission checks, fallback to user.role
   const currentRole = activeRole || user?.role;
+  const initialTaskFilters = useMemo(() => loadSavedTaskListFilters(), []);
   
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
@@ -110,23 +161,23 @@ const TaskList: React.FC = () => {
   const [isStatsLoading, setIsStatsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 7 days');
-  const [draftStart, setDraftStart] = useState(''); // YYYY-MM-DD
-  const [draftEnd, setDraftEnd] = useState(''); // YYYY-MM-DD
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>(() => initialTaskFilters.selectedPreset);
+  const [draftStart, setDraftStart] = useState(() => initialTaskFilters.dateFrom);
+  const [draftEnd, setDraftEnd] = useState(() => initialTaskFilters.dateTo);
   const datePickerRef = useRef<HTMLDivElement | null>(null);
-  const [filters, setFilters] = useState({
-    status: '',
-    agentId: '',
-    territory: '',
-    zone: '',
-    bu: '',
-    search: '',
-    dateFrom: '',
-    dateTo: '',
-  });
+  const [filters, setFilters] = useState(() => ({
+    status: initialTaskFilters.status,
+    agentId: initialTaskFilters.agentId,
+    territory: initialTaskFilters.territory,
+    zone: initialTaskFilters.zone,
+    bu: initialTaskFilters.bu,
+    search: initialTaskFilters.search,
+    dateFrom: initialTaskFilters.dateFrom,
+    dateTo: initialTaskFilters.dateTo,
+  }));
   const [agents, setAgents] = useState<Array<{ _id: string; name: string; email: string }>>([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(() => initialTaskFilters.showFilters);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<
     'scheduledDate' | 'status' | 'farmerName' | 'agentName' | 'territory' | 'activityType' | 'officerName' | 'language'
@@ -192,6 +243,14 @@ const TaskList: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('admin.taskManagement.tableColumnWidths', JSON.stringify(tableColumnWidths));
   }, [tableColumnWidths]);
+
+  useEffect(() => {
+    saveJsonStorage(TASK_FILTERS_STORAGE_KEY, {
+      ...filters,
+      selectedPreset,
+      showFilters,
+    });
+  }, [filters, selectedPreset, showFilters]);
 
   const startResize = (e: React.MouseEvent, key: TaskTableColumnKey) => {
     e.preventDefault();

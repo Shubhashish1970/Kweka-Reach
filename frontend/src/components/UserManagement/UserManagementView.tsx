@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Filter, Search, Users as UsersIcon, Grid3x3 } from 'lucide-react';
 import { usersAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
@@ -9,6 +9,7 @@ import ConfirmationModal from '../shared/ConfirmationModal';
 import StyledSelect from '../shared/StyledSelect';
 import InfoBanner from '../shared/InfoBanner';
 import Button from '../shared/Button';
+import { loadJsonStorage, parseBoolean, parseString, saveJsonStorage } from '../../utils/filterPersistence';
 
 const USER_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const USER_PAGE_SIZE_DEFAULT = 20;
@@ -30,19 +31,60 @@ interface User {
   createdAt?: string;
 }
 
+const USER_MANAGEMENT_FILTERS_KEY = 'admin.userManagement.filters';
+const USER_VIEW_VALUES = ['users', 'matrix'] as const;
+type UserManagementViewMode = (typeof USER_VIEW_VALUES)[number];
+
+type SavedUserManagementFilters = {
+  view: UserManagementViewMode;
+  role: UserRole | '';
+  isActive: boolean | undefined;
+  search: string;
+  showFilters: boolean;
+};
+
+function loadSavedUserManagementFilters(): SavedUserManagementFilters {
+  return loadJsonStorage(
+    USER_MANAGEMENT_FILTERS_KEY,
+    () => ({
+      view: 'users' as UserManagementViewMode,
+      role: '' as UserRole | '',
+      isActive: true as boolean | undefined,
+      search: '',
+      showFilters: false,
+    }),
+    (parsed, defaults) => {
+      const p = parsed as Record<string, unknown>;
+      const view = USER_VIEW_VALUES.includes(p.view as UserManagementViewMode)
+        ? (p.view as UserManagementViewMode)
+        : defaults.view;
+      const isActive =
+        typeof p.isActive === 'boolean' ? p.isActive : p.isActive === null ? undefined : defaults.isActive;
+      return {
+        view,
+        role: parseString(p.role, defaults.role) as UserRole | '',
+        isActive,
+        search: parseString(p.search, defaults.search),
+        showFilters: parseBoolean(p.showFilters, defaults.showFilters),
+      };
+    }
+  );
+}
+
 const UserManagementView: React.FC = () => {
   const { showError, showSuccess } = useToast();
-  const [view, setView] = useState<'users' | 'matrix'>('users');
+  const initialUserFilters = useMemo(() => loadSavedUserManagementFilters(), []);
+  const [view, setView] = useState<'users' | 'matrix'>(() => initialUserFilters.view);
   const [users, setUsers] = useState<User[]>([]);
   const [teamLeads, setTeamLeads] = useState<Array<{ _id: string; name: string; email: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showUserForm, setShowUserForm] = useState(false);
-  const [filters, setFilters] = useState({
-    role: '' as UserRole | '',
-    isActive: true as boolean | undefined,
-    search: '',
-  });
+  const [filters, setFilters] = useState(() => ({
+    role: initialUserFilters.role,
+    isActive: initialUserFilters.isActive,
+    search: initialUserFilters.search,
+  }));
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, pages: 1 });
   const [pageSize, setPageSize] = useState<number>(() => {
     const raw = localStorage.getItem('admin.userManagement.pageSize');
@@ -50,7 +92,7 @@ const UserManagementView: React.FC = () => {
     return Number.isFinite(n) && USER_PAGE_SIZE_OPTIONS.includes(n as any) ? n : USER_PAGE_SIZE_DEFAULT;
   });
   const [currentUserId, setCurrentUserId] = useState<string | undefined>();
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(() => initialUserFilters.showFilters);
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; user: User | null }>({
     isOpen: false,
     user: null,
@@ -71,6 +113,18 @@ const UserManagementView: React.FC = () => {
       }
     }
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('admin.userManagement.pageSize', String(pageSize));
+  }, [pageSize]);
+
+  useEffect(() => {
+    saveJsonStorage(USER_MANAGEMENT_FILTERS_KEY, {
+      view,
+      ...filters,
+      showFilters,
+    });
+  }, [view, filters, showFilters]);
 
   const fetchUsers = async (page: number = 1) => {
     setIsLoading(true);
@@ -220,10 +274,6 @@ const UserManagementView: React.FC = () => {
 
     return () => clearTimeout(timeoutId);
   }, [filters.search]);
-
-  useEffect(() => {
-    localStorage.setItem('admin.userManagement.pageSize', String(pageSize));
-  }, [pageSize]);
 
   return (
     <div className="space-y-6">

@@ -55,6 +55,7 @@ import {
 import Button from '../shared/Button';
 import StyledSelect from '../shared/StyledSelect';
 import { type DateRangePreset, getPresetRange, formatPretty, toISODateLocal } from '../../utils/dateRangeUtils';
+import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../../utils/filterPersistence';
 
 /** Totals row derived from EMS summary rows (same formulas as backend) */
 export type EmsTotals = {
@@ -116,6 +117,70 @@ function getDefaultDateRange(): { dateFrom: string; dateTo: string } {
   return { dateFrom: toISODateLocal(start), dateTo: toISODateLocal(today) };
 }
 
+const EMS_PROGRESS_FILTERS_KEY = 'admin.emsProgress.filters';
+type FilterDimensionKey = keyof Pick<EmsProgressFilters, 'state' | 'territory' | 'zone' | 'bu' | 'activityType'> | 'region';
+const FILTER_DIMENSION_VALUES: FilterDimensionKey[] = ['state', 'territory', 'zone', 'bu', 'activityType', 'region'];
+const EMS_GROUP_BY_VALUES: EmsReportGroupBy[] = ['fda', 'territory', 'region', 'zone', 'bu', 'tm'];
+const EMS_TREND_BUCKET_VALUES: EmsTrendBucket[] = ['daily', 'weekly', 'monthly'];
+
+type SavedEmsProgressFilters = {
+  dateFrom: string;
+  dateTo: string;
+  state: string;
+  territory: string;
+  zone: string;
+  bu: string;
+  activityType: string;
+  selectedPreset: DateRangePreset;
+  showFilters: boolean;
+  filterDimension: FilterDimensionKey;
+  groupBy: EmsReportGroupBy;
+  trendBucket: EmsTrendBucket;
+};
+
+function loadSavedEmsProgressFilters(): SavedEmsProgressFilters {
+  const defaultRange = getDefaultDateRange();
+  return loadJsonStorage(
+    EMS_PROGRESS_FILTERS_KEY,
+    () => ({
+      ...defaultRange,
+      state: '',
+      territory: '',
+      zone: '',
+      bu: '',
+      activityType: '',
+      selectedPreset: 'Last 30 days' as DateRangePreset,
+      showFilters: false,
+      filterDimension: 'state' as FilterDimensionKey,
+      groupBy: 'fda' as EmsReportGroupBy,
+      trendBucket: 'weekly' as EmsTrendBucket,
+    }),
+    (parsed, defaults) => {
+      const p = parsed as Record<string, unknown>;
+      return {
+        dateFrom: parseIsoDate(p.dateFrom, defaults.dateFrom),
+        dateTo: parseIsoDate(p.dateTo, defaults.dateTo),
+        state: parseString(p.state, defaults.state),
+        territory: parseString(p.territory, defaults.territory),
+        zone: parseString(p.zone, defaults.zone),
+        bu: parseString(p.bu, defaults.bu),
+        activityType: parseString(p.activityType, defaults.activityType),
+        selectedPreset: parsePreset(p.selectedPreset, defaults.selectedPreset, COMMON_DATE_RANGE_PRESETS),
+        showFilters: parseBoolean(p.showFilters, defaults.showFilters),
+        filterDimension: (FILTER_DIMENSION_VALUES as readonly string[]).includes(p.filterDimension as string)
+          ? (p.filterDimension as FilterDimensionKey)
+          : defaults.filterDimension,
+        groupBy: (EMS_GROUP_BY_VALUES as readonly string[]).includes(p.groupBy as string)
+          ? (p.groupBy as EmsReportGroupBy)
+          : defaults.groupBy,
+        trendBucket: (EMS_TREND_BUCKET_VALUES as readonly string[]).includes(p.trendBucket as string)
+          ? (p.trendBucket as EmsTrendBucket)
+          : defaults.trendBucket,
+      };
+    }
+  );
+}
+
 function computeEmsTotals(rows: EmsReportSummaryRow[]): EmsTotals | null {
   if (!rows.length) return null;
   const r0 = rows[0];
@@ -172,10 +237,11 @@ function computeEmsTotals(rows: EmsReportSummaryRow[]): EmsTotals | null {
 
 const ActivityEmsProgressView: React.FC = () => {
   const { showError, showSuccess } = useToast();
+  const initialEmsFilters = useMemo(() => loadSavedEmsProgressFilters(), []);
   const [emsDetailRows, setEmsDetailRows] = useState<EmsReportSummaryRow[]>([]);
   const [emsTrends, setEmsTrends] = useState<EmsTrendRow[]>([]);
-  const [trendBucket, setTrendBucket] = useState<EmsTrendBucket>('weekly');
-  const [groupBy, setGroupBy] = useState<EmsReportGroupBy>('fda');
+  const [trendBucket, setTrendBucket] = useState<EmsTrendBucket>(() => initialEmsFilters.trendBucket);
+  const [groupBy, setGroupBy] = useState<EmsReportGroupBy>(() => initialEmsFilters.groupBy);
   const [isLoadingEmsDetail, setIsLoadingEmsDetail] = useState(false);
   const [isLoadingEmsTrends, setIsLoadingEmsTrends] = useState(false);
   const [filterOptions, setFilterOptions] = useState<{
@@ -191,21 +257,20 @@ const ActivityEmsProgressView: React.FC = () => {
   const [showEmsReportModal, setShowEmsReportModal] = useState(false);
   const [emsReportGroupBy, setEmsReportGroupBy] = useState<EmsReportGroupBy>('fda');
   const [emsReportLevel, setEmsReportLevel] = useState<'summary' | 'line'>('summary');
-  const [showFilters, setShowFilters] = useState(false);
-  const defaultRange = getDefaultDateRange();
-  const [filters, setFilters] = useState<EmsProgressFilters>({
-    dateFrom: defaultRange.dateFrom,
-    dateTo: defaultRange.dateTo,
-    state: '',
-    territory: '',
-    zone: '',
-    bu: '',
-    activityType: '',
-  });
+  const [showFilters, setShowFilters] = useState(() => initialEmsFilters.showFilters);
+  const [filters, setFilters] = useState<EmsProgressFilters>(() => ({
+    dateFrom: initialEmsFilters.dateFrom,
+    dateTo: initialEmsFilters.dateTo,
+    state: initialEmsFilters.state,
+    territory: initialEmsFilters.territory,
+    zone: initialEmsFilters.zone,
+    bu: initialEmsFilters.bu,
+    activityType: initialEmsFilters.activityType,
+  }));
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 30 days');
-  const [draftStart, setDraftStart] = useState(defaultRange.dateFrom);
-  const [draftEnd, setDraftEnd] = useState(defaultRange.dateTo);
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>(() => initialEmsFilters.selectedPreset);
+  const [draftStart, setDraftStart] = useState(() => initialEmsFilters.dateFrom);
+  const [draftEnd, setDraftEnd] = useState(() => initialEmsFilters.dateTo);
   const datePickerRef = useRef<HTMLDivElement | null>(null);
   const [drillDownGroupKey, setDrillDownGroupKey] = useState<string | null>(null);
   const [drillDownLabel, setDrillDownLabel] = useState<string>('');
@@ -214,8 +279,7 @@ const ActivityEmsProgressView: React.FC = () => {
   const [tableSortKey, setTableSortKey] = useState<string>('');
   const [tableSortDir, setTableSortDir] = useState<'asc' | 'desc'>('asc');
   const [tableFilterText, setTableFilterText] = useState<string>('');
-  type FilterDimensionKey = keyof Pick<EmsProgressFilters, 'state' | 'territory' | 'zone' | 'bu' | 'activityType'>;
-  const [filterDimension, setFilterDimension] = useState<FilterDimensionKey | 'region'>('state');
+  const [filterDimension, setFilterDimension] = useState<FilterDimensionKey>(() => initialEmsFilters.filterDimension);
   const [kpiTooltipOpen, setKpiTooltipOpen] = useState<string | null>(null);
   const kpiTooltipRef = useRef<HTMLDivElement | null>(null);
 
@@ -274,6 +338,17 @@ const ActivityEmsProgressView: React.FC = () => {
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [isDatePickerOpen]);
+
+  useEffect(() => {
+    saveJsonStorage(EMS_PROGRESS_FILTERS_KEY, {
+      ...filters,
+      selectedPreset,
+      showFilters,
+      filterDimension,
+      groupBy,
+      trendBucket,
+    });
+  }, [filters, selectedPreset, showFilters, filterDimension, groupBy, trendBucket]);
 
   const fetchOptions = useCallback(async () => {
     setIsLoadingOptions(true);

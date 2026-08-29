@@ -18,9 +18,44 @@ const LANGUAGE_FALLBACK_ORDER = ['Unknown'] as const;
 const TASK_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const TASK_PAGE_SIZE_DEFAULT = 20;
 
-/** Shared row-action button sizing (Reallocate / Cancel Queue). */
+/** Shared row-action button sizing (Reallocate / Cancel Queue), stacked vertically in workload table. */
 const ROW_ACTION_BTN =
-  'inline-flex items-center justify-center min-w-[92px] h-8 px-3 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap';
+  'inline-flex items-center justify-center w-full h-7 px-1.5 text-[10px] font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+
+/** Two-line table headers save horizontal space on dense workload tables. */
+function WorkloadSortHeader({
+  lines,
+  isSorted,
+  sortDir,
+  onClick,
+}: {
+  lines: string[];
+  isSorted: boolean;
+  sortDir: 'asc' | 'desc';
+  onClick: () => void;
+}) {
+  return (
+    <th
+      className="px-1.5 py-1.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wide select-none cursor-pointer hover:bg-slate-100 align-bottom"
+      onClick={onClick}
+      title="Click to sort"
+    >
+      <div className="flex items-end gap-0.5 min-w-0">
+        <span className="leading-tight">
+          {lines.map((line) => (
+            <span key={line} className="block">{line}</span>
+          ))}
+        </span>
+        {isSorted &&
+          (sortDir === 'asc' ? (
+            <ChevronUp size={12} className="shrink-0 self-end" />
+          ) : (
+            <ChevronDown size={12} className="shrink-0 self-end" />
+          ))}
+      </div>
+    </th>
+  );
+}
 
 interface AgentQueueDetailForTL {
   agent: {
@@ -1662,45 +1697,38 @@ const TaskDashboardView: React.FC = () => {
           <table className="table-fixed w-full text-sm">
             <colgroup>
               <col style={{ width: '14%' }} />
+              <col style={{ width: '8%' }} />
               <col style={{ width: '9%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '12%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '11%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
               <col style={{ width: '9%' }} />
-              <col style={{ width: '15%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '9%' }} />
             </colgroup>
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 {(
                   [
-                    { key: 'language' as LanguageTableSortKey, label: 'Language' },
-                    { key: 'total' as LanguageTableSortKey, label: 'Total' },
-                    { key: 'unassigned' as LanguageTableSortKey, label: 'Unassigned' },
-                    { key: 'sampledInQueue' as LanguageTableSortKey, label: 'Sampled-in-queue' },
-                    { key: 'inProgress' as LanguageTableSortKey, label: 'In-progress' },
-                    { key: 'completed' as LanguageTableSortKey, label: 'Completed' },
-                    { key: 'notReachable' as LanguageTableSortKey, label: 'Not reachable' },
-                    { key: 'invalidNumber' as LanguageTableSortKey, label: 'Invalid' },
-                    { key: 'cancelled' as LanguageTableSortKey, label: 'Cancelled' },
-                  ] as Array<{ key: LanguageTableSortKey; label: string }>
-                ).map((col) => {
-                  const isSorted = languageTableSort.key === col.key;
-                  return (
-                    <th
-                      key={col.key}
-                      className="px-2 py-2 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-widest select-none cursor-pointer hover:bg-slate-100"
-                      onClick={() => handleLanguageHeaderClick(col.key)}
-                      title="Click to sort"
-                    >
-                      <div className="flex items-center gap-1 truncate">
-                        <span className="truncate">{col.label}</span>
-                        {isSorted && (languageTableSort.dir === 'asc' ? <ChevronUp size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />)}
-                      </div>
-                    </th>
-                  );
-                })}
+                    { key: 'language' as LanguageTableSortKey, lines: ['Language'] },
+                    { key: 'total' as LanguageTableSortKey, lines: ['Total'] },
+                    { key: 'unassigned' as LanguageTableSortKey, lines: ['Unassigned'] },
+                    { key: 'sampledInQueue' as LanguageTableSortKey, lines: ['Sampled-in', 'queue'] },
+                    { key: 'inProgress' as LanguageTableSortKey, lines: ['In', 'progress'] },
+                    { key: 'completed' as LanguageTableSortKey, lines: ['Completed'] },
+                    { key: 'notReachable' as LanguageTableSortKey, lines: ['Not', 'reachable'] },
+                    { key: 'invalidNumber' as LanguageTableSortKey, lines: ['Invalid'] },
+                    { key: 'cancelled' as LanguageTableSortKey, lines: ['Cancelled'] },
+                  ] as Array<{ key: LanguageTableSortKey; lines: string[] }>
+                ).map((col) => (
+                  <WorkloadSortHeader
+                    key={col.key}
+                    lines={col.lines}
+                    isSorted={languageTableSort.key === col.key}
+                    sortDir={languageTableSort.dir}
+                    onClick={() => handleLanguageHeaderClick(col.key)}
+                  />
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1745,50 +1773,43 @@ const TaskDashboardView: React.FC = () => {
         <div className="mt-4 overflow-hidden border border-slate-200 rounded-2xl">
           <table className="table-fixed w-full text-sm">
             <colgroup>
-              <col style={{ width: '15%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '10%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '7%' }} />
               <col style={{ width: '9%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '9%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
               <col style={{ width: '7%' }} />
               <col style={{ width: '8%' }} />
               <col style={{ width: '6%' }} />
-              <col style={{ width: '12%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '5%' }} />
+              <col style={{ width: '10%' }} />
             </colgroup>
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 {(
                   [
-                    { key: 'agent' as AgentTableSortKey, label: 'Agent' },
-                    { key: 'employeeId' as AgentTableSortKey, label: 'Employee ID' },
-                    { key: 'languages' as AgentTableSortKey, label: 'Languages' },
-                    { key: 'sampledInQueue' as AgentTableSortKey, label: 'Sampled-in-queue' },
-                    { key: 'inProgress' as AgentTableSortKey, label: 'In-progress' },
-                    { key: 'completed' as AgentTableSortKey, label: 'Completed' },
-                    { key: 'notReachable' as AgentTableSortKey, label: 'Not reachable' },
-                    { key: 'invalidNumber' as AgentTableSortKey, label: 'Invalid' },
-                    { key: 'cancelled' as AgentTableSortKey, label: 'Cancelled' },
-                    { key: 'totalOpen' as AgentTableSortKey, label: 'Total' },
-                  ] as Array<{ key: AgentTableSortKey; label: string }>
-                ).map((col) => {
-                  const isSorted = agentTableSort.key === col.key;
-                  return (
-                    <th
-                      key={col.key}
-                      className="px-2 py-2 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-widest select-none cursor-pointer hover:bg-slate-100"
-                      onClick={() => handleAgentHeaderClick(col.key)}
-                      title="Click to sort"
-                    >
-                      <div className="flex items-center gap-1 truncate">
-                        <span className="truncate">{col.label}</span>
-                        {isSorted && (agentTableSort.dir === 'asc' ? <ChevronUp size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />)}
-                      </div>
-                    </th>
-                  );
-                })}
-                <th className="px-2 py-2 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Action</th>
+                    { key: 'agent' as AgentTableSortKey, lines: ['Agent'] },
+                    { key: 'employeeId' as AgentTableSortKey, lines: ['Employee', 'ID'] },
+                    { key: 'languages' as AgentTableSortKey, lines: ['Languages'] },
+                    { key: 'sampledInQueue' as AgentTableSortKey, lines: ['Sampled-in', 'queue'] },
+                    { key: 'inProgress' as AgentTableSortKey, lines: ['In', 'progress'] },
+                    { key: 'completed' as AgentTableSortKey, lines: ['Completed'] },
+                    { key: 'notReachable' as AgentTableSortKey, lines: ['Not', 'reachable'] },
+                    { key: 'invalidNumber' as AgentTableSortKey, lines: ['Invalid'] },
+                    { key: 'cancelled' as AgentTableSortKey, lines: ['Cancelled'] },
+                    { key: 'totalOpen' as AgentTableSortKey, lines: ['Total'] },
+                  ] as Array<{ key: AgentTableSortKey; lines: string[] }>
+                ).map((col) => (
+                  <WorkloadSortHeader
+                    key={col.key}
+                    lines={col.lines}
+                    isSorted={agentTableSort.key === col.key}
+                    sortDir={agentTableSort.dir}
+                    onClick={() => handleAgentHeaderClick(col.key)}
+                  />
+                ))}
+                <th className="px-1.5 py-1.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wide align-bottom">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1837,14 +1858,14 @@ const TaskDashboardView: React.FC = () => {
                   <td className="px-2 py-2 font-bold text-slate-700">{a.invalidNumber ?? 0}</td>
                   <td className="px-2 py-2 font-bold text-slate-700">{a.cancelled ?? 0}</td>
                   <td className="px-2 py-2 font-black text-slate-900">{a.totalOpen ?? 0}</td>
-                  <td className="px-2 py-2">
+                  <td className="px-1.5 py-2 align-top">
                     {Number(a.sampledInQueue || 0) > 0 ? (
-                      <div className="flex items-stretch gap-1">
+                      <div className="flex flex-col gap-1 w-full min-w-0">
                         <button
                           type="button"
                           onClick={() => setReallocateAgent({ agentId: a.agentId, name: a.name, sampledInQueue: a.sampledInQueue })}
                           disabled={isReallocating || isAllocRunning}
-                          className={`${ROW_ACTION_BTN} flex-1 min-w-0 px-2 text-white bg-blue-600 hover:bg-blue-700`}
+                          className={`${ROW_ACTION_BTN} text-white bg-blue-600 hover:bg-blue-700`}
                         >
                           Reallocate
                         </button>
@@ -1852,7 +1873,7 @@ const TaskDashboardView: React.FC = () => {
                           type="button"
                           onClick={() => setCancelAgent({ agentId: a.agentId, name: a.name, sampledInQueue: a.sampledInQueue })}
                           disabled={isReallocating || isAllocRunning}
-                          className={`${ROW_ACTION_BTN} flex-1 min-w-0 px-2 text-white bg-red-600 hover:bg-red-700`}
+                          className={`${ROW_ACTION_BTN} text-white bg-red-600 hover:bg-red-700`}
                         >
                           Cancel Queue
                         </button>

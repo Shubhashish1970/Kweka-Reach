@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Phone, PhoneCall, MapPin, Loader2, Search, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { tasksAPI } from '../services/api';
 import { formatDateIST } from '../utils/dateRangeUtils';
@@ -40,25 +40,69 @@ interface TaskSelectionModalProps {
   onSelectTask: (task: Task) => void;
 }
 
+type DialerFilterTab = 'in_progress' | 'sampled_in_queue' | 'completed';
+type DialerFilterBy = '' | 'territory' | 'tm' | 'fda';
+
+const DIALER_FILTERS_STORAGE_KEY = 'agent.dialer.filters';
+const DIALER_FILTER_TABS: DialerFilterTab[] = ['in_progress', 'sampled_in_queue', 'completed'];
+const DIALER_FILTER_BY_VALUES: DialerFilterBy[] = ['', 'territory', 'tm', 'fda'];
+
+type SavedDialerFilters = {
+  filter: DialerFilterTab;
+  filterBy: DialerFilterBy;
+  filterValues: string[];
+  searchQuery: string;
+};
+
+function loadSavedDialerFilters(): SavedDialerFilters | null {
+  try {
+    const raw = localStorage.getItem(DIALER_FILTERS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const filter = (DIALER_FILTER_TABS as readonly string[]).includes(parsed?.filter)
+      ? (parsed.filter as DialerFilterTab)
+      : null;
+    if (!filter) return null;
+    const filterBy = (DIALER_FILTER_BY_VALUES as readonly string[]).includes(parsed?.filterBy)
+      ? (parsed.filterBy as DialerFilterBy)
+      : '';
+    const filterValues = Array.isArray(parsed?.filterValues)
+      ? parsed.filterValues.filter((v: unknown) => typeof v === 'string')
+      : [];
+    const searchQuery = typeof parsed?.searchQuery === 'string' ? parsed.searchQuery : '';
+    return { filter, filterBy, filterValues, searchQuery };
+  } catch {
+    return null;
+  }
+}
+
 const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose, onSelectTask }) => {
+  const savedDialerFilters = useMemo(() => loadSavedDialerFilters(), []);
+  const hasSavedDialerFiltersRef = useRef(savedDialerFilters !== null);
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isLoadingTask, setIsLoadingTask] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'in_progress' | 'sampled_in_queue' | 'completed'>('sampled_in_queue');
-  const [filterBy, setFilterBy] = useState<'' | 'territory' | 'tm' | 'fda'>('');
-  const [filterValues, setFilterValues] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState(() => savedDialerFilters?.searchQuery ?? '');
+  const [filter, setFilter] = useState<DialerFilterTab>(() => savedDialerFilters?.filter ?? 'sampled_in_queue');
+  const [filterBy, setFilterBy] = useState<DialerFilterBy>(() => savedDialerFilters?.filterBy ?? '');
+  const [filterValues, setFilterValues] = useState<string[]>(() => savedDialerFilters?.filterValues ?? []);
 
   useEffect(() => {
     if (isOpen) {
       fetchAvailableTasks();
-      setSearchQuery('');
-      setFilterBy('');
-      setFilterValues([]);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      DIALER_FILTERS_STORAGE_KEY,
+      JSON.stringify({ filter, filterBy, filterValues, searchQuery })
+    );
+    hasSavedDialerFiltersRef.current = true;
+  }, [filter, filterBy, filterValues, searchQuery]);
 
   const fetchAvailableTasks = async () => {
     setIsLoading(true);
@@ -68,8 +112,10 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
       if (response.success && response.data) {
         const list = response.data.tasks || [];
         setTasks(list);
-        const inProgress = list.filter((t) => t.status === 'in_progress').length;
-        setFilter(inProgress === 0 ? 'sampled_in_queue' : 'in_progress');
+        if (!hasSavedDialerFiltersRef.current) {
+          const inProgress = list.filter((t) => t.status === 'in_progress').length;
+          setFilter(inProgress === 0 ? 'sampled_in_queue' : 'in_progress');
+        }
       } else {
         setError('Failed to load tasks');
       }

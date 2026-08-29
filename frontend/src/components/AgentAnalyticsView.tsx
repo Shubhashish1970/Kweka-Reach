@@ -26,18 +26,70 @@ const formatPeriod = (period: string, bucket: Bucket) => {
 
 const formatPeriodTable = (period: string) => formatDateIST(period) || period;
 
+const ANALYTICS_FILTERS_STORAGE_KEY = 'agent.analytics.filters';
+const DATE_RANGE_PRESETS: DateRangePreset[] = [
+  'Custom',
+  'Today',
+  'Yesterday',
+  'This week (Sun - Today)',
+  'Last 7 days',
+  'Last week (Sun - Sat)',
+  'Last 14 days',
+  'Last 28 days',
+  'Last 30 days',
+  'Last 90 days',
+  'YTD',
+];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+type SavedAnalyticsFilters = {
+  dateFrom: string;
+  dateTo: string;
+  selectedPreset: DateRangePreset;
+  showDetailTable: boolean;
+};
+
+function loadSavedAnalyticsFilters(): SavedAnalyticsFilters {
+  const fallback = getPresetRange('Last 7 days');
+  const defaults: SavedAnalyticsFilters = {
+    dateFrom: fallback.start,
+    dateTo: fallback.end,
+    selectedPreset: 'Last 7 days',
+    showDetailTable: true,
+  };
+  try {
+    const raw = localStorage.getItem(ANALYTICS_FILTERS_STORAGE_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    const dateFrom = ISO_DATE.test(parsed?.dateFrom || '') ? parsed.dateFrom : defaults.dateFrom;
+    const dateTo = ISO_DATE.test(parsed?.dateTo || '') ? parsed.dateTo : defaults.dateTo;
+    const selectedPreset = (DATE_RANGE_PRESETS as readonly string[]).includes(parsed?.selectedPreset)
+      ? (parsed.selectedPreset as DateRangePreset)
+      : defaults.selectedPreset;
+    const showDetailTable =
+      typeof parsed?.showDetailTable === 'boolean' ? parsed.showDetailTable : defaults.showDetailTable;
+    return { dateFrom, dateTo, selectedPreset, showDetailTable };
+  } catch {
+    return defaults;
+  }
+}
+
 const AgentAnalyticsView: React.FC = () => {
   const toast = useToast();
+  const initialAnalyticsFilters = useMemo(() => loadSavedAnalyticsFilters(), []);
   const [isLoading, setIsLoading] = useState(false);
   const [data, setData] = useState<any>(null);
-  const [showDetailTable, setShowDetailTable] = useState(true);
+  const [showDetailTable, setShowDetailTable] = useState(() => initialAnalyticsFilters.showDetailTable);
 
-  const [filters, setFilters] = useState<{ dateFrom: string; dateTo: string }>({ dateFrom: '', dateTo: '' });
+  const [filters, setFilters] = useState<{ dateFrom: string; dateTo: string }>(() => ({
+    dateFrom: initialAnalyticsFilters.dateFrom,
+    dateTo: initialAnalyticsFilters.dateTo,
+  }));
 
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 7 days');
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>(() => initialAnalyticsFilters.selectedPreset);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [draftStart, setDraftStart] = useState('');
-  const [draftEnd, setDraftEnd] = useState('');
+  const [draftStart, setDraftStart] = useState(() => initialAnalyticsFilters.dateFrom);
+  const [draftEnd, setDraftEnd] = useState(() => initialAnalyticsFilters.dateTo);
   const datePickerRef = useRef<HTMLDivElement | null>(null);
 
   const getRange = (preset: DateRangePreset) =>
@@ -47,13 +99,16 @@ const AgentAnalyticsView: React.FC = () => {
   const bucket: Bucket = 'daily';
 
   useEffect(() => {
-    if (filters.dateFrom || filters.dateTo) return;
-    const r = getRange('Last 7 days');
-    setFilters({ dateFrom: r.start, dateTo: r.end });
-    setDraftStart(r.start);
-    setDraftEnd(r.end);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    localStorage.setItem(
+      ANALYTICS_FILTERS_STORAGE_KEY,
+      JSON.stringify({
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        selectedPreset,
+        showDetailTable,
+      })
+    );
+  }, [filters.dateFrom, filters.dateTo, selectedPreset, showDetailTable]);
 
   useEffect(() => {
     if (!isDatePickerOpen) return;

@@ -53,16 +53,80 @@ const safeArr = (v: any) => (Array.isArray(v) ? v : v ? [v] : []);
 
 const formatDateTime = (d: unknown) => formatDateTimeIST(d as string);
 
+const HISTORY_FILTERS_STORAGE_KEY = 'agent.history.filters';
+const HISTORY_STATUS_VALUES: HistoryStatus[] = ['', 'in_progress', 'completed', 'not_reachable', 'invalid_number'];
+const DATE_RANGE_PRESETS: DateRangePreset[] = [
+  'Custom',
+  'Today',
+  'Yesterday',
+  'This week (Sun - Today)',
+  'Last 7 days',
+  'Last week (Sun - Sat)',
+  'Last 14 days',
+  'Last 28 days',
+  'Last 30 days',
+  'Last 90 days',
+  'YTD',
+];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+type HistoryFiltersState = {
+  status: HistoryStatus;
+  territory: string;
+  activityType: string;
+  search: string;
+  dateFrom: string;
+  dateTo: string;
+};
+
+type SavedHistoryFilters = HistoryFiltersState & {
+  selectedPreset: DateRangePreset;
+  showFilters: boolean;
+};
+
+function loadSavedHistoryFilters(): SavedHistoryFilters {
+  const fallback = getPresetRange('Last 7 days');
+  const defaults: SavedHistoryFilters = {
+    status: '',
+    territory: '',
+    activityType: '',
+    search: '',
+    dateFrom: fallback.start,
+    dateTo: fallback.end,
+    selectedPreset: 'Last 7 days',
+    showFilters: false,
+  };
+  try {
+    const raw = localStorage.getItem(HISTORY_FILTERS_STORAGE_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    const status = (HISTORY_STATUS_VALUES as readonly string[]).includes(parsed?.status)
+      ? (parsed.status as HistoryStatus)
+      : defaults.status;
+    const territory = typeof parsed?.territory === 'string' ? parsed.territory : defaults.territory;
+    const activityType = typeof parsed?.activityType === 'string' ? parsed.activityType : defaults.activityType;
+    const search = typeof parsed?.search === 'string' ? parsed.search : defaults.search;
+    const dateFrom = ISO_DATE.test(parsed?.dateFrom || '') ? parsed.dateFrom : defaults.dateFrom;
+    const dateTo = ISO_DATE.test(parsed?.dateTo || '') ? parsed.dateTo : defaults.dateTo;
+    const selectedPreset = (DATE_RANGE_PRESETS as readonly string[]).includes(parsed?.selectedPreset)
+      ? (parsed.selectedPreset as DateRangePreset)
+      : defaults.selectedPreset;
+    const showFilters = typeof parsed?.showFilters === 'boolean' ? parsed.showFilters : defaults.showFilters;
+    return { status, territory, activityType, search, dateFrom, dateTo, selectedPreset, showFilters };
+  } catch {
+    return defaults;
+  }
+}
+
 const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promise<void> }> = ({ onOpenTask }) => {
   const toast = useToast();
-  // Initialize default date range once to avoid race condition
-  const defaultDateRange = getPresetRange('Last 7 days');
-  
+  const initialHistoryFilters = useMemo(() => loadSavedHistoryFilters(), []);
+
   const [isLoading, setIsLoading] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
   const [pagination, setPagination] = useState<any>(null);
   const [isExporting, setIsExporting] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(() => initialHistoryFilters.showFilters);
   const [pageSize, setPageSize] = useState<number>(() => {
     const raw = localStorage.getItem('agent.history.pageSize');
     const n = raw ? Number(raw) : NaN;
@@ -90,22 +154,14 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
   });
   const resizingRef = useRef<{ key: HistoryColumnKey; startX: number; startWidth: number } | null>(null);
 
-  // Initialize filters with default date range to avoid race condition
-  const [filters, setFilters] = useState<{
-    status: HistoryStatus;
-    territory: string;
-    activityType: string;
-    search: string;
-    dateFrom: string;
-    dateTo: string;
-  }>({
-    status: '',
-    territory: '',
-    activityType: '',
-    search: '',
-    dateFrom: defaultDateRange.start,
-    dateTo: defaultDateRange.end,
-  });
+  const [filters, setFilters] = useState<HistoryFiltersState>(() => ({
+    status: initialHistoryFilters.status,
+    territory: initialHistoryFilters.territory,
+    activityType: initialHistoryFilters.activityType,
+    search: initialHistoryFilters.search,
+    dateFrom: initialHistoryFilters.dateFrom,
+    dateTo: initialHistoryFilters.dateTo,
+  }));
 
   const [filterOptions, setFilterOptions] = useState<{ territoryOptions: string[]; activityTypeOptions: string[] }>({
     territoryOptions: [],
@@ -119,10 +175,10 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [openingTaskId, setOpeningTaskId] = useState<string | null>(null);
 
-  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>('Last 7 days');
+  const [selectedPreset, setSelectedPreset] = useState<DateRangePreset>(() => initialHistoryFilters.selectedPreset);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [draftStart, setDraftStart] = useState(defaultDateRange.start);
-  const [draftEnd, setDraftEnd] = useState(defaultDateRange.end);
+  const [draftStart, setDraftStart] = useState(() => initialHistoryFilters.dateFrom);
+  const [draftEnd, setDraftEnd] = useState(() => initialHistoryFilters.dateTo);
   const datePickerRef = useRef<HTMLDivElement | null>(null);
 
   const getRange = (preset: DateRangePreset) =>
@@ -200,6 +256,22 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
   useEffect(() => {
     localStorage.setItem('agent.history.colWidths', JSON.stringify(colWidths));
   }, [colWidths]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      HISTORY_FILTERS_STORAGE_KEY,
+      JSON.stringify({
+        status: filters.status,
+        territory: filters.territory,
+        activityType: filters.activityType,
+        search: filters.search,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        selectedPreset,
+        showFilters,
+      })
+    );
+  }, [filters, selectedPreset, showFilters]);
 
   const handleResizeStart = (key: HistoryColumnKey, startX: number) => {
     resizingRef.current = { key, startX, startWidth: colWidths[key] };

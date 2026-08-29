@@ -78,7 +78,15 @@ const AgentWorkspace: React.FC = () => {
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'details' | 'flow' | 'ai'>('flow');
-  const [activeSection, setActiveSection] = useState<'dialer' | 'history' | 'analytics'>('dialer');
+  const [activeSection, setActiveSection] = useState<'dialer' | 'history' | 'analytics'>(() => {
+    const saved = localStorage.getItem('agent.workspace.activeSection');
+    if (saved === 'dialer' || saved === 'history' || saved === 'analytics') return saved;
+    return 'dialer';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('agent.workspace.activeSection', activeSection);
+  }, [activeSection]);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showTaskSelectionModal, setShowTaskSelectionModal] = useState(false);
   const [isAIPanelExpanded, setIsAIPanelExpanded] = useState(false);

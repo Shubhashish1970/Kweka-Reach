@@ -163,17 +163,34 @@ function buildFirstSampleRunQuery(rangeStart: Date, rangeEnd: Date, lifecycleSta
   };
 }
 
-/** Count of activities eligible for a later run (auto range, respecting sample-from floor). */
-async function getLaterRunEligibleCount(userId: mongoose.Types.ObjectId): Promise<{ count: number; range: { dateFrom: Date; dateTo: Date } | null }> {
+/** Count of activities eligible for a later run.
+ * Suggested start = Sample-from if set, else last first-sample dateTo (cursor).
+ * Caller may override dates on the run request.
+ */
+async function getLaterRunEligibleCount(userId: mongoose.Types.ObjectId): Promise<{
+  count: number;
+  range: { dateFrom: Date; dateTo: Date } | null;
+  lastRunCursor: Date | null;
+  sampleFrom: Date | null;
+}> {
   const autoRange = await getFirstSampleAutoRange(userId);
-  if (!autoRange) return { count: 0, range: null };
-  const floor = await loadSampleFromFloor();
-  const dateFrom = applySampleFromFloor(autoRange.dateFrom, floor);
-  if (dateFrom > autoRange.dateTo) return { count: 0, range: { dateFrom, dateTo: autoRange.dateTo } };
-  const range = { dateFrom, dateTo: autoRange.dateTo };
+  if (!autoRange) return { count: 0, range: null, lastRunCursor: null, sampleFrom: null };
+  const sampleFrom = await loadSampleFromFloor();
+  const dateFrom = sampleFrom ? new Date(sampleFrom) : new Date(autoRange.dateFrom);
+  dateFrom.setHours(0, 0, 0, 0);
+  const dateTo = autoRange.dateTo;
+  if (dateFrom > dateTo) {
+    return {
+      count: 0,
+      range: { dateFrom, dateTo },
+      lastRunCursor: autoRange.dateFrom,
+      sampleFrom,
+    };
+  }
+  const range = { dateFrom, dateTo };
   const q = buildFirstSampleRunQuery(range.dateFrom, range.dateTo);
   const count = await Activity.countDocuments(q);
-  return { count, range };
+  return { count, range, lastRunCursor: autoRange.dateFrom, sampleFrom };
 }
 
 /** Group activities by MDO (officerId); allocate proportional target sample size per MDO. Every MDO gets at least 1 (mandatory representation). */
@@ -906,19 +923,29 @@ router.get(
       }
 
       const lifecycleStatus = ((req.query.lifecycleStatus as string) || 'active') as string;
-      const floor = await loadSampleFromFloor();
-      const before = await countEligibleBeforeSampleFrom(floor, lifecycleStatus);
-
-      let inRangeCount = 0;
-      let effectiveDateFrom: string | null = floor ? toLocalISODate(floor) : null;
-      let effectiveDateTo: string | null = null;
-
       const dateFromQ = req.query.dateFrom as string | undefined;
       const dateToQ = req.query.dateTo as string | undefined;
+
+      // Warn relative to the chosen run start (or saved Sample-from if no override)
+      const savedFloor = await loadSampleFromFloor();
+      let chosenStart: Date | null = null;
+      if (dateFromQ) {
+        chosenStart = new Date(dateFromQ);
+        chosenStart.setHours(0, 0, 0, 0);
+      } else if (savedFloor) {
+        chosenStart = new Date(savedFloor);
+      }
+      const before = await countEligibleBeforeSampleFrom(chosenStart, lifecycleStatus);
+
+      let inRangeCount = 0;
+      let effectiveDateFrom: string | null = chosenStart ? toLocalISODate(chosenStart) : null;
+      let effectiveDateTo: string | null = null;
+
       if (dateFromQ && dateToQ) {
-        let start = new Date(dateFromQ);
+        const start = new Date(dateFromQ);
+        start.setHours(0, 0, 0, 0);
         const end = new Date(dateToQ);
-        start = applySampleFromFloor(start, floor);
+        end.setHours(23, 59, 59, 999);
         effectiveDateFrom = toLocalISODate(start);
         effectiveDateTo = toLocalISODate(end);
         if (start <= end) {
@@ -932,19 +959,20 @@ router.get(
               : buildFirstSampleRunQuery(start, end, lifecycleStatus);
           inRangeCount = await Activity.countDocuments(q);
         }
-      } else if (floor) {
+      } else if (chosenStart) {
         const end = new Date();
         end.setHours(23, 59, 59, 999);
         effectiveDateTo = toLocalISODate(end);
         inRangeCount = await Activity.countDocuments(
-          buildFirstSampleRunQuery(floor, end, lifecycleStatus)
+          buildFirstSampleRunQuery(chosenStart, end, lifecycleStatus)
         );
       }
 
       res.json({
         success: true,
         data: {
-          sampleFrom: floor ? toLocalISODate(floor) : null,
+          sampleFrom: savedFloor ? toLocalISODate(savedFloor) : null,
+          chosenStart: chosenStart ? toLocalISODate(chosenStart) : null,
           beforeCutoffCount: before.beforeCount,
           oldestBefore: before.oldestBefore,
           inRangeCount,
@@ -973,7 +1001,7 @@ router.get(
       const floor = await loadSampleFromFloor();
       const laterRun = await getLaterRunEligibleCount(authUserId);
       if (laterRun.range) {
-        const before = await countEligibleBeforeSampleFrom(floor);
+        const before = await countEligibleBeforeSampleFrom(laterRun.range.dateFrom);
         return res.json({
           success: true,
           data: {
@@ -981,25 +1009,31 @@ router.get(
             dateFrom: toLocalISODate(laterRun.range.dateFrom),
             dateTo: toLocalISODate(laterRun.range.dateTo),
             matchedCount: laterRun.count,
-            sampleFrom: floor ? toLocalISODate(floor) : null,
+            lastRunCursor: laterRun.lastRunCursor ? toLocalISODate(laterRun.lastRunCursor) : null,
+            sampleFrom: laterRun.sampleFrom ? toLocalISODate(laterRun.sampleFrom) : null,
             beforeCutoffCount: before.beforeCount,
             oldestBefore: before.oldestBefore,
           },
         });
       }
       const suggested = await getFirstSampleSuggestedRange();
-      const dateFrom = applySampleFromFloor(suggested.dateFrom, floor);
+      // Prefer Sample-from as suggested start when set; else earliest eligible
+      const dateFrom = floor ? applySampleFromFloor(suggested.dateFrom, floor) : suggested.dateFrom;
+      // If Sample-from is earlier than earliest activity, still allow starting at Sample-from
+      const start = floor && floor < suggested.dateFrom ? new Date(floor) : dateFrom;
+      start.setHours(0, 0, 0, 0);
       const dateTo = suggested.dateTo;
-      const qSuggested = buildFirstSampleRunQuery(dateFrom, dateTo);
+      const qSuggested = buildFirstSampleRunQuery(start, dateTo);
       const matchedCount = await Activity.countDocuments(qSuggested);
-      const before = await countEligibleBeforeSampleFrom(floor);
+      const before = await countEligibleBeforeSampleFrom(start);
       return res.json({
         success: true,
         data: {
           isFirstRun: true,
-          dateFrom: toLocalISODate(dateFrom),
+          dateFrom: toLocalISODate(start),
           dateTo: toLocalISODate(dateTo),
           matchedCount,
+          lastRunCursor: null,
           sampleFrom: floor ? toLocalISODate(floor) : null,
           beforeCutoffCount: before.beforeCount,
           oldestBefore: before.oldestBefore,
@@ -1079,21 +1113,19 @@ router.post(
       if (alreadyRunning) {
         return res.json({ success: true, ran: false, reason: 'run_already_in_progress' });
       }
-      // Pass resolved range so run handler applies sample-from floor consistently
+      // Pass suggested range (Sample-from if set, else last-run cursor → today)
       req.body = {
         runType: 'first_sample',
         trigger: 'scheduled',
         dateFrom: toLocalISODate(range.dateFrom),
         dateTo: toLocalISODate(range.dateTo),
       };
-      if (sampleFrom) {
-        logger.info('[auto-run] Using sample-from floor', {
-          sampleFrom: sampleFromDisplay,
-          dateFrom: req.body.dateFrom,
-          dateTo: req.body.dateTo,
-          unsampledCount: count,
-        });
-      }
+      logger.info('[auto-run] Starting later run', {
+        sampleFrom: sampleFromDisplay || null,
+        dateFrom: req.body.dateFrom,
+        dateTo: req.body.dateTo,
+        unsampledCount: count,
+      });
       return runSamplingHandler(req, res, next);
     } catch (error) {
       next(error);
@@ -1141,28 +1173,32 @@ async function runSamplingHandler(req: Request, res: Response, next: NextFunctio
         ids = activityIds;
         matchedCount = activityIds.length;
       } else if (effectiveRunType === 'first_sample') {
-        const floor = await loadSampleFromFloor();
-        const autoRange = await getFirstSampleAutoRange(authUserObjId);
         let rangeStart: Date;
         let rangeEnd: Date;
         if (dateFrom && dateTo) {
+          // Explicit window from UI / auto-run — respect user's chosen start
           rangeStart = new Date(dateFrom);
+          rangeStart.setHours(0, 0, 0, 0);
           rangeEnd = new Date(dateTo);
-        } else if (autoRange) {
-          rangeStart = autoRange.dateFrom;
-          rangeEnd = autoRange.dateTo;
+          rangeEnd.setHours(23, 59, 59, 999);
         } else {
-          const suggested = await getFirstSampleSuggestedRange();
-          rangeStart = suggested.dateFrom;
-          rangeEnd = suggested.dateTo;
+          const later = await getLaterRunEligibleCount(authUserObjId);
+          if (later.range) {
+            rangeStart = later.range.dateFrom;
+            rangeEnd = later.range.dateTo;
+          } else {
+            const suggested = await getFirstSampleSuggestedRange();
+            const floor = await loadSampleFromFloor();
+            rangeStart = floor && floor < suggested.dateFrom ? new Date(floor) : suggested.dateFrom;
+            rangeStart.setHours(0, 0, 0, 0);
+            rangeEnd = suggested.dateTo;
+          }
         }
-        rangeStart = applySampleFromFloor(rangeStart, floor);
         if (rangeStart > rangeEnd) {
           return res.status(400).json({
             success: false,
             error: {
-              message:
-                'Sample-from date is after the end of the sampling range. Adjust Sample activities from or the date range.',
+              message: 'Start date is after end date. Adjust the sampling date range.',
             },
           });
         }
@@ -1184,16 +1220,15 @@ async function runSamplingHandler(req: Request, res: Response, next: NextFunctio
             error: { message: 'Ad-hoc run requires dateFrom and dateTo' },
           });
         }
-        const floor = await loadSampleFromFloor();
-        let rangeStart = new Date(dateFrom);
+        const rangeStart = new Date(dateFrom);
+        rangeStart.setHours(0, 0, 0, 0);
         const rangeEnd = new Date(dateTo);
-        rangeStart = applySampleFromFloor(rangeStart, floor);
+        rangeEnd.setHours(23, 59, 59, 999);
         if (rangeStart > rangeEnd) {
           return res.status(400).json({
             success: false,
             error: {
-              message:
-                'Sample-from date is after the end of the selected range. Adjust Sample activities from or the date range.',
+              message: 'Start date is after end date. Adjust the sampling date range.',
             },
           });
         }

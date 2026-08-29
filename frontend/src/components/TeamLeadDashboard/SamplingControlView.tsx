@@ -103,6 +103,7 @@ const SamplingControlView: React.FC = () => {
   const [autoRunActivateFrom, setAutoRunActivateFrom] = useState<string>('');
   const [sampleFromImpact, setSampleFromImpact] = useState<{
     sampleFrom: string | null;
+    chosenStart: string | null;
     beforeCutoffCount: number;
     oldestBefore: string | null;
     inRangeCount: number;
@@ -120,7 +121,16 @@ const SamplingControlView: React.FC = () => {
 
   /** first_sample = auto date range (or manual for very first run); adhoc = user picks date range */
   const [runType, setRunType] = useState<'first_sample' | 'adhoc'>(() => initialSamplingControlFilters.runType);
-  const [firstSampleRange, setFirstSampleRange] = useState<{ dateFrom: string; dateTo: string; matchedCount?: number } | null>(null);
+  const [firstSampleRange, setFirstSampleRange] = useState<{
+    dateFrom: string;
+    dateTo: string;
+    matchedCount?: number;
+    lastRunCursor?: string | null;
+    sampleFrom?: string | null;
+  } | null>(null);
+  const [runConfirmStart, setRunConfirmStart] = useState('');
+  const [runConfirmEnd, setRunConfirmEnd] = useState('');
+  const [runConfirmMatched, setRunConfirmMatched] = useState<number | null>(null);
   const [isFirstSampleRun, setIsFirstSampleRun] = useState<boolean>(false);
 
   // Date range dropdown (same UX as Admin Activity Sampling)
@@ -311,7 +321,13 @@ const SamplingControlView: React.FC = () => {
       if (d?.dateFrom && d?.dateTo) {
         const fromStr = typeof d.dateFrom === 'string' ? d.dateFrom.split('T')[0] : d.dateFrom;
         const toStr = typeof d.dateTo === 'string' ? d.dateTo.split('T')[0] : d.dateTo;
-        setFirstSampleRange({ dateFrom: fromStr, dateTo: toStr, matchedCount: d?.matchedCount });
+        setFirstSampleRange({
+          dateFrom: fromStr,
+          dateTo: toStr,
+          matchedCount: d?.matchedCount,
+          lastRunCursor: d?.lastRunCursor || null,
+          sampleFrom: d?.sampleFrom || null,
+        });
       } else {
         setFirstSampleRange(null);
       }
@@ -435,6 +451,28 @@ const SamplingControlView: React.FC = () => {
       await loadConfig();
       await loadActivityTypes();
       await loadStats();
+      if (runType === 'first_sample') {
+        try {
+          const r: any = await samplingAPI.getFirstSampleRange();
+          const d = r?.data;
+          setIsFirstSampleRun(d?.isFirstRun === true);
+          if (d?.dateFrom && d?.dateTo) {
+            const fromStr = typeof d.dateFrom === 'string' ? d.dateFrom.split('T')[0] : d.dateFrom;
+            const toStr = typeof d.dateTo === 'string' ? d.dateTo.split('T')[0] : d.dateTo;
+            setFirstSampleRange({
+              dateFrom: fromStr,
+              dateTo: toStr,
+              matchedCount: d?.matchedCount,
+              lastRunCursor: d?.lastRunCursor || null,
+              sampleFrom: d?.sampleFrom || null,
+            });
+          } else {
+            setFirstSampleRange(null);
+          }
+        } catch {
+          /* keep existing range */
+        }
+      }
     } catch (e: any) {
       toast.showError(e.message || 'Failed to save config');
     } finally {
@@ -444,14 +482,21 @@ const SamplingControlView: React.FC = () => {
 
   // Note: Save & Apply is the single action (save config + apply eligibility).
 
-  const handleRunSampling = async () => {
-    if (runType === 'adhoc' || (runType === 'first_sample' && isFirstSampleRun)) {
+  const handleRunSampling = async (opts?: { overrideDateFrom?: string; overrideDateTo?: string }) => {
+    const hasOverride = Boolean(opts?.overrideDateFrom && opts?.overrideDateTo);
+    if (runType === 'adhoc' || (runType === 'first_sample' && isFirstSampleRun && !hasOverride)) {
       if (!activityFilters.dateFrom || !activityFilters.dateTo) {
         toast.showError(runType === 'first_sample' ? 'Select date range for first sample run' : 'Select date range for ad-hoc run');
         return;
       }
       if (runType === 'adhoc' && totalMatchingByLifecycle === 0) {
         toast.showError('No activities match the current filters');
+        return;
+      }
+    }
+    if (runType === 'first_sample' && hasOverride) {
+      if (opts!.overrideDateFrom! > opts!.overrideDateTo!) {
+        toast.showError('Start date must be on or before end date');
         return;
       }
     }
@@ -466,8 +511,16 @@ const SamplingControlView: React.FC = () => {
         errorCount: 0,
       });
 
-      const runDateFrom = runType === 'adhoc' ? activityFilters.dateFrom : (runType === 'first_sample' ? (firstSampleRange?.dateFrom ?? activityFilters.dateFrom) : undefined);
-      const runDateTo = runType === 'adhoc' ? activityFilters.dateTo : (runType === 'first_sample' ? (firstSampleRange?.dateTo ?? activityFilters.dateTo) : undefined);
+      const runDateFrom =
+        opts?.overrideDateFrom ||
+        (runType === 'adhoc'
+          ? activityFilters.dateFrom
+          : firstSampleRange?.dateFrom ?? activityFilters.dateFrom);
+      const runDateTo =
+        opts?.overrideDateTo ||
+        (runType === 'adhoc'
+          ? activityFilters.dateTo
+          : firstSampleRange?.dateTo ?? activityFilters.dateTo);
       const res: any = await samplingAPI.runSampling({
         runType,
         lifecycleStatus: activityFilters.lifecycleStatus,
@@ -708,6 +761,32 @@ const SamplingControlView: React.FC = () => {
     return byTypeSort.dir === 'asc' ? ' ▲' : ' ▼';
   };
 
+  const loadSampleFromImpact = async (from: string, to: string, type: 'first_sample' | 'adhoc') => {
+    if (!from || !to) {
+      setSampleFromImpact(null);
+      setRunConfirmMatched(null);
+      return;
+    }
+    setIsSampleFromImpactLoading(true);
+    try {
+      const res: any = await samplingAPI.getSampleFromImpact({
+        lifecycleStatus: type === 'adhoc' ? activityFilters.lifecycleStatus : 'active',
+        dateFrom: from,
+        dateTo: to,
+        runType: type,
+      });
+      setSampleFromImpact(res?.data || null);
+      setRunConfirmMatched(
+        typeof res?.data?.inRangeCount === 'number' ? res.data.inRangeCount : null
+      );
+    } catch {
+      setSampleFromImpact(null);
+      setRunConfirmMatched(null);
+    } finally {
+      setIsSampleFromImpactLoading(false);
+    }
+  };
+
   const openRunConfirm = async () => {
     if (runType === 'adhoc') {
       if (!activityFilters.dateFrom || !activityFilters.dateTo) {
@@ -723,38 +802,44 @@ const SamplingControlView: React.FC = () => {
       toast.showError('Select date range for first sample run');
       return;
     }
+    const start =
+      runType === 'adhoc'
+        ? activityFilters.dateFrom
+        : firstSampleRange?.dateFrom ?? activityFilters.dateFrom ?? '';
+    const end =
+      runType === 'adhoc'
+        ? activityFilters.dateTo
+        : firstSampleRange?.dateTo ?? activityFilters.dateTo ?? '';
+    setRunConfirmStart(start);
+    setRunConfirmEnd(end);
+    setRunConfirmMatched(
+      runType === 'first_sample' ? firstSampleRange?.matchedCount ?? null : totalMatchingByLifecycle
+    );
     setRunConfirmType(runType);
     setIsRunConfirmOpen(true);
-    setIsSampleFromImpactLoading(true);
     setSampleFromImpact(null);
-    try {
-      const runDateFrom =
-        runType === 'adhoc'
-          ? activityFilters.dateFrom
-          : firstSampleRange?.dateFrom ?? activityFilters.dateFrom;
-      const runDateTo =
-        runType === 'adhoc'
-          ? activityFilters.dateTo
-          : firstSampleRange?.dateTo ?? activityFilters.dateTo;
-      const res: any = await samplingAPI.getSampleFromImpact({
-        lifecycleStatus: runType === 'adhoc' ? activityFilters.lifecycleStatus : 'active',
-        dateFrom: runDateFrom || undefined,
-        dateTo: runDateTo || undefined,
-        runType,
-      });
-      setSampleFromImpact(res?.data || null);
-    } catch {
-      setSampleFromImpact(null);
-    } finally {
-      setIsSampleFromImpactLoading(false);
-    }
+    await loadSampleFromImpact(start, end, runType);
   };
 
   const confirmRunSampling = async () => {
+    if (runConfirmType === 'first_sample') {
+      if (!runConfirmStart || !runConfirmEnd) {
+        toast.showError('Set start and end dates for this run');
+        return;
+      }
+      if (runConfirmStart > runConfirmEnd) {
+        toast.showError('Start date must be on or before end date');
+        return;
+      }
+    }
     setIsRunConfirmOpen(false);
+    const type = runConfirmType;
     setRunConfirmType(null);
     setSampleFromImpact(null);
-    await handleRunSampling();
+    await handleRunSampling({
+      overrideDateFrom: type === 'first_sample' ? runConfirmStart : undefined,
+      overrideDateTo: type === 'first_sample' ? runConfirmEnd : undefined,
+    });
   };
 
   return (
@@ -772,16 +857,71 @@ const SamplingControlView: React.FC = () => {
         <div className="space-y-4">
           {runConfirmType === 'first_sample' && (
             <>
-              <p className="text-sm font-bold text-slate-800">Run Sample (auto date range)</p>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1 text-sm text-slate-800">
-                <p><strong>Date range for this run:</strong> {firstSampleRange?.dateFrom && firstSampleRange?.dateTo ? `${formatPretty(firstSampleRange.dateFrom)} – ${formatPretty(firstSampleRange.dateTo)}` : '(determined automatically)'}</p>
-                <p><strong>Activities that will be sampled:</strong> {firstSampleRange?.matchedCount != null ? firstSampleRange.matchedCount : '—'}</p>
+              <p className="text-sm font-bold text-slate-800">Run Sample</p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3 text-sm text-slate-800">
+                <p className="text-xs text-slate-600">
+                  Default start is <strong>Sample activities from</strong> when saved, otherwise the last-run cursor.
+                  You can change the start/end for <strong>this run only</strong>.
+                </p>
+                {(firstSampleRange?.lastRunCursor || firstSampleRange?.sampleFrom) && (
+                  <p className="text-xs text-slate-500">
+                    {firstSampleRange.sampleFrom ? (
+                      <>Saved Sample from: <strong>{formatPretty(firstSampleRange.sampleFrom)}</strong></>
+                    ) : null}
+                    {firstSampleRange.sampleFrom && firstSampleRange.lastRunCursor ? ' · ' : null}
+                    {firstSampleRange.lastRunCursor ? (
+                      <>Last-run cursor: <strong>{formatPretty(firstSampleRange.lastRunCursor)}</strong></>
+                    ) : null}
+                  </p>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
+                      Start (this run)
+                    </label>
+                    <input
+                      type="date"
+                      value={runConfirmStart}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setRunConfirmStart(v);
+                        void loadSampleFromImpact(v, runConfirmEnd, 'first_sample');
+                      }}
+                      className="w-full min-h-11 px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
+                      End (this run)
+                    </label>
+                    <input
+                      type="date"
+                      value={runConfirmEnd}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setRunConfirmEnd(v);
+                        void loadSampleFromImpact(runConfirmStart, v, 'first_sample');
+                      }}
+                      className="w-full min-h-11 px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
+                    />
+                  </div>
+                </div>
+                <p>
+                  <strong>Activities that will be sampled:</strong>{' '}
+                  {isSampleFromImpactLoading
+                    ? '…'
+                    : runConfirmMatched != null
+                      ? runConfirmMatched
+                      : firstSampleRange?.matchedCount != null
+                        ? firstSampleRange.matchedCount
+                        : '—'}
+                </p>
               </div>
               <ul className="text-sm text-slate-700 space-y-2 list-disc list-inside">
                 <li><strong>Activities:</strong> Only <strong>Active</strong> activities that have <strong>never been sampled</strong>.</li>
-                <li><strong>Date range:</strong> Chosen automatically — first run: earliest to latest activity date; later runs: last run end date (inclusive) to today. Clamped by <strong>Sample activities from</strong> when set.</li>
+                <li><strong>Date range:</strong> Suggested from Sample from / last-run cursor; editable above for this run only.</li>
                 <li><strong>Lifecycle:</strong> Fixed by the system; you do not select it.</li>
-                <li><strong>Tasks:</strong> Created only for farmers not already sampled for that activity (same farmer is not sampled again).</li>
+                <li><strong>Tasks:</strong> Created only for farmers not already sampled for that activity.</li>
               </ul>
             </>
           )}
@@ -794,27 +934,29 @@ const SamplingControlView: React.FC = () => {
                 <p><strong>Lifecycle:</strong> {activityFilters.lifecycleStatus}</p>
               </div>
               <ul className="text-sm text-slate-700 space-y-2 list-disc list-inside">
-                <li><strong>Activities:</strong> All activities in your selected <strong>Lifecycle</strong> and <strong>Date range</strong> (Active, Sampled, Inactive, or Not Eligible). Already-sampled activities are included.</li>
-                <li><strong>Date range:</strong> Your selected start and end date (start raised to Sample activities from when set).</li>
+                <li><strong>Activities:</strong> All activities in your selected <strong>Lifecycle</strong> and <strong>Date range</strong>. Already-sampled activities are included.</li>
+                <li><strong>Date range:</strong> Your selected start and end date on the dashboard filters.</li>
                 <li><strong>Lifecycle:</strong> Your selected lifecycle.</li>
-                <li><strong>Tasks:</strong> Created only for farmers not already sampled for that activity (same farmer is not sampled again).</li>
+                <li><strong>Tasks:</strong> Created only for farmers not already sampled for that activity.</li>
               </ul>
             </>
           )}
           {isSampleFromImpactLoading && (
-            <p className="text-xs text-slate-500">Checking activities before Sample-from date…</p>
+            <p className="text-xs text-slate-500">Checking activities before chosen start…</p>
           )}
-          {!isSampleFromImpactLoading && sampleFromImpact?.sampleFrom && (sampleFromImpact.beforeCutoffCount || 0) > 0 && (
+          {!isSampleFromImpactLoading &&
+            (sampleFromImpact?.chosenStart || sampleFromImpact?.sampleFrom) &&
+            (sampleFromImpact.beforeCutoffCount || 0) > 0 && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-1 text-sm text-amber-950">
-              <p className="font-black">Eligible activities before Sample activities from</p>
+              <p className="font-black">Eligible activities before chosen start</p>
               <p>
                 <strong>{sampleFromImpact.beforeCutoffCount}</strong> eligible activit
                 {sampleFromImpact.beforeCutoffCount === 1 ? 'y' : 'ies'} exist before{' '}
-                <strong>{formatPretty(sampleFromImpact.sampleFrom)}</strong>
+                <strong>{formatPretty(sampleFromImpact.chosenStart || sampleFromImpact.sampleFrom || '')}</strong>
                 {sampleFromImpact.oldestBefore ? ` (oldest ${formatPretty(sampleFromImpact.oldestBefore)})` : ''}.
               </p>
               <p>
-                This run will <strong>only</strong> sample activities on/after that date
+                This run will <strong>only</strong> sample activities on/after that start
                 {sampleFromImpact.inRangeCount != null ? (
                   <> (<strong>{sampleFromImpact.inRangeCount}</strong> in range)</>
                 ) : null}
@@ -840,7 +982,7 @@ const SamplingControlView: React.FC = () => {
               className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-black"
             >
               {sampleFromImpact && sampleFromImpact.beforeCutoffCount > 0
-                ? 'Continue with cutoff only'
+                ? 'Continue from start date'
                 : 'Confirm'}
             </button>
           </div>
@@ -1025,8 +1167,9 @@ const SamplingControlView: React.FC = () => {
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
               <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Sample activities from</p>
               <p className="text-xs text-slate-600">
-                Only activities with <strong>activity date</strong> on or after this day are considered for Run Sample, Ad-hoc, and auto-run.
-                Eligible activities before this date are left alone (you will be warned before a manual run). Separate from Admin Data Management FFA API date.
+                Saved preference for the <strong>suggested start</strong> on Run Sample and auto-run (when set).
+                If empty, later runs default to the last-run cursor. You can still change the start on the Run Sample confirm for that run only.
+                Separate from Admin Data Management FFA <strong>Activity Date From</strong> (API pull only).
               </p>
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
@@ -1038,7 +1181,7 @@ const SamplingControlView: React.FC = () => {
                   onChange={(e) => setAutoRunActivateFrom(e.target.value)}
                   className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
                 />
-                <p className="text-xs text-slate-500 mt-1">Leave empty to include all eligible activity dates. Save &amp; Apply to store.</p>
+                <p className="text-xs text-slate-500 mt-1">Leave empty to use last-run cursor as suggested start. Save &amp; Apply to store.</p>
               </div>
             </div>
 

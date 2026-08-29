@@ -17,6 +17,7 @@ import {
   parseFfaEmsDefaultDateFrom,
   isEmsFfaApiEnabled,
 } from '../services/emsFfaClient.js';
+import { calculateSampleSize } from '../utils/reservoirSampling.js';
 
 const router = express.Router();
 
@@ -193,8 +194,9 @@ async function getLaterRunEligibleCount(userId: mongoose.Types.ObjectId): Promis
   return { count, range, lastRunCursor: autoRange.dateFrom, sampleFrom };
 }
 
-/** Group activities by MDO (officerId); allocate proportional farmer sample targets
- * so sum(targets) ≈ ceil(totalFarmers * sampling% / 100). Small MDOs may get 0 this run.
+/** Group activities by MDO (officerId).
+ * Rule: each MDO’s farmer target = sampling% of that MDO’s farmers (e.g. 10% ⇒ ~1 in 10),
+ * at least 1 when the MDO has farmers. Quota stop in the run loop still applies.
  */
 type FdaGroupDoc = { _id: mongoose.Types.ObjectId; officerId: string; officerName?: string; farmerIds?: unknown[] };
 async function buildFdaGroups(
@@ -222,8 +224,7 @@ async function buildFdaGroups(
   for (const g of byOfficer.values()) {
     g.activities.sort((a, b) => b.farmerCount - a.farmerCount);
   }
-  const totalWeight = Array.from(byOfficer.values()).reduce((s, g) => s + g.totalFarmers, 0);
-  if (totalWeight === 0) {
+  if (byOfficer.size === 0) {
     return [];
   }
   let resolvedPct = samplingPercentage ?? 10;
@@ -231,30 +232,20 @@ async function buildFdaGroups(
   if (config && (samplingPercentage == null || samplingPercentage === undefined)) {
     resolvedPct = (config as any).defaultPercentage ?? 10;
   }
-  const desiredTotal = Math.min(totalWeight, Math.max(1, Math.ceil((totalWeight * resolvedPct) / 100)));
 
-  // Largest-remainder allocation so sum(targets) === desiredTotal (honours sampling %)
-  const rows = Array.from(byOfficer.entries()).map(([officerId, g]) => {
-    const exact = (g.totalFarmers / totalWeight) * desiredTotal;
-    const floor = Math.floor(exact);
-    return { officerId, g, floor, frac: exact - floor };
-  });
-  let assigned = rows.reduce((s, r) => s + r.floor, 0);
-  let remaining = desiredTotal - assigned;
-  rows.sort((a, b) => b.frac - a.frac || b.g.totalFarmers - a.g.totalFarmers);
-  for (const r of rows) {
-    if (remaining <= 0) break;
-    r.floor += 1;
-    remaining -= 1;
+  const out: { officerId: string; officerName: string; activities: { id: string; farmerCount: number }[]; totalFarmers: number; target: number }[] = [];
+  for (const [officerId, g] of byOfficer.entries()) {
+    // Per-MDO: 10% of this MDO’s farmers (ceil, at least 1) — e.g. 10 farmers → 1 task slot
+    const target = g.totalFarmers > 0 ? calculateSampleSize(g.totalFarmers, resolvedPct) : 0;
+    out.push({
+      officerId,
+      officerName: g.officerName,
+      activities: g.activities,
+      totalFarmers: g.totalFarmers,
+      target,
+    });
   }
-
-  return rows.map(({ officerId, g, floor }) => ({
-    officerId,
-    officerName: g.officerName,
-    activities: g.activities,
-    totalFarmers: g.totalFarmers,
-    target: floor,
-  }));
+  return out;
 }
 
 // ============================================================================

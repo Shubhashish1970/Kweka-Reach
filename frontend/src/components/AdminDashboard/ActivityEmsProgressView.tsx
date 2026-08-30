@@ -183,8 +183,6 @@ function loadSavedEmsProgressFilters(): SavedEmsProgressFilters {
 
 function computeEmsTotals(rows: EmsReportSummaryRow[]): EmsTotals | null {
   if (!rows.length) return null;
-  const r0 = rows[0];
-  const hasCounts = 'disconnectedCount' in r0 && (r0 as EmsReportSummaryRow).disconnectedCount != null;
   let totalAttempted = 0, totalConnected = 0, connectedIntakePendingCount = 0, disconnectedCount = 0, incomingNACount = 0, invalidCount = 0, noAnswerCount = 0;
   let identityWrongCount = 0, dontRecallCount = 0, noMissedCount = 0, notAFarmerCount = 0, yesAttendedCount = 0;
   let notPurchasedCount = 0, purchasedCount = 0, willingMaybeCount = 0, willingNoCount = 0, willingYesCount = 0, yesPlusPurchasedCount = 0;
@@ -194,26 +192,23 @@ function computeEmsTotals(rows: EmsReportSummaryRow[]): EmsTotals | null {
     totalConnected += r.totalConnected;
     connectedIntakePendingCount += r.connectedIntakePendingCount ?? 0;
     invalidCount += r.invalidCount;
-    identityWrongCount += (r as EmsReportSummaryRow & { identityWrongCount?: number }).identityWrongCount ?? 0;
-    activityQualitySum += (r as EmsReportSummaryRow & { activityQualitySum?: number }).activityQualitySum ?? 0;
-    activityQualityCount += (r as EmsReportSummaryRow & { activityQualityCount?: number }).activityQualityCount ?? 0;
+    identityWrongCount += r.identityWrongCount ?? 0;
+    activityQualitySum += r.activityQualitySum ?? 0;
+    activityQualityCount += r.activityQualityCount ?? 0;
     notAFarmerCount += r.notAFarmerCount;
     yesAttendedCount += r.yesAttendedCount;
     purchasedCount += r.purchasedCount;
     willingYesCount += r.willingYesCount;
-    if (hasCounts) {
-      disconnectedCount += (r as EmsReportSummaryRow).disconnectedCount ?? 0;
-      incomingNACount += (r as EmsReportSummaryRow).incomingNACount ?? 0;
-      noAnswerCount += (r as EmsReportSummaryRow).noAnswerCount ?? 0;
-      dontRecallCount += (r as EmsReportSummaryRow).dontRecallCount ?? 0;
-      noMissedCount += (r as EmsReportSummaryRow).noMissedCount ?? 0;
-      notPurchasedCount += (r as EmsReportSummaryRow).notPurchasedCount ?? 0;
-      willingMaybeCount += (r as EmsReportSummaryRow).willingMaybeCount ?? 0;
-      willingNoCount += (r as EmsReportSummaryRow).willingNoCount ?? 0;
-      yesPlusPurchasedCount += (r as EmsReportSummaryRow).yesPlusPurchasedCount ?? 0;
-    }
+    disconnectedCount += r.disconnectedCount ?? 0;
+    incomingNACount += r.incomingNACount ?? 0;
+    noAnswerCount += r.noAnswerCount ?? 0;
+    dontRecallCount += r.dontRecallCount ?? 0;
+    noMissedCount += r.noMissedCount ?? 0;
+    notPurchasedCount += r.notPurchasedCount ?? 0;
+    willingMaybeCount += r.willingMaybeCount ?? 0;
+    willingNoCount += r.willingNoCount ?? 0;
+    yesPlusPurchasedCount += r.yesPlusPurchasedCount ?? r.willingYesCount + r.purchasedCount;
   }
-  if (!hasCounts) yesPlusPurchasedCount = willingYesCount + purchasedCount;
   const mobileValidityPct = totalAttempted > 0 ? Math.round(((totalAttempted - invalidCount) / totalAttempted) * 100) : 0;
   const hygienePct = totalConnected > 0 ? Math.round(((totalConnected - identityWrongCount - notAFarmerCount) / totalConnected) * 100) : 0;
   const meetingValidityPct = totalConnected > 0 ? Math.round((yesAttendedCount / totalConnected) * 100) : 0;
@@ -586,6 +581,10 @@ const ActivityEmsProgressView: React.FC = () => {
                                 const { start, end } = getPresetRange(p, filters.dateFrom, filters.dateTo);
                                 setDraftStart(start);
                                 setDraftEnd(end);
+                                if (p !== 'Custom') {
+                                  setFilters((prev) => ({ ...prev, dateFrom: start, dateTo: end }));
+                                  setIsDatePickerOpen(false);
+                                }
                               }}
                               className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-colors ${isActive ? 'bg-white border border-slate-200 text-slate-900' : 'text-slate-700 hover:bg-white'}`}
                             >

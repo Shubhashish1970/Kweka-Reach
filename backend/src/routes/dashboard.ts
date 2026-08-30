@@ -6,6 +6,7 @@ import {
   getEmsProgress,
   getEmsDrilldown,
   getEmsFilterOptions,
+  parseEmsProgressFilters,
   EmsDrilldownGroupBy,
 } from '../services/kpiService.js';
 
@@ -124,15 +125,7 @@ router.get(
           error: { message: 'Validation failed', errors: errors.array() },
         });
       }
-      const filters = {
-        dateFrom: req.query.dateFrom ? new Date(req.query.dateFrom as string) : undefined,
-        dateTo: req.query.dateTo ? new Date(req.query.dateTo as string) : undefined,
-        state: (req.query.state as string) || undefined,
-        territory: (req.query.territory as string) || undefined,
-        zone: (req.query.zone as string) || undefined,
-        bu: (req.query.bu as string) || undefined,
-        activityType: (req.query.activityType as string) || undefined,
-      };
+      const filters = parseEmsProgressFilters(req.query as Record<string, unknown>);
       const options = await getEmsFilterOptions(filters);
       res.json({ success: true, data: options });
     } catch (err) {

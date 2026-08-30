@@ -1,4 +1,4 @@
-import { compareEmsReportByHierarchy } from '../../src/services/emsReportService.js';
+import { compareEmsReportByHierarchy, computePurchaseIntentionPct, isWillingNo, isWillingYes } from '../../src/services/emsReportService.js';
 
 describe('compareEmsReportByHierarchy', () => {
   it('sorts by BU when groupBy is bu', () => {
@@ -45,5 +45,32 @@ describe('compareEmsReportByHierarchy', () => {
     ];
     rows.sort((a, b) => compareEmsReportByHierarchy(a, b, 'fda'));
     expect(rows.map((r) => r.groupLabel)).toEqual(['MDO A', 'MDO Z']);
+  });
+});
+
+describe('purchase intention helpers', () => {
+  it('counts willing no when non-purchase reason is captured without explicit No toggle', () => {
+    expect(
+      isWillingNo({
+        hasPurchased: false,
+        willingToPurchase: null,
+        nonPurchaseReason: 'Price',
+      })
+    ).toBe(true);
+  });
+
+  it('does not count purchased farmers as willing no', () => {
+    expect(
+      isWillingNo({
+        hasPurchased: true,
+        willingToPurchase: null,
+        nonPurchaseReason: 'Price',
+      })
+    ).toBe(false);
+  });
+
+  it('counts willing yes only for not purchased with explicit yes', () => {
+    expect(isWillingYes({ hasPurchased: false, willingToPurchase: true })).toBe(true);
+    expect(isWillingYes({ hasPurchased: true, willingToPurchase: true })).toBe(false);
   });
 });

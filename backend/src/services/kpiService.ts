@@ -52,6 +52,74 @@ export function buildActivityMatchWithoutDate(filters: EmsProgressFilters | unde
   return match;
 }
 
+/** EMS dashboards filter tasks by scheduledDate when a date range is set (same scope as Task Allocation). */
+export function hasEmsDateFilter(filters?: EmsProgressFilters): boolean {
+  return !!(filters?.dateFrom || filters?.dateTo);
+}
+
+export function buildEmsScheduledDateMatch(filters?: EmsProgressFilters): Record<string, Date> | null {
+  if (!hasEmsDateFilter(filters)) return null;
+  const scheduledDate: Record<string, Date> = {};
+  if (filters!.dateFrom) {
+    const d = new Date(filters!.dateFrom);
+    d.setHours(0, 0, 0, 0);
+    scheduledDate.$gte = d;
+  }
+  if (filters!.dateTo) {
+    const d = new Date(filters!.dateTo);
+    d.setHours(23, 59, 59, 999);
+    scheduledDate.$lte = d;
+  }
+  return Object.keys(scheduledDate).length ? scheduledDate : null;
+}
+
+export function buildEmsTaskBaseMatch(filters?: EmsProgressFilters): Record<string, unknown> {
+  const taskMatch: Record<string, unknown> = {
+    status: { $in: ['completed', 'not_reachable', 'invalid_number'] },
+    callLog: { $exists: true, $ne: null },
+  };
+  const scheduledDate = buildEmsScheduledDateMatch(filters);
+  if (scheduledDate) taskMatch.scheduledDate = scheduledDate;
+  return taskMatch;
+}
+
+/** Prefix activity fields for $lookup pipelines (e.g. activity.state). */
+export function buildActivityPipelineMatch(
+  activityMatch: Record<string, unknown>,
+  activityPrefix = 'activity'
+): Record<string, unknown> {
+  if (!Object.keys(activityMatch).length) return {};
+  const matchForPipeline: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(activityMatch)) {
+    if (k === '$or' && Array.isArray(v)) {
+      matchForPipeline.$or = v.map((cond: Record<string, unknown>) => {
+        const out: Record<string, unknown> = {};
+        for (const [ck, cv] of Object.entries(cond)) out[`${activityPrefix}.${ck}`] = cv;
+        return out;
+      });
+    } else {
+      matchForPipeline[`${activityPrefix}.${k}`] = v;
+    }
+  }
+  return matchForPipeline;
+}
+
+export function parseEmsProgressFilters(query: Record<string, unknown>): EmsProgressFilters {
+  const dateFrom = query.dateFrom ? new Date(String(query.dateFrom)) : undefined;
+  const dateTo = query.dateTo ? new Date(String(query.dateTo)) : undefined;
+  if (dateFrom && !Number.isNaN(dateFrom.getTime())) dateFrom.setHours(0, 0, 0, 0);
+  if (dateTo && !Number.isNaN(dateTo.getTime())) dateTo.setHours(23, 59, 59, 999);
+  return {
+    dateFrom,
+    dateTo,
+    state: (query.state as string)?.trim() || undefined,
+    territory: (query.territory as string)?.trim() || undefined,
+    zone: (query.zone as string)?.trim() || undefined,
+    bu: (query.bu as string)?.trim() || undefined,
+    activityType: (query.activityType as string)?.trim() || undefined,
+  };
+}
+
 export interface EmsProgressSummary {
   activities: {
     total: number;
@@ -496,8 +564,54 @@ export interface EmsFilterOptions {
 
 /**
  * Distinct filter options for EMS dashboard (state, territory, zone, bu, activity type).
+ * When a date range is set, uses task scheduledDate (same scope as EMS report / Task Allocation).
  */
 export async function getEmsFilterOptions(filters?: EmsProgressFilters): Promise<EmsFilterOptions> {
+  const cleanDistinct = (arr: unknown[]) =>
+    (arr || [])
+      .filter((v) => v != null && String(v).trim() !== '')
+      .map((v) => String(v).trim())
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+  if (hasEmsDateFilter(filters)) {
+    const activityCollection = Activity.collection.name;
+    const pipeline: any[] = [
+      { $match: buildEmsTaskBaseMatch(filters) },
+      {
+        $lookup: {
+          from: activityCollection,
+          localField: 'activityId',
+          foreignField: '_id',
+          as: 'activity',
+        },
+      },
+      { $unwind: '$activity' },
+    ];
+    const activityMatchNoDate = buildActivityMatchWithoutDate(filters);
+    const activityPipelineMatch = buildActivityPipelineMatch(activityMatchNoDate);
+    if (Object.keys(activityPipelineMatch).length) pipeline.push({ $match: activityPipelineMatch });
+    pipeline.push({
+      $group: {
+        _id: null,
+        states: { $addToSet: '$activity.state' },
+        territories: { $addToSet: { $ifNull: ['$activity.territoryName', '$activity.territory'] } },
+        zones: { $addToSet: '$activity.zoneName' },
+        bus: { $addToSet: '$activity.buName' },
+        types: { $addToSet: '$activity.type' },
+      },
+    });
+
+    const agg = await CallTask.aggregate(pipeline).exec();
+    const row = agg[0] || {};
+    return {
+      stateOptions: cleanDistinct(row.states),
+      territoryOptions: cleanDistinct(row.territories),
+      zoneOptions: cleanDistinct(row.zones),
+      buOptions: cleanDistinct(row.bus),
+      activityTypeOptions: cleanDistinct(row.types),
+    };
+  }
+
   const baseMatch = buildActivityMatch(filters);
 
   const stateOpts = await Activity.distinct('state', baseMatch).then((arr) => arr.filter(Boolean).sort());

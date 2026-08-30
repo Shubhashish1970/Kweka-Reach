@@ -1,8 +1,14 @@
 import { Activity } from '../models/Activity.js';
 import { CallTask } from '../models/CallTask.js';
 import mongoose from 'mongoose';
-import type { EmsProgressFilters } from './kpiService.js';
-import { buildActivityMatch, buildActivityMatchWithoutDate } from './kpiService.js';
+import {
+  buildActivityMatch,
+  buildActivityMatchWithoutDate,
+  buildActivityPipelineMatch,
+  buildEmsTaskBaseMatch,
+  hasEmsDateFilter,
+  type EmsProgressFilters,
+} from './kpiService.js';
 
 export type EmsReportGroupBy = 'tm' | 'fda' | 'bu' | 'zone' | 'region' | 'territory';
 
@@ -16,6 +22,58 @@ export function computePurchaseIntentionPct(
   const denominator = numerator + willingNoCount;
   return denominator > 0 ? Math.round((numerator / denominator) * 100) : 0;
 }
+
+type PurchaseIntentionLog = {
+  hasPurchased?: boolean | null;
+  willingToPurchase?: boolean | null;
+  nonPurchaseReason?: string | null;
+};
+
+/** Willing Yes = not purchased and explicitly likely to buy. */
+export function isWillingYes(log: PurchaseIntentionLog): boolean {
+  return log.hasPurchased === false && log.willingToPurchase === true;
+}
+
+/**
+ * Willing No = not purchased and either clicked "Likely to buy? → No"
+ * or captured a non-purchase reason (agents often skip the No toggle).
+ */
+export function isWillingNo(log: PurchaseIntentionLog): boolean {
+  if (log.hasPurchased !== false || log.willingToPurchase === true) return false;
+  if (log.willingToPurchase === false) return true;
+  return Boolean(String(log.nonPurchaseReason ?? '').trim());
+}
+
+const NON_EMPTY_NON_PURCHASE_REASON = {
+  $gt: [
+    { $strLenCP: { $trim: { input: { $ifNull: ['$callLog.nonPurchaseReason', ''] } } } },
+    0,
+  ],
+};
+
+const WILLING_YES_EXPR = {
+  $and: [
+    { $eq: ['$callLog.hasPurchased', false] },
+    { $eq: ['$callLog.willingToPurchase', true] },
+  ],
+};
+
+const WILLING_NO_EXPR = {
+  $and: [
+    { $eq: ['$callLog.hasPurchased', false] },
+    {
+      $or: [
+        { $eq: ['$callLog.willingToPurchase', false] },
+        {
+          $and: [
+            { $ne: ['$callLog.willingToPurchase', true] },
+            NON_EMPTY_NON_PURCHASE_REASON,
+          ],
+        },
+      ],
+    },
+  ],
+};
 
 /** Connected = callStatus === 'Connected' AND (didAttend set OR hasPurchased set OR willingToPurchase set) */
 function isConnectedAndProgressed(log: { callStatus?: string; didAttend?: string | null; hasPurchased?: boolean | null; willingToPurchase?: boolean | null }): boolean {
@@ -213,25 +271,8 @@ export async function getEmsReportSummary(
   const activityCollection = Activity.collection.name;
   const groupField = getGroupField(groupBy);
 
-  const hasDateFilter = !!(filters?.dateFrom || filters?.dateTo);
-  const taskMatch: Record<string, unknown> = {
-    status: { $in: ['completed', 'not_reachable', 'invalid_number'] },
-    callLog: { $exists: true, $ne: null },
-  };
-  if (hasDateFilter && (filters?.dateFrom || filters?.dateTo)) {
-    const scheduledDate: Record<string, Date> = {};
-    if (filters.dateFrom) {
-      const d = new Date(filters.dateFrom);
-      d.setHours(0, 0, 0, 0);
-      scheduledDate.$gte = d;
-    }
-    if (filters.dateTo) {
-      const d = new Date(filters.dateTo);
-      d.setHours(23, 59, 59, 999);
-      scheduledDate.$lte = d;
-    }
-    if (Object.keys(scheduledDate).length) taskMatch.scheduledDate = scheduledDate;
-  }
+  const hasDateFilter = hasEmsDateFilter(filters);
+  const taskMatch: Record<string, unknown> = buildEmsTaskBaseMatch(filters);
 
   const pipeline: any[] = [
     { $match: taskMatch },
@@ -248,19 +289,8 @@ export async function getEmsReportSummary(
 
   if (hasDateFilter) {
     const activityMatchNoDate = buildActivityMatchWithoutDate(filters);
-    if (Object.keys(activityMatchNoDate).length) {
-      const matchForPipeline: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(activityMatchNoDate)) {
-        if (k === '$or' && Array.isArray(v)) {
-          matchForPipeline.$or = v.map((cond: Record<string, unknown>) => {
-            const out: Record<string, unknown> = {};
-            for (const [ck, cv] of Object.entries(cond)) out[`activity.${ck}`] = cv;
-            return out;
-          });
-        } else {
-          matchForPipeline[`activity.${k}`] = v;
-        }
-      }
+    const matchForPipeline = buildActivityPipelineMatch(activityMatchNoDate);
+    if (Object.keys(matchForPipeline).length) {
       pipeline.push({ $match: matchForPipeline });
     }
   } else {
@@ -304,8 +334,8 @@ export async function getEmsReportSummary(
         __notPurchased: { $eq: ['$callLog.hasPurchased', false] },
         __purchased: { $eq: ['$callLog.hasPurchased', true] },
         __willingMaybe: { $and: [{ $ne: ['$callLog.willingToPurchase', true] }, { $ne: ['$callLog.willingToPurchase', false] }] },
-        __willingNo: { $eq: ['$callLog.willingToPurchase', false] },
-        __willingYes: { $eq: ['$callLog.willingToPurchase', true] },
+        __willingNo: WILLING_NO_EXPR,
+        __willingYes: WILLING_YES_EXPR,
         __hasQualityRating: {
           $and: [
             { $gte: [{ $ifNull: ['$callLog.activityQuality', 0] }, 1] },
@@ -501,26 +531,10 @@ export async function getEmsReportLineLevel(
   groupBy: EmsReportGroupBy
 ): Promise<EmsReportLineRow[]> {
   const groupField = getGroupField(groupBy);
-  const hasDateFilter = !!(filters?.dateFrom || filters?.dateTo);
+  const hasDateFilter = hasEmsDateFilter(filters);
 
-  const taskQuery: any = {
-    status: { $in: ['completed', 'not_reachable', 'invalid_number'] },
-    callLog: { $exists: true, $ne: null },
-  };
-  if (hasDateFilter && (filters?.dateFrom || filters?.dateTo)) {
-    const scheduledDate: Record<string, Date> = {};
-    if (filters!.dateFrom) {
-      const d = new Date(filters!.dateFrom);
-      d.setHours(0, 0, 0, 0);
-      scheduledDate.$gte = d;
-    }
-    if (filters!.dateTo) {
-      const d = new Date(filters!.dateTo);
-      d.setHours(23, 59, 59, 999);
-      scheduledDate.$lte = d;
-    }
-    if (Object.keys(scheduledDate).length) taskQuery.scheduledDate = scheduledDate;
-  } else {
+  const taskQuery: any = { ...buildEmsTaskBaseMatch(filters) };
+  if (!hasDateFilter) {
     const activityMatch = buildActivityMatch(filters);
     const activityIds = await Activity.find(activityMatch as any).select('_id').lean();
     const ids = activityIds.map((a: any) => a._id);
@@ -561,8 +575,8 @@ export async function getEmsReportLineLevel(
     const notAFarmer = log.didAttend === 'Not a Farmer' ? 1 : 0;
     const yesAttended = log.didAttend === 'Yes, I attended' ? 1 : 0;
     const purchased = log.hasPurchased === true ? 1 : 0;
-    const willingYes = log.willingToPurchase === true ? 1 : 0;
-    const willingNo = log.willingToPurchase === false ? 1 : 0;
+    const willingYes = isWillingYes(log) ? 1 : 0;
+    const willingNo = isWillingNo(log) ? 1 : 0;
 
     const totalConnected = isConnected ? 1 : 0;
     const mobileValidityPct = isInvalid ? 0 : 100;
@@ -647,26 +661,10 @@ export async function getEmsReportTrends(
   bucket: EmsTrendBucket
 ): Promise<EmsTrendRow[]> {
   const activityCollection = Activity.collection.name;
-  const hasDateFilter = !!(filters?.dateFrom || filters?.dateTo);
+  const hasDateFilter = hasEmsDateFilter(filters);
 
-  const taskMatch: Record<string, unknown> = {
-    status: { $in: ['completed', 'not_reachable', 'invalid_number'] },
-    callLog: { $exists: true, $ne: null },
-  };
-  if (hasDateFilter && (filters?.dateFrom || filters?.dateTo)) {
-    const scheduledDate: Record<string, Date> = {};
-    if (filters!.dateFrom) {
-      const d = new Date(filters!.dateFrom);
-      d.setHours(0, 0, 0, 0);
-      scheduledDate.$gte = d;
-    }
-    if (filters!.dateTo) {
-      const d = new Date(filters!.dateTo);
-      d.setHours(23, 59, 59, 999);
-      scheduledDate.$lte = d;
-    }
-    if (Object.keys(scheduledDate).length) taskMatch.scheduledDate = scheduledDate;
-  } else {
+  const taskMatch: Record<string, unknown> = { ...buildEmsTaskBaseMatch(filters) };
+  if (!hasDateFilter) {
     const activityMatch = buildActivityMatch(filters);
     const activityIds = await Activity.find(activityMatch as any).select('_id').lean();
     const ids = activityIds.map((a: any) => a._id);
@@ -692,19 +690,8 @@ export async function getEmsReportTrends(
   ];
   if (hasDateFilter) {
     const activityMatchNoDate = buildActivityMatchWithoutDate(filters);
-    if (Object.keys(activityMatchNoDate).length) {
-      const matchForPipeline: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(activityMatchNoDate)) {
-        if (k === '$or' && Array.isArray(v)) {
-          matchForPipeline.$or = v.map((cond: Record<string, unknown>) => {
-            const out: Record<string, unknown> = {};
-            for (const [ck, cv] of Object.entries(cond)) out[`activity.${ck}`] = cv;
-            return out;
-          });
-        } else {
-          matchForPipeline[`activity.${k}`] = v;
-        }
-      }
+    const matchForPipeline = buildActivityPipelineMatch(activityMatchNoDate);
+    if (Object.keys(matchForPipeline).length) {
       pipeline.push({ $match: matchForPipeline });
     }
   }
@@ -729,8 +716,8 @@ export async function getEmsReportTrends(
         __notAFarmer: { $eq: ['$callLog.didAttend', 'Not a Farmer'] },
         __yesAttended: { $eq: ['$callLog.didAttend', 'Yes, I attended'] },
         __purchased: { $eq: ['$callLog.hasPurchased', true] },
-        __willingYes: { $eq: ['$callLog.willingToPurchase', true] },
-        __willingNo: { $eq: ['$callLog.willingToPurchase', false] },
+        __willingYes: WILLING_YES_EXPR,
+        __willingNo: WILLING_NO_EXPR,
         __hasQualityRating: {
           $and: [
             { $gte: [{ $ifNull: ['$callLog.activityQuality', 0] }, 1] },

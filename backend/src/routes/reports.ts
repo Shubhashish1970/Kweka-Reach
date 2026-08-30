@@ -3,7 +3,7 @@ import { query, validationResult } from 'express-validator';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/rbac.js';
 import { getDailyReport, getPeriodReport, getTaskDetailExportRows } from '../services/reportService.js';
-import { getEmsProgress, getEmsDrilldown, type EmsDrilldownGroupBy } from '../services/kpiService.js';
+import { getEmsProgress, getEmsDrilldown, parseEmsProgressFilters, type EmsDrilldownGroupBy } from '../services/kpiService.js';
 import {
   getEmsReportSummary,
   getEmsReportLineLevel,
@@ -21,24 +21,8 @@ router.use(authenticate);
 // Permission-based: mis_admin has reports.weekly; normalizes "admin" -> mis_admin so Admin always has access
 router.use(requirePermission('reports.weekly'));
 
-function parseFilters(req: Request): {
-  dateFrom?: Date;
-  dateTo?: Date;
-  state?: string;
-  territory?: string;
-  zone?: string;
-  bu?: string;
-  activityType?: string;
-} {
-  return {
-    dateFrom: req.query.dateFrom ? new Date(req.query.dateFrom as string) : undefined,
-    dateTo: req.query.dateTo ? new Date(req.query.dateTo as string) : undefined,
-    state: (req.query.state as string) || undefined,
-    territory: (req.query.territory as string) || undefined,
-    zone: (req.query.zone as string) || undefined,
-    bu: (req.query.bu as string) || undefined,
-    activityType: (req.query.activityType as string) || undefined,
-  };
+function parseFilters(req: Request) {
+  return parseEmsProgressFilters(req.query as Record<string, unknown>);
 }
 
 const filterValidators = [
@@ -279,6 +263,7 @@ router.get(
         const totalsTotalCsScore = totals.activityQualitySum || 0;
         const totalsMaxCsScore = totals.totalAttempted * 5;
         const totalsHygienePct = totals.totalConnected > 0 ? Math.round(((totals.totalConnected - totals.identityWrongCount - totals.notAFarmerCount) / totals.totalConnected) * 100) : 0;
+        const totalsMeetingValidityPct = totals.totalConnected > 0 ? Math.round((totals.yesAttendedCount / totals.totalConnected) * 100) : 0;
         const totalsMeetingConversionPct = totals.totalConnected > 0 ? Math.round((totals.purchasedCount / totals.totalConnected) * 100) : 0;
         const totalsPurchaseIntentionPct =
           totals.yesPlusPurchasedCount + totals.willingNoCount > 0
@@ -310,6 +295,7 @@ router.get(
           ['Wrong identity', ...summaryRows.map((r) => r.identityWrongCount), totals.identityWrongCount],
           ['Yes', ...summaryRows.map((r) => r.yesAttendedCount), totals.yesAttendedCount],
           ['Hygiene %', ...summaryRows.map((r) => r.hygienePct), totalsHygienePct],
+          ['Meeting Validity (%)', ...summaryRows.map((r) => r.meetingValidityPct), totalsMeetingValidityPct],
           ['Product purchase'],
           ['Not Purchased', ...summaryRows.map((r) => r.notPurchasedCount), totals.notPurchasedCount],
           ['Purchased', ...summaryRows.map((r) => r.purchasedCount), totals.purchasedCount],
@@ -388,6 +374,94 @@ router.get(
         ];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), 'EMS Report (Line)');
       }
+
+      // Calculation guide sheet (same workbook for summary and line exports)
+      const calcSheetData: (string | number)[][] = [
+        ['EMS Report — Calculation Guide'],
+        [],
+        ['Metric', 'Formula', 'Notes'],
+        [
+          'Connected',
+          'callStatus = Connected AND (didAttend set OR hasPurchased set OR willingToPurchase set)',
+          'Intake must have progressed beyond dial status',
+        ],
+        [
+          'Connected (intake pending)',
+          'callStatus = Connected but didAttend / purchase / willing not yet captured',
+          'Excluded from Hygiene & Meeting Validity denominators',
+        ],
+        [
+          'Total calls',
+          'Connected + Connected (intake pending) + Disconnected + Incoming not Allowed + Invalid + No Ans',
+          'Same scope as Team Lead Task Allocation when date range is used',
+        ],
+        [],
+        ['Meeting attendance'],
+        ['No', 'didAttend = "No, I missed"', ''],
+        ['Wrong identity', 'didAttend = "Identity Wrong"', ''],
+        ['Yes', 'didAttend = "Yes, I attended"', 'Only Yes counts toward Meeting Validity'],
+        [
+          'Hygiene %',
+          '(Connected − Wrong identity − Not a Farmer) ÷ Connected × 100',
+          'Valid farmer identity among connected calls',
+        ],
+        [
+          'Meeting Validity (%)',
+          'Yes attended ÷ Connected × 100',
+          'Shown immediately after Hygiene %',
+        ],
+        [],
+        ['Product purchase'],
+        ['Not Purchased', 'hasPurchased = false', ''],
+        ['Purchased', 'hasPurchased = true', ''],
+        [
+          'Meeting conversion (%)',
+          'Purchased ÷ Connected × 100',
+          'Share of connected farmers who bought',
+        ],
+        [],
+        ['Purchase Intention'],
+        ['No', 'Not purchased AND (Likely to buy = No OR a non-purchase reason captured)', 'Reason alone counts as No when Likely to buy was not Yes'],
+        ['Yes', 'willingToPurchase = true (Likely to buy = Yes)', ''],
+        ['Yes + Purchased', 'Willing Yes + Purchased', 'Numerator for Purchase Intention %'],
+        [
+          'Purchase Intention (%)',
+          '(Yes + Purchased) ÷ (Yes + No + Purchased) × 100',
+          'Only farmers who answered commercial conversion; unanswered calls excluded',
+        ],
+        [],
+        ['Crop Solution Rating'],
+        ['1–5', 'Count of calls with activityQuality = 1…5', 'Farmer-rated crop solutions focus'],
+        ['0', 'Total calls − (count of ratings 1–5)', 'No rating captured'],
+        ['Total CS Score', 'Sum of (rating × count) for ratings 1–5', 'e.g. five 4-star ratings = 20'],
+        ['Max CS Score', 'Total calls × 5', 'If every call scored 5'],
+        [
+          'Crop Solutions Score (%)',
+          'Total CS Score ÷ Max CS Score × 100',
+          'Also called Crop Solutions Focus %',
+        ],
+        [],
+        [
+          'EMS Score',
+          '25% × Meeting conversion (%) + 25% × Purchase Intention (%) + 50% × Crop Solutions Score (%)',
+          'Hygiene % and Meeting Validity (%) are displayed but not included in EMS Score',
+        ],
+        [],
+        ['Column / row order'],
+        [
+          'Group columns (summary)',
+          'Sorted left → right by BU → Zone → Region → Territory (then MDO/TM name when grouped by those)',
+          'Alphabetical within each level; blank values last',
+        ],
+        [
+          'Region',
+          'Maps to activity state field in the system',
+          'Labeled Region in the UI and report',
+        ],
+      ];
+      const calcSheet = XLSX.utils.aoa_to_sheet(calcSheetData);
+      calcSheet['!cols'] = [{ wch: 28 }, { wch: 72 }, { wch: 56 }];
+      XLSX.utils.book_append_sheet(wb, calcSheet, 'Calculations');
 
       const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
       const filename = `ems-report-${groupBy}-${level}-${new Date().toISOString().slice(0, 10)}.xlsx`;

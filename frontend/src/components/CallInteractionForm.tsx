@@ -547,7 +547,13 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                                           return (
                                             <button
                                               key={reason}
-                                              onClick={() => setFormData((p: any) => ({ ...p, nonPurchaseReason: isSelected ? '' : reason }))}
+                                              onClick={() => setFormData((p: any) => ({
+                                                ...p,
+                                                nonPurchaseReason: isSelected ? '' : reason,
+                                                willingToPurchase: isSelected
+                                                  ? (p.willingToPurchase === true ? true : null)
+                                                  : (p.willingToPurchase === true ? true : false),
+                                              }))}
                                               className={`px-3 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-tighter transition-all min-h-[32px] ${
                                                 isSelected
                                                   ? 'bg-slate-950 text-white border-slate-950 shadow-sm'

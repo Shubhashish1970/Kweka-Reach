@@ -10,6 +10,10 @@ import { AppError } from '../middleware/errorHandler.js';
 import {
   getNextTaskForAgent,
   getAvailableTasksForAgent,
+  getAvailableTasksForAgentPaginated,
+  getAvailableTasksSummaryForAgent,
+  type DialerFilterBy,
+  type DialerTab,
   getPendingTasks,
   getPendingTasksFilterOptions,
   getTeamTasks,
@@ -43,8 +47,79 @@ router.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+function formatDialerTaskResponse(task: any) {
+  const farmer = task.farmer ?? task.farmerId;
+  const activity = task.activity ?? task.activityId;
+  return {
+    taskId: task._id.toString(),
+    farmer: {
+      name: farmer?.name || 'Unknown',
+      mobileNumber: farmer?.mobileNumber || 'Unknown',
+      location: farmer?.location || 'Unknown',
+      preferredLanguage: farmer?.preferredLanguage || 'Unknown',
+      photoUrl: farmer?.photoUrl,
+    },
+    activity: {
+      type: activity?.type || 'Unknown',
+      date: activity?.date || task.createdAt,
+      officerName: activity?.officerName || 'Unknown',
+      tmName: activity?.tmName || '',
+      location: activity?.location || 'Unknown',
+      territory: activity?.territoryName || activity?.territory || 'Unknown',
+      state: activity?.state || '',
+      crops: Array.isArray(activity?.crops) ? activity.crops : activity?.crops ? [activity.crops] : [],
+      products: Array.isArray(activity?.products) ? activity.products : activity?.products ? [activity.products] : [],
+    },
+    status: task.status,
+    scheduledDate: task.scheduledDate,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    isCallback: task.isCallback || false,
+    callbackNumber: task.callbackNumber || 0,
+    parentTaskId: task.parentTaskId?.toString?.() || task.parentTaskId || null,
+  };
+}
+
+function parseDialerTab(raw: string | undefined): DialerTab {
+  if (raw === 'in_progress') return 'in_progress';
+  if (raw === 'queue' || raw === 'sampled_in_queue') return 'queue';
+  if (raw === 'done' || raw === 'completed') return 'done';
+  return 'queue';
+}
+
+function parseDialerFilterBy(raw: string | undefined): DialerFilterBy {
+  if (raw === 'territory' || raw === 'tm' || raw === 'fda') return raw;
+  return '';
+}
+
+// @route   GET /api/tasks/available/summary
+// @desc    Dialer tab counts + filter facets (load after first page for faster open)
+// @access  Private (CC Agent only)
+router.get(
+  '/available/summary',
+  requirePermission('tasks.view.own'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authReq = req as AuthRequest;
+      const agentId = authReq.user._id.toString();
+      const filterBy = parseDialerFilterBy(req.query.filterBy as string | undefined);
+      const filterValuesRaw = req.query.filterValues as string | undefined;
+      const filterValues = filterValuesRaw
+        ? filterValuesRaw.split(',').map((v) => v.trim()).filter(Boolean)
+        : [];
+      const summary = await getAvailableTasksSummaryForAgent(agentId, {
+        filterBy: filterBy || undefined,
+        filterValues: filterValues.length ? filterValues : undefined,
+      });
+      res.json({ success: true, data: summary });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // @route   GET /api/tasks/available
-// @desc    Get all available tasks for CC Agent (for selection)
+// @desc    Paginated dialer tasks for one tab (language-matched, lazy-loaded)
 // @access  Private (CC Agent only)
 router.get(
   '/available',
@@ -53,44 +128,54 @@ router.get(
     try {
       const authReq = req as AuthRequest;
       const agentId = authReq.user._id.toString();
-      const tasks = await getAvailableTasksForAgent(agentId);
+      const tab = parseDialerTab(req.query.tab as string | undefined);
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+      const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+      const filterBy = parseDialerFilterBy(req.query.filterBy as string | undefined);
+      const filterValuesRaw = req.query.filterValues as string | undefined;
+      const filterValues = filterValuesRaw
+        ? filterValuesRaw.split(',').map((v) => v.trim()).filter(Boolean)
+        : [];
 
-      // Format tasks for response
-      const formattedTasks = tasks.map((task) => {
-        const farmer = task.farmerId as any;
-        const activity = task.activityId as any;
-        
-        return {
-          taskId: task._id.toString(),
-          farmer: {
-            name: farmer?.name || 'Unknown',
-            mobileNumber: farmer?.mobileNumber || 'Unknown',
-            location: farmer?.location || 'Unknown',
-            preferredLanguage: farmer?.preferredLanguage || 'Unknown',
-            photoUrl: farmer?.photoUrl,
-          },
-          activity: {
-            type: activity?.type || 'Unknown',
-            date: activity?.date || task.createdAt,
-            // Agent-facing: MDO + TM + Territory + State
-            officerName: activity?.officerName || 'Unknown', // MDO
-            tmName: activity?.tmName || '',
-            location: activity?.location || 'Unknown',
-            territory: activity?.territoryName || activity?.territory || 'Unknown',
-            state: activity?.state || '',
-            crops: Array.isArray(activity?.crops) ? activity.crops : (activity?.crops ? [activity.crops] : []),
-            products: Array.isArray(activity?.products) ? activity.products : (activity?.products ? [activity.products] : []),
-          },
-          status: task.status,
-          scheduledDate: task.scheduledDate,
-          createdAt: task.createdAt,
-          updatedAt: task.updatedAt,
-          // Callback fields
-          isCallback: task.isCallback || false,
-          callbackNumber: task.callbackNumber || 0,
-          parentTaskId: task.parentTaskId?.toString() || null,
-        };
+      const result = await getAvailableTasksForAgentPaginated(agentId, {
+        tab,
+        page,
+        limit,
+        search,
+        filterBy: filterBy || undefined,
+        filterValues: filterValues.length ? filterValues : undefined,
       });
+
+      const formattedTasks = result.tasks.map(formatDialerTaskResponse);
+
+      res.json({
+        success: true,
+        data: {
+          tasks: formattedTasks,
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          hasMore: result.hasMore,
+          count: formattedTasks.length,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Legacy full-list helper kept for scripts; not used by dialer UI.
+router.get(
+  '/available/all',
+  requirePermission('tasks.view.own'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authReq = req as AuthRequest;
+      const agentId = authReq.user._id.toString();
+      const tasks = await getAvailableTasksForAgent(agentId);
+      const formattedTasks = tasks.map((task) => formatDialerTaskResponse(task));
 
       res.json({
         success: true,

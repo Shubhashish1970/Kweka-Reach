@@ -190,7 +190,7 @@ async function main() {
     dBy[s] = (dBy[s] || 0) + 1;
   }
 
-  console.log('\n=== Dialer (getAvailableTasksForAgent: scheduledDate sort, limit 300, language filter) ===');
+  console.log('\n=== Dialer (getAvailableTasksForAgent: scheduledDate sort, language filter) ===');
   console.log('Rows returned:', dialerTasks.length, '| Total assigned CallTasks:', allAssigned);
   console.log('By status:', dBy);
 

@@ -136,21 +136,32 @@ describe('Agent screens: history stats & available tasks counts', () => {
     await mk('not_reachable');
     await mk('invalid_number');
 
-    const res = await request(app).get('/api/tasks/available').set('Authorization', `Bearer ${token}`);
-
+    const res = await request(app).get('/api/tasks/available/summary').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
-    const tasks = res.body.data?.tasks || [];
+    expect(res.body.data.inProgress).toBe(1);
+    expect(res.body.data.queue).toBe(2);
+    expect(res.body.data.doneToday).toBe(3);
+
+    const tabs = ['in_progress', 'queue', 'done'] as const;
+    const all: any[] = [];
+    for (const tab of tabs) {
+      const pageRes = await request(app)
+        .get(`/api/tasks/available?tab=${tab}&limit=100`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(pageRes.status).toBe(200);
+      all.push(...(pageRes.body.data?.tasks || []));
+    }
     let inProgress = 0;
     let queue = 0;
     let doneTab = 0;
-    for (const t of tasks) {
+    for (const t of all) {
       const s = t.status;
       if (s === 'in_progress') inProgress++;
       else if (s === 'sampled_in_queue') queue++;
       else if (s === 'completed' || s === 'not_reachable' || s === 'invalid_number') doneTab++;
     }
-    expect(inProgress + queue + doneTab).toBe(tasks.length);
-    expect(tasks.length).toBe(6);
+    expect(inProgress + queue + doneTab).toBe(all.length);
+    expect(all.length).toBe(6);
   });
 
   test('History filter options: distinct territories & activity types for agent (no cross-filter shrink)', async () => {

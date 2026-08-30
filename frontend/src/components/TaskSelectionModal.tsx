@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { X, Phone, PhoneCall, MapPin, Loader2, Search, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { tasksAPI } from '../services/api';
 import { formatDateIST } from '../utils/dateRangeUtils';
@@ -42,7 +42,9 @@ interface TaskSelectionModalProps {
 
 type DialerFilterTab = 'in_progress' | 'sampled_in_queue' | 'completed';
 type DialerFilterBy = '' | 'territory' | 'tm' | 'fda';
+type DialerApiTab = 'in_progress' | 'queue' | 'done';
 
+const DIALER_PAGE_SIZE = 50;
 const DIALER_FILTERS_STORAGE_KEY = 'agent.dialer.filters';
 const DIALER_FILTER_TABS: DialerFilterTab[] = ['in_progress', 'sampled_in_queue', 'completed'];
 const DIALER_FILTER_BY_VALUES: DialerFilterBy[] = ['', 'territory', 'tm', 'fda'];
@@ -76,12 +78,31 @@ function loadSavedDialerFilters(): SavedDialerFilters | null {
   }
 }
 
+function tabToApiTab(tab: DialerFilterTab): DialerApiTab {
+  if (tab === 'in_progress') return 'in_progress';
+  if (tab === 'completed') return 'done';
+  return 'queue';
+}
+
 const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose, onSelectTask }) => {
   const savedDialerFilters = useMemo(() => loadSavedDialerFilters(), []);
   const hasSavedDialerFiltersRef = useRef(savedDialerFilters !== null);
 
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [listTotal, setListTotal] = useState(0);
+  const [isLoadingInitial, setIsLoadingInitial] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [summary, setSummary] = useState<{
+    inProgress: number;
+    queue: number;
+    doneToday: number;
+    filterOptions: { territories: string[]; tms: string[]; fdas: string[] };
+  } | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const listRequestIdRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isLoadingTask, setIsLoadingTask] = useState(false);
@@ -90,11 +111,86 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
   const [filterBy, setFilterBy] = useState<DialerFilterBy>(() => savedDialerFilters?.filterBy ?? '');
   const [filterValues, setFilterValues] = useState<string[]>(() => savedDialerFilters?.filterValues ?? []);
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchAvailableTasks();
+  const fetchSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const response = await tasksAPI.getAvailableTasksSummary({
+        filterBy: filterBy || undefined,
+        filterValues: filterValues.length ? filterValues : undefined,
+      });
+      if (response.success && response.data) {
+        setSummary(response.data);
+        if (savedDialerFilters === null && response.data.inProgress > 0) {
+          setFilter('in_progress');
+        }
+      }
+    } catch {
+      /* counts optional — list still works */
+    } finally {
+      setSummaryLoading(false);
     }
-  }, [isOpen]);
+  }, [filterBy, filterValues, savedDialerFilters]);
+
+  const fetchTasksPage = useCallback(
+    async (pageNum: number, append: boolean) => {
+      const requestId = ++listRequestIdRef.current;
+      if (append) setIsLoadingMore(true);
+      else {
+        setIsLoadingInitial(true);
+        setError(null);
+      }
+      try {
+        const response = await tasksAPI.getAvailableTasks({
+          tab: tabToApiTab(filter),
+          page: pageNum,
+          limit: DIALER_PAGE_SIZE,
+          search: searchQuery.trim() || undefined,
+          filterBy: filterBy || undefined,
+          filterValues: filterValues.length ? filterValues : undefined,
+        });
+        if (requestId !== listRequestIdRef.current) return;
+        if (response.success && response.data) {
+          const list = response.data.tasks || [];
+          setTasks((prev) => (append ? [...prev, ...list] : list));
+          setPage(response.data.page ?? pageNum);
+          setHasMore(!!response.data.hasMore);
+          setListTotal(response.data.total ?? list.length);
+        } else if (!append) {
+          setError('Failed to load tasks');
+          setTasks([]);
+        }
+      } catch (err: any) {
+        if (requestId !== listRequestIdRef.current) return;
+        if (!append) {
+          setError(err.message || 'Failed to load tasks');
+          setTasks([]);
+        }
+      } finally {
+        if (requestId === listRequestIdRef.current) {
+          setIsLoadingInitial(false);
+          setIsLoadingMore(false);
+        }
+      }
+    },
+    [filter, searchQuery, filterBy, filterValues]
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = setTimeout(() => {
+      setTasks([]);
+      setPage(1);
+      setHasMore(false);
+      setListTotal(0);
+      void fetchTasksPage(1, false);
+    }, searchQuery.trim() ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [isOpen, filter, filterBy, filterValues, searchQuery, fetchTasksPage]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void fetchSummary();
+  }, [isOpen, filterBy, filterValues, fetchSummary]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -104,26 +200,22 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
     hasSavedDialerFiltersRef.current = true;
   }, [filter, filterBy, filterValues, searchQuery]);
 
-  const fetchAvailableTasks = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await tasksAPI.getAvailableTasks();
-      if (response.success && response.data) {
-        const list = response.data.tasks || [];
-        setTasks(list);
-        if (!hasSavedDialerFiltersRef.current) {
-          const inProgress = list.filter((t) => t.status === 'in_progress').length;
-          setFilter(inProgress === 0 ? 'sampled_in_queue' : 'in_progress');
-        }
-      } else {
-        setError('Failed to load tasks');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load tasks');
-    } finally {
-      setIsLoading(false);
+  const loadMore = useCallback(() => {
+    if (isLoadingInitial || isLoadingMore || !hasMore) return;
+    void fetchTasksPage(page + 1, true);
+  }, [fetchTasksPage, hasMore, isLoadingInitial, isLoadingMore, page]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el || isLoadingMore || isLoadingInitial || !hasMore) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
+      loadMore();
     }
+  };
+
+  const retryLoad = () => {
+    void fetchTasksPage(1, false);
+    void fetchSummary();
   };
 
   const handleSelectTask = async (task: Task) => {
@@ -145,34 +237,14 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
     }
   };
 
-  const norm = (s: string | undefined) => (s ?? '').trim();
+  const territoryOptions = summary?.filterOptions.territories ?? [];
+  const tmOptions = summary?.filterOptions.tms ?? [];
+  const fdaOptions = summary?.filterOptions.fdas ?? [];
 
-  const territoryOptions = useMemo(() => {
-    const set = new Set<string>();
-    tasks.forEach(t => {
-      const v = norm(t.activity?.territory);
-      if (v) set.add(v);
-    });
-    return Array.from(set).sort();
-  }, [tasks]);
-
-  const tmOptions = useMemo(() => {
-    const set = new Set<string>();
-    tasks.forEach(t => {
-      const v = norm(t.activity?.tmName);
-      if (v) set.add(v);
-    });
-    return Array.from(set).sort();
-  }, [tasks]);
-
-  const fdaOptions = useMemo(() => {
-    const set = new Set<string>();
-    tasks.forEach(t => {
-      const v = norm(t.activity?.officerName);
-      if (v) set.add(v);
-    });
-    return Array.from(set).sort();
-  }, [tasks]);
+  const formatCount = (n: number | undefined) => (summaryLoading && n === undefined ? '…' : String(n ?? 0));
+  const inProgressCount = summary?.inProgress;
+  const queueCount = summary?.queue;
+  const completedCount = summary?.doneToday;
 
   const nameOptions = useMemo(() => {
     if (filterBy === 'territory') return territoryOptions;
@@ -180,27 +252,6 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
     if (filterBy === 'fda') return fdaOptions;
     return [];
   }, [filterBy, territoryOptions, tmOptions, fdaOptions]);
-
-  const tasksByFilter = useMemo(() => {
-    if (!filterBy || filterValues.length === 0) return tasks;
-    const selected = new Set(filterValues.map(norm));
-    return tasks.filter(t => {
-      if (filterBy === 'territory') return selected.has(norm(t.activity?.territory));
-      if (filterBy === 'tm') return selected.has(norm(t.activity?.tmName));
-      if (filterBy === 'fda') return selected.has(norm(t.activity?.officerName));
-      return true;
-    });
-  }, [tasks, filterBy, filterValues]);
-
-  const { inProgressCount, queueCount, completedCount } = useMemo(() => {
-    let inProgress = 0, queue = 0, completed = 0;
-    tasksByFilter.forEach(t => {
-      if (t.status === 'in_progress') inProgress++;
-      else if (t.status === 'sampled_in_queue') queue++;
-      else if (t.status === 'completed' || t.status === 'not_reachable' || t.status === 'invalid_number') completed++;
-    });
-    return { inProgressCount: inProgress, queueCount: queue, completedCount: completed };
-  }, [tasksByFilter]);
 
   const handleFilterByChange = (value: '' | 'territory' | 'tm' | 'fda') => {
     setFilterBy(value);
@@ -212,33 +263,6 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
       prev.includes(item) ? prev.filter((v) => v !== item) : [...prev, item]
     );
   };
-
-  const filteredTasks = tasksByFilter.filter(task => {
-    const query = searchQuery.toLowerCase();
-    const matchesSearch =
-      !searchQuery ||
-      task.farmer.name.toLowerCase().includes(query) ||
-      task.farmer.mobileNumber.includes(query) ||
-      task.farmer.location.toLowerCase().includes(query);
-    const matchesFilter =
-      (filter === 'in_progress' && task.status === 'in_progress') ||
-      (filter === 'sampled_in_queue' && task.status === 'sampled_in_queue') ||
-      (filter === 'completed' && (task.status === 'completed' || task.status === 'not_reachable' || task.status === 'invalid_number'));
-    return matchesSearch && matchesFilter;
-  });
-
-  // Sort tasks: in_progress first, then queue, then completed; within group by scheduled date
-  const sortedTasks = [...filteredTasks].sort((a, b) => {
-    const rank = (s: Task['status']) => {
-      if (s === 'in_progress') return 0;
-      if (s === 'sampled_in_queue') return 1;
-      return 2; // completed/not_reachable/invalid_number
-    };
-    const rA = rank(a.status);
-    const rB = rank(b.status);
-    if (rA !== rB) return rA - rB;
-    return new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime();
-  });
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
@@ -342,7 +366,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                     />
                   </div>
                   <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap self-end pb-2" title="In progress / Queue / Completed">
-                    ({inProgressCount} / {queueCount} / {completedCount})
+                    ({formatCount(inProgressCount)} / {formatCount(queueCount)} / {formatCount(completedCount)})
                   </span>
                 </div>
               </div>
@@ -359,7 +383,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              In Progress ({inProgressCount})
+              In Progress ({formatCount(inProgressCount)})
             </button>
             <button
               onClick={() => setFilter('sampled_in_queue')}
@@ -369,7 +393,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Queue ({queueCount})
+              Queue ({formatCount(queueCount)})
             </button>
             <button
               onClick={() => setFilter('completed')}
@@ -379,20 +403,19 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Done (Today) ({completedCount})
+              Done (Today) ({formatCount(completedCount)})
             </button>
           </div>
           <p className="text-[10px] text-slate-500 mt-2 leading-snug">
-            Up to 300 earliest-scheduled open tasks (language-matched). &quot;Done&quot; shows successful and unsuccessful
-            outcomes completed <span className="font-semibold text-slate-600">today (IST)</span> and resets each day —
-            use the <span className="font-semibold text-slate-600">phone icon</span> to reopen a task. Full history uses
-            the History date range and may show different totals.
+            Queue loads in pages (earliest scheduled first, language-matched). Tab totals load in the background.
+            &quot;Done&quot; shows outcomes completed <span className="font-semibold text-slate-600">today (IST)</span> —
+            use the <span className="font-semibold text-slate-600">phone icon</span> to reopen a task.
           </p>
         </div>
 
         {/* Content - Light theme */}
-        <div className="flex-1 overflow-y-auto bg-slate-50">
-          {isLoading ? (
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto bg-slate-50">
+          {isLoadingInitial ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 className="animate-spin text-lime-600" size={32} />
               <span className="ml-3 text-slate-600 font-medium">Loading contacts...</span>
@@ -402,13 +425,13 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
               <Phone size={48} className="mx-auto text-slate-300 mb-4" />
               <p className="text-red-600 mb-4 font-medium">{error}</p>
                 <button
-                onClick={fetchAvailableTasks}
+                onClick={retryLoad}
                 className="px-6 py-2 bg-slate-900 text-white rounded-2xl font-medium hover:bg-slate-800"
               >
                 Retry
               </button>
             </div>
-          ) : sortedTasks.length === 0 ? (
+          ) : tasks.length === 0 ? (
             <div className="text-center py-20 px-6">
               <Phone size={48} className="mx-auto text-slate-300 mb-4" />
               <p className="text-slate-600 font-medium text-lg mb-2">
@@ -422,7 +445,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
             </div>
           ) : (
             <div className="divide-y divide-slate-200">
-              {sortedTasks.map((task) => {
+              {tasks.map((task) => {
                 const isSelected = selectedTaskId === task.taskId;
                 const isInProgress = task.status === 'in_progress';
                 const isCompleted = task.status === 'completed' || task.status === 'not_reachable' || task.status === 'invalid_number';
@@ -620,6 +643,12 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                   </button>
                 );
               })}
+              {isLoadingMore && (
+                <div className="flex items-center justify-center py-4 text-slate-500 text-sm">
+                  <Loader2 className="animate-spin text-lime-600 mr-2" size={18} />
+                  Loading more…
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -630,11 +659,12 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
             <p className="text-xs text-slate-500">
               {tasks.length > 0 ? (
                 <>
-                  <span className="font-bold text-slate-700">{sortedTasks.length}</span> contact
-                  {sortedTasks.length !== 1 ? 's' : ''} available
-                  {(searchQuery || filterValues.length > 0) && tasks.length > sortedTasks.length && (
-                    <span> (filtered from {tasks.length})</span>
-                  )}
+                  Showing <span className="font-bold text-slate-700">{tasks.length}</span>
+                  {listTotal > tasks.length ? (
+                    <> of <span className="font-bold text-slate-700">{listTotal}</span></>
+                  ) : null}{' '}
+                  contact{listTotal !== 1 ? 's' : ''}
+                  {hasMore ? ' — scroll for more' : ''}
                 </>
               ) : (
                 'No contacts available'

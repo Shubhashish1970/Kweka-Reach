@@ -31,7 +31,227 @@ export const callTaskNeedsAgentMongoFilter = (): Record<string, unknown> => ({
 });
 
 const OPEN_DIALER_STATUSES: TaskStatus[] = ['sampled_in_queue', 'in_progress'];
-const TERMINAL_DIALER_STATUSES: TaskStatus[] = ['completed', 'not_reachable', 'invalid_number', 'cancelled'];
+const TERMINAL_DIALER_STATUSES: TaskStatus[] = ['completed', 'not_reachable', 'invalid_number'];
+const DIALER_DONE_STATUSES: TaskStatus[] = ['completed', 'not_reachable', 'invalid_number'];
+
+export type DialerTab = 'in_progress' | 'queue' | 'done';
+export type DialerFilterBy = 'territory' | 'tm' | 'fda' | '';
+
+export interface DialerListOptions {
+  tab: DialerTab;
+  page?: number;
+  limit?: number;
+  search?: string;
+  filterBy?: DialerFilterBy;
+  filterValues?: string[];
+}
+
+async function getDialerAgent(agentId: string) {
+  const agent = await User.findById(agentId);
+  if (!agent || !agent.isActive || agent.role !== 'cc_agent') {
+    throw new Error('Invalid or inactive agent');
+  }
+  return agent;
+}
+
+function buildDialerTaskMatch(agentObjectId: mongoose.Types.ObjectId, tab: DialerTab): Record<string, unknown> {
+  const base: Record<string, unknown> = { assignedAgentId: agentObjectId };
+  if (tab === 'in_progress') {
+    base.status = 'in_progress';
+  } else if (tab === 'queue') {
+    base.status = 'sampled_in_queue';
+  } else {
+    const { start, end } = getIstCalendarDayBounds();
+    base.status = { $in: DIALER_DONE_STATUSES };
+    base.updatedAt = { $gte: start, $lte: end };
+  }
+  return base;
+}
+
+function buildDialerLookupFilterStages(
+  languages: string[],
+  search?: string,
+  filterBy?: DialerFilterBy,
+  filterValues?: string[]
+): mongoose.PipelineStage[] {
+  const stages: mongoose.PipelineStage[] = [
+    {
+      $lookup: {
+        from: 'farmers',
+        localField: 'farmerId',
+        foreignField: '_id',
+        as: 'farmer',
+      },
+    },
+    { $unwind: { path: '$farmer', preserveNullAndEmptyArrays: false } },
+    { $match: { 'farmer.preferredLanguage': { $in: languages } } },
+    {
+      $lookup: {
+        from: 'activities',
+        localField: 'activityId',
+        foreignField: '_id',
+        as: 'activity',
+      },
+    },
+    { $unwind: { path: '$activity', preserveNullAndEmptyArrays: false } },
+  ];
+
+  if (filterBy && filterValues?.length) {
+    if (filterBy === 'territory') {
+      stages.push({
+        $match: {
+          $or: [
+            { 'activity.territory': { $in: filterValues } },
+            { 'activity.territoryName': { $in: filterValues } },
+          ],
+        },
+      });
+    } else if (filterBy === 'tm') {
+      stages.push({ $match: { 'activity.tmName': { $in: filterValues } } });
+    } else if (filterBy === 'fda') {
+      stages.push({ $match: { 'activity.officerName': { $in: filterValues } } });
+    }
+  }
+
+  const q = search?.trim();
+  if (q) {
+    const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    stages.push({
+      $match: {
+        $or: [
+          { 'farmer.name': regex },
+          { 'farmer.mobileNumber': regex },
+          { 'farmer.location': regex },
+        ],
+      },
+    });
+  }
+
+  return stages;
+}
+
+/** Paginated dialer list for one tab (language-matched). */
+export const getAvailableTasksForAgentPaginated = async (
+  agentId: string,
+  options: DialerListOptions
+): Promise<{ tasks: any[]; page: number; limit: number; total: number; hasMore: boolean }> => {
+  const agent = await getDialerAgent(agentId);
+  const languages = agent.languageCapabilities || [];
+  const page = Math.max(1, options.page ?? 1);
+  const limit = Math.min(100, Math.max(1, options.limit ?? 50));
+  const skip = (page - 1) * limit;
+  const agentObjectId = new mongoose.Types.ObjectId(agentId);
+  const sortStage: mongoose.PipelineStage =
+    options.tab === 'done' ? { $sort: { updatedAt: -1 } } : { $sort: { scheduledDate: 1 } };
+
+  const pipeline: mongoose.PipelineStage[] = [
+    { $match: buildDialerTaskMatch(agentObjectId, options.tab) },
+    ...buildDialerLookupFilterStages(languages, options.search, options.filterBy, options.filterValues),
+    sortStage,
+    {
+      $facet: {
+        items: [{ $skip: skip }, { $limit: limit }],
+        total: [{ $count: 'count' }],
+      },
+    },
+  ];
+
+  const [result] = await CallTask.aggregate(pipeline);
+  const items = result?.items ?? [];
+  const total = Number(result?.total?.[0]?.count ?? 0);
+  return {
+    tasks: items,
+    page,
+    limit,
+    total,
+    hasMore: skip + items.length < total,
+  };
+};
+
+/** Tab counts + filter facet options (deferred load in dialer UI). */
+export const getAvailableTasksSummaryForAgent = async (
+  agentId: string,
+  options?: { filterBy?: DialerFilterBy; filterValues?: string[] }
+): Promise<{
+  inProgress: number;
+  queue: number;
+  doneToday: number;
+  filterOptions: { territories: string[]; tms: string[]; fdas: string[] };
+}> => {
+  const agent = await getDialerAgent(agentId);
+  const languages = agent.languageCapabilities || [];
+  const agentObjectId = new mongoose.Types.ObjectId(agentId);
+  const { start, end } = getIstCalendarDayBounds();
+
+  const baseMatch: Record<string, unknown> = {
+    assignedAgentId: agentObjectId,
+    $or: [
+      { status: { $in: OPEN_DIALER_STATUSES } },
+      {
+        status: { $in: DIALER_DONE_STATUSES },
+        updatedAt: { $gte: start, $lte: end },
+      },
+    ],
+  };
+
+  const pipeline: mongoose.PipelineStage[] = [
+    { $match: baseMatch },
+    ...buildDialerLookupFilterStages(
+      languages,
+      undefined,
+      options?.filterBy,
+      options?.filterValues
+    ),
+    {
+      $facet: {
+        inProgress: [{ $match: { status: 'in_progress' } }, { $count: 'count' }],
+        queue: [{ $match: { status: 'sampled_in_queue' } }, { $count: 'count' }],
+        doneToday: [
+          {
+            $match: {
+              status: { $in: DIALER_DONE_STATUSES },
+              updatedAt: { $gte: start, $lte: end },
+            },
+          },
+          { $count: 'count' },
+        ],
+        territories: [
+          {
+            $group: {
+              _id: {
+                $ifNull: [
+                  { $cond: [{ $ne: ['$activity.territoryName', ''] }, '$activity.territoryName', null] },
+                  '$activity.territory',
+                ],
+              },
+            },
+          },
+        ],
+        tms: [{ $group: { _id: '$activity.tmName' } }],
+        fdas: [{ $group: { _id: '$activity.officerName' } }],
+      },
+    },
+  ];
+
+  const [result] = await CallTask.aggregate(pipeline);
+  const pickCount = (arr: { count?: number }[] | undefined) => Number(arr?.[0]?.count ?? 0);
+  const pickStrings = (arr: { _id?: string | null }[] | undefined) =>
+    (arr || [])
+      .map((r) => (typeof r._id === 'string' ? r._id.trim() : ''))
+      .filter((s) => s.length > 0)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+  return {
+    inProgress: pickCount(result?.inProgress),
+    queue: pickCount(result?.queue),
+    doneToday: pickCount(result?.doneToday),
+    filterOptions: {
+      territories: pickStrings(result?.territories),
+      tms: pickStrings(result?.tms),
+      fdas: pickStrings(result?.fdas),
+    },
+  };
+};
 
 /**
  * Get all tasks for an agent that can be shown in the dialer (queue/in-progress + today's Done)
@@ -65,7 +285,6 @@ export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]>
         .populate(populateFarmer)
         .populate(populateActivity)
         .sort({ scheduledDate: 1 })
-        .limit(300)
         .lean(),
       CallTask.find({
         assignedAgentId: agentObjectId,
@@ -75,7 +294,6 @@ export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]>
         .populate(populateFarmer)
         .populate(populateActivity)
         .sort({ updatedAt: -1 })
-        .limit(300)
         .lean(),
     ]);
 

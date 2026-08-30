@@ -158,8 +158,48 @@ export const tasksAPI = {
     return response;
   },
 
-  getAvailableTasks: async (abortSignal?: AbortSignal) => {
-    return apiRequest<{ success: boolean; data: { tasks: any[]; count: number } }>('/tasks/available', {}, abortSignal);
+  getAvailableTasks: async (
+    filters?: {
+      tab?: 'in_progress' | 'queue' | 'done' | 'sampled_in_queue' | 'completed';
+      page?: number;
+      limit?: number;
+      search?: string;
+      filterBy?: '' | 'territory' | 'tm' | 'fda';
+      filterValues?: string[];
+    },
+    abortSignal?: AbortSignal
+  ) => {
+    const params = new URLSearchParams();
+    if (filters?.tab) params.append('tab', filters.tab);
+    if (filters?.page) params.append('page', String(filters.page));
+    if (filters?.limit) params.append('limit', String(filters.limit));
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.filterBy) params.append('filterBy', filters.filterBy);
+    if (filters?.filterValues?.length) params.append('filterValues', filters.filterValues.join(','));
+    const query = params.toString();
+    return apiRequest<{
+      success: boolean;
+      data: { tasks: any[]; count: number; page: number; limit: number; total: number; hasMore: boolean };
+    }>(`/tasks/available${query ? `?${query}` : ''}`, {}, abortSignal);
+  },
+
+  getAvailableTasksSummary: async (
+    filters?: { filterBy?: '' | 'territory' | 'tm' | 'fda'; filterValues?: string[] },
+    abortSignal?: AbortSignal
+  ) => {
+    const params = new URLSearchParams();
+    if (filters?.filterBy) params.append('filterBy', filters.filterBy);
+    if (filters?.filterValues?.length) params.append('filterValues', filters.filterValues.join(','));
+    const query = params.toString();
+    return apiRequest<{
+      success: boolean;
+      data: {
+        inProgress: number;
+        queue: number;
+        doneToday: number;
+        filterOptions: { territories: string[]; tms: string[]; fdas: string[] };
+      };
+    }>(`/tasks/available/summary${query ? `?${query}` : ''}`, {}, abortSignal);
   },
 
   loadTask: async (taskId: string) => {

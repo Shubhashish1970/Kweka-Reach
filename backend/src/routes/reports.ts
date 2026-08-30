@@ -320,9 +320,9 @@ router.get(
         const headerRow = ['', ...groupLabels, 'Totals'];
         const groupByLabel = { tm: 'TM', fda: 'MDO', bu: 'BU', zone: 'Zone', region: 'Region', territory: 'Territory' }[groupBy] || groupBy;
         const groupByNote = `Group By: ${groupByLabel}`;
-        const taskAllocNote =
-          'When date range is used, EMS uses task scheduled date so Total calls = Completed + Not reachable + Invalid from Team Lead Task Allocation (same scope).';
-        const sheetData = [headerRow, [groupByNote], [taskAllocNote], [], ...metricRows];
+        const activityDateNote =
+          'Date range filters use activity date (field meeting date). Validation calls may complete later than the activity due to cooling period.';
+        const sheetData = [headerRow, [groupByNote], [activityDateNote], [], ...metricRows];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), 'EMS Report');
       } else {
         const lineRows = rows as EmsReportLineRow[];
@@ -393,7 +393,7 @@ router.get(
         [
           'Total calls',
           'Connected + Connected (intake pending) + Disconnected + Incoming not Allowed + Invalid + No Ans',
-          'Same scope as Team Lead Task Allocation when date range is used',
+          'All attempted validation calls for activities in the selected activity-date range',
         ],
         [],
         ['Meeting attendance'],

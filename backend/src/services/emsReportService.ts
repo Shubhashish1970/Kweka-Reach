@@ -2,11 +2,8 @@ import { Activity } from '../models/Activity.js';
 import { CallTask } from '../models/CallTask.js';
 import mongoose from 'mongoose';
 import {
-  buildActivityMatch,
-  buildActivityMatchWithoutDate,
-  buildActivityPipelineMatch,
-  buildEmsTaskBaseMatch,
-  hasEmsDateFilter,
+  buildEmsCallTaskMatch,
+  getEmsScopedActivityIds,
   type EmsProgressFilters,
 } from './kpiService.js';
 
@@ -261,7 +258,7 @@ function buildRelativeRemarks(meetingValidityPct: number, meetingConversionPct: 
 /**
  * EMS Report summary: one row per group (TM, MDO, BU, Zone, Region, Territory).
  * Includes all attempted calls: status completed (Connected), not_reachable (Disconnected/Incoming N/A/No Answer), invalid_number (Invalid).
- * When dateFrom/dateTo are provided, tasks are filtered by scheduledDate so totals tally with Team Lead Task Allocation (same scope).
+ * Date range filters use activity.date (validation calls may complete after the activity due to cooling period).
  * Connected = callLog.callStatus === 'Connected' and progressed to next stage or beyond.
  */
 export async function getEmsReportSummary(
@@ -271,8 +268,9 @@ export async function getEmsReportSummary(
   const activityCollection = Activity.collection.name;
   const groupField = getGroupField(groupBy);
 
-  const hasDateFilter = hasEmsDateFilter(filters);
-  const taskMatch: Record<string, unknown> = buildEmsTaskBaseMatch(filters);
+  const activityIds = await getEmsScopedActivityIds(filters);
+  if (activityIds.length === 0) return [];
+  const taskMatch = buildEmsCallTaskMatch(activityIds);
 
   const pipeline: any[] = [
     { $match: taskMatch },
@@ -286,21 +284,6 @@ export async function getEmsReportSummary(
     },
     { $unwind: '$activity' },
   ];
-
-  if (hasDateFilter) {
-    const activityMatchNoDate = buildActivityMatchWithoutDate(filters);
-    const matchForPipeline = buildActivityPipelineMatch(activityMatchNoDate);
-    if (Object.keys(matchForPipeline).length) {
-      pipeline.push({ $match: matchForPipeline });
-    }
-  } else {
-    const activityMatch = buildActivityMatch(filters);
-    const activityIds = await Activity.find(activityMatch as any).select('_id').lean();
-    const ids = activityIds.map((a: any) => a._id);
-    if (ids.length === 0) return [];
-    (taskMatch as any).activityId = { $in: ids };
-    pipeline[0] = { $match: taskMatch };
-  }
 
   pipeline.push(
     {
@@ -524,43 +507,22 @@ export async function getEmsReportSummary(
 
 /**
  * EMS Report line-level: one row per call with metrics and relative remarks.
- * When dateFrom/dateTo are provided, tasks are filtered by scheduledDate so totals tally with Task Allocation.
+ * Date range filters use activity.date (validation calls may complete after the activity).
  */
 export async function getEmsReportLineLevel(
   filters: EmsProgressFilters | undefined,
   groupBy: EmsReportGroupBy
 ): Promise<EmsReportLineRow[]> {
   const groupField = getGroupField(groupBy);
-  const hasDateFilter = hasEmsDateFilter(filters);
 
-  const taskQuery: any = { ...buildEmsTaskBaseMatch(filters) };
-  if (!hasDateFilter) {
-    const activityMatch = buildActivityMatch(filters);
-    const activityIds = await Activity.find(activityMatch as any).select('_id').lean();
-    const ids = activityIds.map((a: any) => a._id);
-    if (ids.length === 0) return [];
-    taskQuery.activityId = { $in: ids };
-  }
+  const activityIds = await getEmsScopedActivityIds(filters);
+  if (activityIds.length === 0) return [];
 
-  let tasksList = await CallTask.find(taskQuery)
+  const tasksList = await CallTask.find(buildEmsCallTaskMatch(activityIds))
     .populate('activityId', 'date officerName tmName territoryName zoneName buName state territory type')
     .populate('farmerId', 'name mobileNumber')
     .sort({ updatedAt: -1 })
     .lean();
-
-  if (hasDateFilter) {
-    const activityMatchNoDate = buildActivityMatchWithoutDate(filters);
-    tasksList = (tasksList as any[]).filter((t: any) => {
-      const act = t.activityId;
-      if (!act) return false;
-      if (activityMatchNoDate.type && act.type !== activityMatchNoDate.type) return false;
-      if (activityMatchNoDate.state && act.state !== activityMatchNoDate.state) return false;
-      if (activityMatchNoDate.zoneName && act.zoneName !== activityMatchNoDate.zoneName) return false;
-      if (activityMatchNoDate.buName && act.buName !== activityMatchNoDate.buName) return false;
-      if (filters?.territory && act.territoryName !== filters.territory && act.territory !== filters.territory) return false;
-      return true;
-    });
-  }
 
   const rows: EmsReportLineRow[] = [];
   for (const t of tasksList as any[]) {
@@ -654,27 +616,20 @@ export interface EmsTrendRow {
 
 /**
  * EMS trends: time-series of aggregate metrics by period (daily, weekly, monthly).
- * When dateFrom/dateTo are provided, uses task scheduledDate for filter and bucketing so totals tally with Task Allocation.
+ * Date range filters and trend buckets use activity.date.
  */
 export async function getEmsReportTrends(
   filters: EmsProgressFilters | undefined,
   bucket: EmsTrendBucket
 ): Promise<EmsTrendRow[]> {
   const activityCollection = Activity.collection.name;
-  const hasDateFilter = hasEmsDateFilter(filters);
 
-  const taskMatch: Record<string, unknown> = { ...buildEmsTaskBaseMatch(filters) };
-  if (!hasDateFilter) {
-    const activityMatch = buildActivityMatch(filters);
-    const activityIds = await Activity.find(activityMatch as any).select('_id').lean();
-    const ids = activityIds.map((a: any) => a._id);
-    if (ids.length === 0) return [];
-    (taskMatch as any).activityId = { $in: ids };
-  }
+  const activityIds = await getEmsScopedActivityIds(filters);
+  if (activityIds.length === 0) return [];
+  const taskMatch = buildEmsCallTaskMatch(activityIds);
 
   const dateFormat =
     bucket === 'monthly' ? '%Y-%m' : bucket === 'weekly' ? '%G-W%V' : '%Y-%m-%d';
-  const dateFieldForPeriod = hasDateFilter ? '$scheduledDate' : '$activity.date';
 
   const pipeline: any[] = [
     { $match: taskMatch },
@@ -688,17 +643,10 @@ export async function getEmsReportTrends(
     },
     { $unwind: '$activity' },
   ];
-  if (hasDateFilter) {
-    const activityMatchNoDate = buildActivityMatchWithoutDate(filters);
-    const matchForPipeline = buildActivityPipelineMatch(activityMatchNoDate);
-    if (Object.keys(matchForPipeline).length) {
-      pipeline.push({ $match: matchForPipeline });
-    }
-  }
   pipeline.push(
     {
       $addFields: {
-        __period: { $dateToString: { format: dateFormat, date: dateFieldForPeriod } },
+        __period: { $dateToString: { format: dateFormat, date: '$activity.date' } },
         __isConnected: {
           $and: [
             { $eq: ['$callLog.callStatus', 'Connected'] },

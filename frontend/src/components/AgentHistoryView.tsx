@@ -5,12 +5,14 @@ import StyledSelect from './shared/StyledSelect';
 import { tasksAPI } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateTimeIST } from '../utils/dateRangeUtils';
+import { getTaskStatusLabel } from '../utils/taskStatusLabels';
 
 type HistoryStatus = '' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number' | 'cancelled';
 
 type HistoryColumnKey =
   | 'expand'
   | 'farmer'
+  | 'taskStatus'
   | 'outcome'
   | 'outbound'
   | 'activityType'
@@ -20,7 +22,8 @@ type HistoryColumnKey =
 
 const DEFAULT_COL_WIDTHS: Record<HistoryColumnKey, number> = {
   expand: 48,
-  farmer: 200,
+  farmer: 180,
+  taskStatus: 110,
   outcome: 120,
   outbound: 100,
   activityType: 100,
@@ -392,6 +395,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
     const base: Array<[HistoryColumnKey, string]> = [
       ['expand', ''],
       ['farmer', 'Farmer'],
+      ['taskStatus', 'Status'],
       ['outcome', 'Outcome'],
       ['outbound', 'Outbound'],
       ['activityType', 'Activity'],
@@ -420,7 +424,8 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
       const farmer = t.farmerId || t.farmer || {};
       const activity = t.activityId || t.activity || {};
       if (key === 'farmer') return String(farmer?.name || '');
-      if (key === 'outcome') return String(t.status || '');
+      if (key === 'taskStatus') return String(t.status || '');
+      if (key === 'outcome') return String(t.outcome || t.status || '');
       if (key === 'outbound') return String(t.callLog?.callStatus || '');
       if (key === 'activityType') return String(activity?.type || '');
       if (key === 'territory') return String(activity?.territoryName || activity?.territory || '');
@@ -855,6 +860,11 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                             </div>
                           </div>
                         </td>
+                        <td className="px-2 sm:px-3 py-3 text-sm font-bold text-slate-700 max-w-0 align-middle" style={{ width: columnWidthPct.taskStatus }}>
+                          <div className="truncate" title={getTaskStatusLabel(String(t.status || ''))}>
+                            {getTaskStatusLabel(String(t.status || ''))}
+                          </div>
+                        </td>
                         <td className="px-2 sm:px-3 py-3 text-sm font-bold text-slate-700 max-w-0 align-middle" style={{ width: columnWidthPct.outcome }}>
                           <div className="truncate" title={String(t.outcome || outcomeLabel(t.status))}>
                             {t.outcome || outcomeLabel(t.status)}
@@ -947,7 +957,8 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                                         <Phone size={12} className="text-slate-400" />
                                         Call Info
                                       </h4>
-                                      <p className="text-[10px] text-slate-600">Status: <span className="text-xs font-semibold text-slate-900">{detail.callLog?.callStatus || '-'}</span></p>
+                                      <p className="text-[10px] text-slate-600">Task: <span className="text-xs font-semibold text-slate-900">{getTaskStatusLabel(String(detail.status || t.status || ''))}</span></p>
+                                      <p className="text-[10px] text-slate-600">Call: <span className="text-xs font-semibold text-slate-900">{detail.callLog?.callStatus || '-'}</span></p>
                                       <p className="text-[10px] text-slate-600">Started: <span className="font-semibold">{formatDateTime(detail.callStartedAt) || '-'}</span></p>
                                       <p className="text-[10px] text-slate-600">Duration: <span className="font-semibold">{Number(detail.callLog?.callDurationSeconds || 0)}s</span></p>
                                     </div>

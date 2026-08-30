@@ -25,6 +25,7 @@ import {
   bulkCancelTasks,
 } from '../services/taskService.js';
 import { getOutcomeFromStatus } from '../utils/outcomeHelper.js';
+import { getTaskStatusLabel } from '../utils/taskStatusLabels.js';
 import { exportAgentQueueTasksXlsx, getAgentQueue } from '../services/adminService.js';
 import logger from '../config/logger.js';
 import mongoose from 'mongoose';
@@ -727,6 +728,7 @@ router.get(
           Farmer: String(farmer.name || ''),
           Mobile: String(farmer.mobileNumber || ''),
           Language: String(farmer.preferredLanguage || ''),
+          'Task Status': getTaskStatusLabel(t.status as TaskStatus) || String(t.status || ''),
           Outcome: String(t.outcome || ''),
           'Outbound Status': String(t.callLog?.callStatus || ''),
           'Call Started': fmtDateTime(callStartedAt),

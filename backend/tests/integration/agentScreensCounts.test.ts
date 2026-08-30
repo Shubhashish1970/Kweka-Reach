@@ -33,7 +33,7 @@ describe('Agent screens: history stats & available tasks counts', () => {
     const dateFrom = '2026-06-01';
     const dateTo = '2026-06-30';
 
-    const mk = async (status: 'sampled_in_queue' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number', iso: string) => {
+    const mk = async (status: 'sampled_in_queue' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number' | 'cancelled', iso: string) => {
       const day = new Date(iso);
       const farmer = await makeFarmer({ preferredLanguage: 'Hindi' });
       const activity = await makeActivity([farmer._id], { territory: 'Kakinada', type: 'Group Meeting' });
@@ -55,6 +55,7 @@ describe('Agent screens: history stats & available tasks counts', () => {
     await mk('not_reachable', '2026-06-14T10:00:00.000Z');
     await mk('not_reachable', '2026-06-15T10:00:00.000Z');
     await mk('invalid_number', '2026-06-20T10:00:00.000Z');
+    await mk('cancelled', '2026-06-22T10:00:00.000Z');
 
     const res = await request(app)
       .get('/api/tasks/own/history/stats')
@@ -63,15 +64,16 @@ describe('Agent screens: history stats & available tasks counts', () => {
 
     expect(res.status).toBe(200);
     const d = res.body.data;
-    const nonQueueSum = d.inProgress + d.completedConversation + d.unsuccessful + d.invalid;
+    const nonQueueSum = d.inProgress + d.completedConversation + d.unsuccessful + d.invalid + d.cancelled;
     expect(d.total).toBe(nonQueueSum);
     expect(d.inQueue).toBe(2);
     expect(d.inProgress).toBe(1);
     expect(d.completedConversation).toBe(3);
     expect(d.unsuccessful).toBe(2);
     expect(d.invalid).toBe(1);
-    expect(d.total).toBe(7);
-    expect(d.inQueue + d.total).toBe(9);
+    expect(d.cancelled).toBe(1);
+    expect(d.total).toBe(8);
+    expect(d.inQueue + d.total).toBe(10);
 
     // Same window as route: updatedAt primary branch (no callStartedAt on these tasks)
     const from = new Date(dateFrom);
@@ -85,14 +87,16 @@ describe('Agent screens: history stats & available tasks counts', () => {
     const mongoDone = await CallTask.countDocuments({ ...inWin, status: 'completed' });
     const mongoNr = await CallTask.countDocuments({ ...inWin, status: 'not_reachable' });
     const mongoInv = await CallTask.countDocuments({ ...inWin, status: 'invalid_number' });
+    const mongoCancelled = await CallTask.countDocuments({ ...inWin, status: 'cancelled' });
 
     expect(mongoInQueue).toBe(d.inQueue);
     expect(mongoProg).toBe(d.inProgress);
     expect(mongoDone).toBe(d.completedConversation);
     expect(mongoNr).toBe(d.unsuccessful);
     expect(mongoInv).toBe(d.invalid);
-    expect(mongoProg + mongoDone + mongoNr + mongoInv).toBe(d.total);
-    expect(mongoInQueue + mongoProg + mongoDone + mongoNr + mongoInv).toBe(d.inQueue + d.total);
+    expect(mongoCancelled).toBe(d.cancelled);
+    expect(mongoProg + mongoDone + mongoNr + mongoInv + mongoCancelled).toBe(d.total);
+    expect(mongoInQueue + mongoProg + mongoDone + mongoNr + mongoInv + mongoCancelled).toBe(d.inQueue + d.total);
 
     // Same totals when date window is derived from min/max updatedAt in DB (prod-style check)
     const bounds = await CallTask.aggregate([
@@ -109,9 +113,9 @@ describe('Agent screens: history stats & available tasks counts', () => {
     expect(res2.status).toBe(200);
     const d2 = res2.body.data;
     expect(d2.total).toBe(
-      d2.inProgress + d2.completedConversation + d2.unsuccessful + d2.invalid
+      d2.inProgress + d2.completedConversation + d2.unsuccessful + d2.invalid + d2.cancelled
     );
-    expect(d2.inQueue + d2.total).toBe(9);
+    expect(d2.inQueue + d2.total).toBe(10);
   });
 
   test('Load Tasks (/available): counts by status sum to returned tasks (modal logic)', async () => {

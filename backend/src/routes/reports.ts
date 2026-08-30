@@ -13,6 +13,7 @@ import {
   type EmsReportLineRow,
   type EmsTrendBucket,
 } from '../services/emsReportService.js';
+import { buildEmsRawSheetAoA, EMS_RAW_GROUP_LEVELS } from '../services/emsRawExport.js';
 import * as XLSX from 'xlsx';
 
 const router = express.Router();
@@ -324,6 +325,20 @@ router.get(
           'Date range filters use activity date (field meeting date). Validation calls may complete later than the activity due to cooling period.';
         const sheetData = [headerRow, [groupByNote], [activityDateNote], [], ...metricRows];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), 'EMS Report');
+
+        // Raw sheets (July Automated layout) for every Group By level — does not alter EMS Report
+        const rawByLevel = await Promise.all(
+          EMS_RAW_GROUP_LEVELS.map(async ({ groupBy: levelGroupBy, sheetName, fdaType }) => {
+            const levelRows =
+              levelGroupBy === groupBy
+                ? summaryRows
+                : await getEmsReportSummary(filters, levelGroupBy);
+            return { sheetName, aoa: buildEmsRawSheetAoA(levelRows, levelGroupBy, fdaType) };
+          })
+        );
+        for (const { sheetName, aoa } of rawByLevel) {
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), sheetName);
+        }
       } else {
         const lineRows = rows as EmsReportLineRow[];
         const sheetData = [

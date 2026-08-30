@@ -128,6 +128,11 @@ export interface EmsReportSummaryRow {
   zoneName?: string;
   regionName?: string;
   territoryName?: string;
+  /** Identity helpers for Raw Excel export */
+  officerId?: string;
+  location?: string;
+  tmName?: string;
+  tmEmpCode?: string;
 }
 
 /** One row per call with call-level metrics and relative remarks */
@@ -338,6 +343,10 @@ export async function getEmsReportSummary(
             $ifNull: ['$activity.territoryName', { $ifNull: ['$activity.territory', ''] }],
           },
         },
+        officerId: { $first: { $ifNull: ['$activity.officerId', ''] } },
+        location: { $first: { $ifNull: ['$activity.location', ''] } },
+        tmName: { $first: { $ifNull: ['$activity.tmName', ''] } },
+        tmEmpCode: { $first: { $ifNull: ['$activity.tmEmpCode', ''] } },
         totalAttempted: { $sum: 1 },
         totalConnected: { $sum: { $cond: ['$__isConnected', 1, 0] } },
         connectedIntakePendingCount: {
@@ -410,6 +419,10 @@ export async function getEmsReportSummary(
     const zoneName = String(row.zoneName || '').trim();
     const regionName = String(row.regionName || '').trim();
     const territoryName = String(row.territoryName || '').trim();
+    const officerId = String(row.officerId || '').trim();
+    const location = String(row.location || '').trim();
+    const tmName = String(row.tmName || '').trim();
+    const tmEmpCode = String(row.tmEmpCode || '').trim();
     const totalAttempted = Number(row.totalAttempted || 0);
     const totalConnected = Number(row.totalConnected || 0);
     const connectedIntakePendingCount = Number(row.connectedIntakePendingCount || 0);
@@ -498,6 +511,10 @@ export async function getEmsReportSummary(
       zoneName,
       regionName,
       territoryName,
+      officerId,
+      location,
+      tmName,
+      tmEmpCode,
     });
   }
 

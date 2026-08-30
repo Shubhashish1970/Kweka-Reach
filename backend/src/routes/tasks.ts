@@ -340,7 +340,7 @@ router.get(
   '/own/history',
   requirePermission('tasks.view.own'),
   [
-    query('status').optional().isIn(['in_progress', 'completed', 'not_reachable', 'invalid_number']),
+    query('status').optional().isIn(['in_progress', 'completed', 'not_reachable', 'invalid_number', 'cancelled']),
     query('territory').optional().isString(),
     query('activityType').optional().isString(),
     query('search').optional().isString(),
@@ -538,7 +538,7 @@ router.get(
   '/own/history/export',
   requirePermission('tasks.view.own'),
   [
-    query('status').optional().isIn(['in_progress', 'completed', 'not_reachable', 'invalid_number']),
+    query('status').optional().isIn(['in_progress', 'completed', 'not_reachable', 'invalid_number', 'cancelled']),
     query('territory').optional().isString(),
     query('activityType').optional().isString(),
     query('search').optional().isString(),
@@ -764,7 +764,7 @@ router.get(
   '/own/history/options',
   requirePermission('tasks.view.own'),
   [
-    query('status').optional().isIn(['in_progress', 'completed', 'not_reachable', 'invalid_number']),
+    query('status').optional().isIn(['in_progress', 'completed', 'not_reachable', 'invalid_number', 'cancelled']),
     query('territory').optional().isString(),
     query('activityType').optional().isString(),
     query('search').optional().isString(),
@@ -914,7 +914,7 @@ router.get(
   '/own/history/stats',
   requirePermission('tasks.view.own'),
   [
-    query('status').optional().isIn(['in_progress', 'completed', 'not_reachable', 'invalid_number']),
+    query('status').optional().isIn(['in_progress', 'completed', 'not_reachable', 'invalid_number', 'cancelled']),
     query('territory').optional().isString(),
     query('activityType').optional().isString(),
     query('search').optional().isString(),
@@ -1087,6 +1087,7 @@ router.get(
       const completed = statusCounts['completed'] || 0;
       const notReachable = statusCounts['not_reachable'] || 0;
       const invalidNumber = statusCounts['invalid_number'] || 0;
+      const cancelled = statusCounts['cancelled'] || 0;
 
       const inQueueMatch: any = {
         assignedAgentId: new mongoose.Types.ObjectId(agentId),
@@ -1180,9 +1181,9 @@ router.get(
         }
       }
 
-      // Total = history-table scope only (excludes sampled_in_queue), so it matches GET /own/history row counts
-      // for the same filters. inQueue is reported separately (dialer backlog); inQueue + total = all assigned in window.
-      const nonQueueSum = inProgress + completed + notReachable + invalidNumber;
+      // Total = history-table scope (all statuses except sampled_in_queue, including cancelled)
+      // so it matches GET /own/history row counts for the same filters.
+      const nonQueueSum = inProgress + completed + notReachable + invalidNumber + cancelled;
       const total = nonQueueSum;
 
       res.json({
@@ -1194,6 +1195,7 @@ router.get(
           completedConversation: completed,
           unsuccessful: notReachable,
           invalid: invalidNumber,
+          cancelled,
         },
       });
     } catch (error) {

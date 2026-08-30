@@ -6,7 +6,7 @@ import { tasksAPI } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateTimeIST } from '../utils/dateRangeUtils';
 
-type HistoryStatus = '' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number';
+type HistoryStatus = '' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number' | 'cancelled';
 
 type HistoryColumnKey =
   | 'expand'
@@ -45,6 +45,7 @@ const outcomeLabel = (status: string) => {
   if (status === 'in_progress') return 'In Progress';
   if (status === 'invalid_number') return 'Unsuccessful';
   if (status === 'not_reachable') return 'Unsuccessful';
+  if (status === 'cancelled') return 'Cancelled';
   return status || 'Unknown';
 };
 
@@ -54,7 +55,7 @@ const safeArr = (v: any) => (Array.isArray(v) ? v : v ? [v] : []);
 const formatDateTime = (d: unknown) => formatDateTimeIST(d as string);
 
 const HISTORY_FILTERS_STORAGE_KEY = 'agent.history.filters';
-const HISTORY_STATUS_VALUES: HistoryStatus[] = ['', 'in_progress', 'completed', 'not_reachable', 'invalid_number'];
+const HISTORY_STATUS_VALUES: HistoryStatus[] = ['', 'in_progress', 'completed', 'not_reachable', 'invalid_number', 'cancelled'];
 const DATE_RANGE_PRESETS: DateRangePreset[] = [
   'Custom',
   'Today',
@@ -534,6 +535,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                       { value: 'completed', label: 'Completed Conversation' },
                       { value: 'not_reachable', label: 'Unsuccessful (not reachable / no answer)' },
                       { value: 'invalid_number', label: 'Invalid number' },
+                      { value: 'cancelled', label: 'Cancelled' },
                     ]}
                   />
                 </div>
@@ -672,7 +674,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                 <div>
                   <h2 className="text-base font-black text-slate-900">Statistics</h2>
                   <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                    <span className="font-semibold text-slate-600">Total</span> matches the table (in progress + completed + unsuccessful + invalid).
+                    <span className="font-semibold text-slate-600">Total</span> matches the table (in progress + completed + unsuccessful + invalid + cancelled).
                     {!filters.status ? (
                       <>
                         {' '}
@@ -699,7 +701,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
 
             {/* Compact Statistics Grid - Matching Activity Sampling */}
             <div
-              className={`grid grid-cols-2 md:grid-cols-3 gap-3 ${filters.status ? 'lg:grid-cols-5' : 'lg:grid-cols-6'}`}
+              className={`grid grid-cols-2 md:grid-cols-3 gap-3 ${filters.status ? 'lg:grid-cols-6' : 'lg:grid-cols-7'}`}
             >
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
                 <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-0.5">Total</p>
@@ -726,6 +728,10 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
               <div className="bg-red-50 rounded-xl p-3 border border-red-200">
                 <p className="text-xs font-black text-red-600 uppercase tracking-widest mb-0.5">Invalid</p>
                 <p className="text-xl font-black text-red-800">{stats?.invalid || 0}</p>
+              </div>
+              <div className="bg-slate-100 rounded-xl p-3 border border-slate-300">
+                <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-0.5">Cancelled</p>
+                <p className="text-xl font-black text-slate-800">{stats?.cancelled || 0}</p>
               </div>
             </div>
           </div>

@@ -125,8 +125,9 @@ async function historyStyleStats(agentOid: mongoose.Types.ObjectId, dateFrom: st
   const completed = statusCounts['completed'] || 0;
   const notReachable = statusCounts['not_reachable'] || 0;
   const invalid = statusCounts['invalid_number'] || 0;
-  const total = inProgress + completed + notReachable + invalid;
-  return { inQueue, inProgress, completed, notReachable, invalid, total };
+  const cancelled = statusCounts['cancelled'] || 0;
+  const total = inProgress + completed + notReachable + invalid + cancelled;
+  return { inQueue, inProgress, completed, notReachable, invalid, cancelled, total };
 }
 
 async function main() {

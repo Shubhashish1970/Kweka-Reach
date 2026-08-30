@@ -7,8 +7,6 @@ import {
   type EmsReportGroupBy,
   type EmsReportSummaryRow,
   type EmsReportLineRow,
-  type EmsTrendRow,
-  type EmsTrendBucket,
 } from '../../services/api';
 import {
   BarChart,
@@ -19,14 +17,7 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  LineChart,
-  Line,
-  ComposedChart,
   Cell,
-  ScatterChart,
-  Scatter,
-  ZAxis,
-  ReferenceLine,
   LabelList,
   PieChart,
   Pie,
@@ -38,7 +29,6 @@ import {
   Download,
   Activity as ActivityIcon,
   Loader2,
-  TrendingUp,
   Phone,
   MessageCircle,
   ShoppingCart,
@@ -51,11 +41,21 @@ import {
   X,
   Info,
   Award,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import Button from '../shared/Button';
 import StyledSelect from '../shared/StyledSelect';
 import { type DateRangePreset, getPresetRange, formatPretty, toISODateLocal } from '../../utils/dateRangeUtils';
 import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../../utils/filterPersistence';
+import {
+  buildPerformanceHierarchy,
+  collectBuNodeIds,
+  collectPerformanceNodeIds,
+  filterPerformanceTree,
+  flattenVisiblePerformanceTree,
+  performanceLevelLabel,
+} from '../../utils/emsPerformanceHierarchy';
 
 /** Totals row derived from EMS summary rows (same formulas as backend) */
 export type EmsTotals = {
@@ -94,12 +94,6 @@ const EMS_REPORT_GROUP_BY_OPTIONS: { value: EmsReportGroupBy; label: string }[] 
   { value: 'tm', label: 'By TM' },
 ];
 
-const TREND_BUCKET_OPTIONS: { value: EmsTrendBucket; label: string }[] = [
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'monthly', label: 'Monthly' },
-];
-
 const GROUP_BY_OPTIONS: { value: EmsReportGroupBy; label: string }[] = [
   { value: 'tm', label: 'TM' },
   { value: 'fda', label: 'MDO' },
@@ -121,7 +115,6 @@ const EMS_PROGRESS_FILTERS_KEY = 'admin.emsProgress.filters';
 type FilterDimensionKey = keyof Pick<EmsProgressFilters, 'state' | 'territory' | 'zone' | 'bu' | 'activityType'> | 'region';
 const FILTER_DIMENSION_VALUES: FilterDimensionKey[] = ['state', 'territory', 'zone', 'bu', 'activityType', 'region'];
 const EMS_GROUP_BY_VALUES: EmsReportGroupBy[] = ['fda', 'territory', 'region', 'zone', 'bu', 'tm'];
-const EMS_TREND_BUCKET_VALUES: EmsTrendBucket[] = ['daily', 'weekly', 'monthly'];
 
 type SavedEmsProgressFilters = {
   dateFrom: string;
@@ -135,7 +128,6 @@ type SavedEmsProgressFilters = {
   showFilters: boolean;
   filterDimension: FilterDimensionKey;
   groupBy: EmsReportGroupBy;
-  trendBucket: EmsTrendBucket;
 };
 
 function loadSavedEmsProgressFilters(): SavedEmsProgressFilters {
@@ -153,7 +145,6 @@ function loadSavedEmsProgressFilters(): SavedEmsProgressFilters {
       showFilters: false,
       filterDimension: 'state' as FilterDimensionKey,
       groupBy: 'fda' as EmsReportGroupBy,
-      trendBucket: 'weekly' as EmsTrendBucket,
     }),
     (parsed, defaults) => {
       const p = parsed as Record<string, unknown>;
@@ -173,9 +164,6 @@ function loadSavedEmsProgressFilters(): SavedEmsProgressFilters {
         groupBy: (EMS_GROUP_BY_VALUES as readonly string[]).includes(p.groupBy as string)
           ? (p.groupBy as EmsReportGroupBy)
           : defaults.groupBy,
-        trendBucket: (EMS_TREND_BUCKET_VALUES as readonly string[]).includes(p.trendBucket as string)
-          ? (p.trendBucket as EmsTrendBucket)
-          : defaults.trendBucket,
       };
     }
   );
@@ -238,11 +226,9 @@ const ActivityEmsProgressView: React.FC = () => {
   const { showError, showSuccess } = useToast();
   const initialEmsFilters = useMemo(() => loadSavedEmsProgressFilters(), []);
   const [emsDetailRows, setEmsDetailRows] = useState<EmsReportSummaryRow[]>([]);
-  const [emsTrends, setEmsTrends] = useState<EmsTrendRow[]>([]);
-  const [trendBucket, setTrendBucket] = useState<EmsTrendBucket>(() => initialEmsFilters.trendBucket);
+  const [emsMdoRows, setEmsMdoRows] = useState<EmsReportSummaryRow[]>([]);
   const [groupBy, setGroupBy] = useState<EmsReportGroupBy>(() => initialEmsFilters.groupBy);
   const [isLoadingEmsDetail, setIsLoadingEmsDetail] = useState(false);
-  const [isLoadingEmsTrends, setIsLoadingEmsTrends] = useState(false);
   const [filterOptions, setFilterOptions] = useState<{
     stateOptions: string[];
     territoryOptions: string[];
@@ -275,9 +261,8 @@ const ActivityEmsProgressView: React.FC = () => {
   const [drillDownLabel, setDrillDownLabel] = useState<string>('');
   const [lineRows, setLineRows] = useState<EmsReportLineRow[]>([]);
   const [isLoadingLine, setIsLoadingLine] = useState(false);
-  const [tableSortKey, setTableSortKey] = useState<string>('');
-  const [tableSortDir, setTableSortDir] = useState<'asc' | 'desc'>('asc');
   const [tableFilterText, setTableFilterText] = useState<string>('');
+  const [expandedPerformanceNodes, setExpandedPerformanceNodes] = useState<Set<string>>(() => new Set());
   const [filterDimension, setFilterDimension] = useState<FilterDimensionKey>(() => initialEmsFilters.filterDimension);
   const [kpiTooltipOpen, setKpiTooltipOpen] = useState<string | null>(null);
   const kpiTooltipRef = useRef<HTMLDivElement | null>(null);
@@ -294,29 +279,49 @@ const ActivityEmsProgressView: React.FC = () => {
 
   const totals = useMemo(() => computeEmsTotals(emsDetailRows), [emsDetailRows]);
 
-  const tableRows = useMemo(() => {
-    let rows = emsDetailRows;
-    if (tableFilterText.trim()) {
-      const q = tableFilterText.trim().toLowerCase();
-      rows = rows.filter((r) => (r.groupLabel || r.groupKey).toLowerCase().includes(q));
-    }
-    if (tableSortKey) {
-      rows = [...rows].sort((a, b) => {
-        const av = (a as Record<string, unknown>)[tableSortKey] as number | string;
-        const bv = (b as Record<string, unknown>)[tableSortKey] as number | string;
-        const cmp = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv));
-        return tableSortDir === 'asc' ? cmp : -cmp;
-      });
-    }
-    return rows;
-  }, [emsDetailRows, tableFilterText, tableSortKey, tableSortDir]);
+  const performanceHierarchy = useMemo(
+    () => buildPerformanceHierarchy(emsMdoRows),
+    [emsMdoRows]
+  );
 
-  const toggleSort = (key: string) => {
-    if (tableSortKey === key) setTableSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setTableSortKey(key);
-      setTableSortDir('asc');
-    }
+  const filteredPerformanceHierarchy = useMemo(
+    () => filterPerformanceTree(performanceHierarchy, tableFilterText),
+    [performanceHierarchy, tableFilterText]
+  );
+
+  const visiblePerformanceRows = useMemo(
+    () => flattenVisiblePerformanceTree(filteredPerformanceHierarchy, expandedPerformanceNodes),
+    [filteredPerformanceHierarchy, expandedPerformanceNodes]
+  );
+
+  useEffect(() => {
+    if (!performanceHierarchy.length) return;
+    setExpandedPerformanceNodes((prev) => {
+      if (prev.size > 0) return prev;
+      return new Set(collectBuNodeIds(performanceHierarchy));
+    });
+  }, [performanceHierarchy]);
+
+  useEffect(() => {
+    if (!tableFilterText.trim()) return;
+    setExpandedPerformanceNodes(new Set(collectPerformanceNodeIds(filteredPerformanceHierarchy)));
+  }, [tableFilterText, filteredPerformanceHierarchy]);
+
+  const togglePerformanceNode = (nodeId: string) => {
+    setExpandedPerformanceNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  };
+
+  const expandAllPerformanceNodes = () => {
+    setExpandedPerformanceNodes(new Set(collectPerformanceNodeIds(filteredPerformanceHierarchy)));
+  };
+
+  const collapseAllPerformanceNodes = () => {
+    setExpandedPerformanceNodes(new Set());
   };
 
   const syncDraftFromFilters = useCallback(() => {
@@ -345,9 +350,8 @@ const ActivityEmsProgressView: React.FC = () => {
       showFilters,
       filterDimension,
       groupBy,
-      trendBucket,
     });
-  }, [filters, selectedPreset, showFilters, filterDimension, groupBy, trendBucket]);
+  }, [filters, selectedPreset, showFilters, filterDimension, groupBy]);
 
   const fetchOptions = useCallback(async () => {
     setIsLoadingOptions(true);
@@ -372,21 +376,26 @@ const ActivityEmsProgressView: React.FC = () => {
   const fetchEmsDetail = useCallback(async () => {
     setIsLoadingEmsDetail(true);
     try {
-      const res = await reportsAPI.getEmsReport(groupBy, 'summary', filters);
-      if (res.success && res.data) setEmsDetailRows(res.data as EmsReportSummaryRow[]);
+      const detailPromise = reportsAPI.getEmsReport(groupBy, 'summary', filters);
+      const mdoPromise = groupBy === 'fda' ? detailPromise : reportsAPI.getEmsReport('fda', 'summary', filters);
+      const [detailRes, mdoRes] = await Promise.all([detailPromise, mdoPromise]);
+      if (detailRes.success && detailRes.data) setEmsDetailRows(detailRes.data as EmsReportSummaryRow[]);
       else setEmsDetailRows([]);
+      if (mdoRes.success && mdoRes.data) setEmsMdoRows(mdoRes.data as EmsReportSummaryRow[]);
+      else setEmsMdoRows([]);
     } catch (e) {
       showError(e instanceof Error ? e.message : 'Failed to load EMS detail');
       setEmsDetailRows([]);
+      setEmsMdoRows([]);
     } finally {
       setIsLoadingEmsDetail(false);
     }
   }, [groupBy, filters, showError]);
 
-  const fetchLineLevel = useCallback(async (groupKey: string) => {
+  const fetchLineLevel = useCallback(async (groupKey: string, forGroupBy: EmsReportGroupBy = groupBy) => {
     setIsLoadingLine(true);
     try {
-      const res = await reportsAPI.getEmsReport(groupBy, 'line', filters);
+      const res = await reportsAPI.getEmsReport(forGroupBy, 'line', filters);
       if (res.success && res.data) {
         const lines = (res.data as EmsReportLineRow[]).filter((r) => r.groupKey === groupKey);
         setLineRows(lines);
@@ -399,20 +408,6 @@ const ActivityEmsProgressView: React.FC = () => {
     }
   }, [groupBy, filters, showError]);
 
-  const fetchEmsTrends = useCallback(async () => {
-    setIsLoadingEmsTrends(true);
-    try {
-      const res = await reportsAPI.getEmsTrends(trendBucket, filters);
-      if (res.success && res.data) setEmsTrends(res.data);
-      else setEmsTrends([]);
-    } catch (e) {
-      showError(e instanceof Error ? e.message : 'Failed to load trends');
-      setEmsTrends([]);
-    } finally {
-      setIsLoadingEmsTrends(false);
-    }
-  }, [trendBucket, filters, showError]);
-
   useEffect(() => {
     fetchOptions();
   }, [fetchOptions]);
@@ -422,13 +417,8 @@ const ActivityEmsProgressView: React.FC = () => {
   }, [fetchEmsDetail]);
 
   useEffect(() => {
-    fetchEmsTrends();
-  }, [fetchEmsTrends]);
-
-  useEffect(() => {
     if (drillDownGroupKey != null) {
-      setDrillDownLabel(drillDownGroupKey);
-      fetchLineLevel(drillDownGroupKey);
+      fetchLineLevel(drillDownGroupKey, 'fda');
     } else {
       setLineRows([]);
     }
@@ -507,7 +497,7 @@ const ActivityEmsProgressView: React.FC = () => {
             </div>
             <div className="min-w-0">
               <h2 className="text-xl font-black text-slate-900 mb-1">Activity EMS Dashboard</h2>
-              <p className="text-sm text-slate-600">Visual EMS metrics, drill-down by group, and trends (Totals)</p>
+              <p className="text-sm text-slate-600">Visual EMS metrics and drill-down by group</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3 min-w-0">
@@ -518,10 +508,10 @@ const ActivityEmsProgressView: React.FC = () => {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => { fetchEmsDetail(); fetchEmsTrends(); fetchOptions(); }}
-              disabled={isLoadingEmsDetail || isLoadingEmsTrends}
+              onClick={() => { fetchEmsDetail(); fetchOptions(); }}
+              disabled={isLoadingEmsDetail}
             >
-              {isLoadingEmsDetail || isLoadingEmsTrends ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+              {isLoadingEmsDetail ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               Refresh
             </Button>
             <Button
@@ -1268,128 +1258,30 @@ const ActivityEmsProgressView: React.FC = () => {
         </div>
       )}
 
-      {/* Conversion & Intent: bar chart + scatter */}
-      {emsDetailRows.length > 0 && totals && (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
-            <h3 className="text-lg font-black text-slate-900">Conversion & Intent</h3>
-          </div>
-          <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Per group: Purchased, Willing Yes, Yes+Purchased, Purchase Intention %</p>
-              <ResponsiveContainer width="100%" height={320}>
-                <ComposedChart data={emsDetailRows.map((r) => ({
-                  name: (r.groupLabel || r.groupKey).slice(0, 14),
-                  purchased: r.purchasedCount,
-                  willingYes: r.willingYesCount,
-                  yesPlusPurchased: (r as EmsReportSummaryRow).yesPlusPurchasedCount ?? r.willingYesCount + r.purchasedCount,
-                  purchaseIntentionPct: r.purchaseIntentionPct,
-                }))} margin={{ top: 8, right: 24, left: 8, bottom: 24 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar yAxisId="left" dataKey="purchased" name="Purchased" fill="#22c55e" radius={[2, 2, 0, 0]} />
-                  <Bar yAxisId="left" dataKey="willingYes" name="Willing Yes" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                  <Bar yAxisId="left" dataKey="yesPlusPurchased" name="Yes+Purchased" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
-                  <Line yAxisId="right" type="monotone" dataKey="purchaseIntentionPct" name="Purchase Intention %" stroke="#eab308" strokeWidth={2} dot={{ r: 3 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Meeting Validity % vs Meeting Conversion % (bubble = Connected); ref = Totals</p>
-              <ResponsiveContainer width="100%" height={320}>
-                <ScatterChart margin={{ top: 8, right: 24, left: 8, bottom: 24 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis type="number" dataKey="meetingValidityPct" name="Meeting Validity %" domain={[0, 100]} />
-                  <YAxis type="number" dataKey="meetingConversionPct" name="Meeting Conversion %" domain={[0, 100]} />
-                  <ZAxis type="number" dataKey="totalConnected" range={[80, 400]} name="Connected" />
-                  <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                  <ReferenceLine x={totals.meetingValidityPct} stroke="#64748b" strokeDasharray="4 4" label="Totals MV" />
-                  <ReferenceLine y={totals.meetingConversionPct} stroke="#64748b" strokeDasharray="4 4" label="Totals MC" />
-                  <Scatter name="Groups" data={emsDetailRows.map((r) => ({
-                    meetingValidityPct: r.meetingValidityPct,
-                    meetingConversionPct: r.meetingConversionPct,
-                    totalConnected: r.totalConnected,
-                    name: r.groupLabel || r.groupKey,
-                    emsScore: r.emsScore,
-                  }))} fill="#22c55e">
-                    {emsDetailRows.map((r, i) => (
-                      <Cell key={i} fill={r.emsScore >= 70 ? '#22c55e' : r.emsScore >= 50 ? '#f59e0b' : '#ef4444'} />
-                    ))}
-                  </Scatter>
-                </ScatterChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Trends View (Totals): Daily / Weekly / Monthly – EMS Score, Meeting Validity %, Meeting Conversion %, Purchase Intention % */}
+      {/* Performance Table – hierarchy explorer (BU → Zone → Region → Territory → MDO) */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-4 border-b border-slate-200 bg-slate-50">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="text-slate-600" size={20} />
-            <h3 className="text-lg font-black text-slate-900">Trends (Totals)</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            {TREND_BUCKET_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setTrendBucket(opt.value)}
-                className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-colors border ${
-                  trendBucket === opt.value ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="p-6">
-          {isLoadingEmsTrends ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="animate-spin text-slate-500" size={28} />
+          <div className="flex items-center gap-2 min-w-0">
+            <MessageCircle className="text-slate-600 shrink-0" size={20} />
+            <div className="min-w-0">
+              <h3 className="text-lg font-black text-slate-900">Performance Table (Hierarchy Explorer)</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Sorted BU → Zone → Region → Territory → MDO. Expand levels to compare % at each level.</p>
             </div>
-          ) : emsTrends.length === 0 ? (
-            <p className="text-center py-8 text-slate-500 text-sm">No trend data for current filters. Complete some calls in the date range.</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={emsTrends} margin={{ top: 8, right: 24, left: 8, bottom: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value: number) => (value != null ? `${value}%` : '')} />
-                <Legend />
-                <Line type="monotone" dataKey="emsScore" name="EMS Score" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="meetingValidityPct" name="Meeting Validity %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="meetingConversionPct" name="Meeting Conversion %" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="purchaseIntentionPct" name="Purchase Intention %" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="cropSolutionsFocusPct" name="Crop Solutions Focus %" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
-
-      {/* Performance Table (Group vs Totals) – sortable, filterable, row click = drill down */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-4 border-b border-slate-200 bg-slate-50">
-          <div className="flex items-center gap-2">
-            <MessageCircle className="text-slate-600" size={20} />
-            <h3 className="text-lg font-black text-slate-900">Performance Table (Group vs Totals)</h3>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
-              placeholder="Filter by group name..."
+              placeholder="Filter by name..."
               value={tableFilterText}
               onChange={(e) => setTableFilterText(e.target.value)}
               className="min-w-[180px] px-3 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
             />
+            <Button variant="secondary" size="sm" onClick={expandAllPerformanceNodes}>
+              Expand all
+            </Button>
+            <Button variant="secondary" size="sm" onClick={collapseAllPerformanceNodes}>
+              Collapse all
+            </Button>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -1397,45 +1289,88 @@ const ActivityEmsProgressView: React.FC = () => {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="animate-spin text-slate-500" size={28} />
             </div>
-          ) : tableRows.length === 0 ? (
+          ) : visiblePerformanceRows.length === 0 ? (
             <p className="text-center py-12 text-slate-500 text-sm">No EMS detail for current filters. Apply filters and ensure completed calls exist.</p>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-100 text-left text-slate-600 font-medium">
-                  <th className="px-4 py-3 cursor-pointer hover:bg-slate-200" onClick={() => toggleSort('groupLabel')}>Group Name {tableSortKey === 'groupLabel' && (tableSortDir === 'asc' ? '↑' : '↓')}</th>
-                  <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-200" onClick={() => toggleSort('totalAttempted')}>Total Calls {tableSortKey === 'totalAttempted' && (tableSortDir === 'asc' ? '↑' : '↓')}</th>
-                  <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-200" onClick={() => toggleSort('totalConnected')}>Connected {tableSortKey === 'totalConnected' && (tableSortDir === 'asc' ? '↑' : '↓')}</th>
-                  <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-200" onClick={() => toggleSort('meetingValidityPct')}>Meeting Validity % {tableSortKey === 'meetingValidityPct' && (tableSortDir === 'asc' ? '↑' : '↓')}</th>
-                  <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-200" onClick={() => toggleSort('meetingConversionPct')}>Meeting Conversion % {tableSortKey === 'meetingConversionPct' && (tableSortDir === 'asc' ? '↑' : '↓')}</th>
-                  <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-200" onClick={() => toggleSort('purchaseIntentionPct')}>Purchase Intention % {tableSortKey === 'purchaseIntentionPct' && (tableSortDir === 'asc' ? '↑' : '↓')}</th>
-                  <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-200" onClick={() => toggleSort('cropSolutionsFocusPct')}>Crop Solutions Focus % {tableSortKey === 'cropSolutionsFocusPct' && (tableSortDir === 'asc' ? '↑' : '↓')}</th>
-                  <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-200" onClick={() => toggleSort('emsScore')}>EMS Score {tableSortKey === 'emsScore' && (tableSortDir === 'asc' ? '↑' : '↓')}</th>
+                  <th className="px-4 py-3 min-w-[260px]">Name</th>
+                  <th className="px-4 py-3 text-right">Total Calls</th>
+                  <th className="px-4 py-3 text-right">Connected</th>
+                  <th className="px-4 py-3 text-right">Meeting Validity %</th>
+                  <th className="px-4 py-3 text-right">Meeting Conversion %</th>
+                  <th className="px-4 py-3 text-right">Purchase Intention %</th>
+                  <th className="px-4 py-3 text-right">Crop Solutions Focus %</th>
+                  <th className="px-4 py-3 text-right">EMS Score</th>
                   <th className="px-4 py-3 max-w-[200px]">Relative remarks</th>
                 </tr>
               </thead>
               <tbody>
-                {tableRows.map((row) => (
-                  <tr
-                    key={row.groupKey}
-                    className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
-                    onClick={() => { setDrillDownGroupKey(row.groupKey); setDrillDownLabel(row.groupLabel || row.groupKey); }}
-                  >
-                    <td className="px-4 py-3 font-medium text-slate-800">{row.groupLabel || '—'}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{row.totalAttempted}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{row.totalConnected}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{row.meetingValidityPct}%</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{row.meetingConversionPct}%</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{row.purchaseIntentionPct}%</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{(row as EmsReportSummaryRow & { cropSolutionsFocusPct?: number }).cropSolutionsFocusPct ?? 0}%</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={row.emsScore >= 70 ? 'text-green-800 font-bold' : row.emsScore >= 50 ? 'text-amber-800 font-bold' : 'text-slate-700'}>
-                        {row.emsScore}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 text-xs max-w-[200px] truncate" title={row.relativeRemarks}>{row.relativeRemarks || '—'}</td>
-                  </tr>
-                ))}
+                {visiblePerformanceRows.map(({ node, depth }) => {
+                  const hasChildren = node.children.length > 0;
+                  const isExpanded = expandedPerformanceNodes.has(node.id);
+                  const metrics = node.metrics;
+                  const isMdo = node.level === 'mdo';
+                  const rowClass = isMdo
+                    ? 'border-b border-slate-100 hover:bg-slate-50 cursor-pointer'
+                    : hasChildren
+                      ? 'border-b border-slate-100 hover:bg-slate-50 cursor-pointer bg-slate-50/40'
+                      : 'border-b border-slate-100';
+
+                  const handleRowClick = () => {
+                    if (isMdo && node.groupKey) {
+                      setDrillDownGroupKey(node.groupKey);
+                      setDrillDownLabel(node.label);
+                      return;
+                    }
+                    if (hasChildren) togglePerformanceNode(node.id);
+                  };
+
+                  return (
+                    <tr key={node.id} className={rowClass} onClick={handleRowClick}>
+                      <td className="px-4 py-3 font-medium text-slate-800">
+                        <div className="flex items-center gap-2" style={{ paddingLeft: `${depth * 18}px` }}>
+                          {hasChildren ? (
+                            <button
+                              type="button"
+                              className="p-0.5 rounded hover:bg-slate-200 text-slate-500 shrink-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePerformanceNode(node.id);
+                              }}
+                              aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                            >
+                              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                          ) : (
+                            <span className="w-5 shrink-0" aria-hidden />
+                          )}
+                          <span className="inline-flex items-center gap-2 min-w-0">
+                            <span className="shrink-0 rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                              {performanceLevelLabel(node.level)}
+                            </span>
+                            <span className="truncate">{node.label}</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-700">{metrics.totalAttempted}</td>
+                      <td className="px-4 py-3 text-right text-slate-700">{metrics.totalConnected}</td>
+                      <td className="px-4 py-3 text-right text-slate-700">{metrics.meetingValidityPct}%</td>
+                      <td className="px-4 py-3 text-right text-slate-700">{metrics.meetingConversionPct}%</td>
+                      <td className="px-4 py-3 text-right text-slate-700">{metrics.purchaseIntentionPct}%</td>
+                      <td className="px-4 py-3 text-right text-slate-700">{metrics.cropSolutionsFocusPct}%</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={metrics.emsScore >= 70 ? 'text-green-800 font-bold' : metrics.emsScore >= 50 ? 'text-amber-800 font-bold' : 'text-slate-700'}>
+                          {metrics.emsScore}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 text-xs max-w-[200px] truncate" title={metrics.relativeRemarks}>
+                        {metrics.relativeRemarks || '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -1443,7 +1378,7 @@ const ActivityEmsProgressView: React.FC = () => {
       </div>
 
       <p className="text-xs text-slate-500">
-        For a detailed activity list with the same filters, use the <strong>Activity Monitoring</strong> tab. Use <strong>EMS report</strong> to export by MDO, Territory, Region, Zone, BU, or TM. Click a row in the Performance Table to drill down to call-level details.
+        For a detailed activity list with the same filters, use the <strong>Activity Monitoring</strong> tab. Use <strong>EMS report</strong> to export by MDO, Territory, Region, Zone, BU, or TM. Click an <strong>MDO</strong> row to drill down to call-level details.
       </p>
 
       {/* Drill-down: Call-Level View modal */}

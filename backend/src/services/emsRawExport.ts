@@ -52,11 +52,6 @@ export const EMS_RAW_HEADERS: string[] = [
 
 export const EMS_RAW_GROUP_LEVELS: { groupBy: EmsReportGroupBy; sheetName: string; fdaType: string }[] = [
   { groupBy: 'fda', sheetName: 'Raw - MDO', fdaType: 'MDO' },
-  { groupBy: 'territory', sheetName: 'Raw - Territory', fdaType: 'Territory' },
-  { groupBy: 'zone', sheetName: 'Raw - Zone', fdaType: 'Zone' },
-  { groupBy: 'region', sheetName: 'Raw - Region', fdaType: 'Region' },
-  { groupBy: 'bu', sheetName: 'Raw - BU', fdaType: 'BU' },
-  { groupBy: 'tm', sheetName: 'Raw - TM', fdaType: 'TM' },
 ];
 
 function asFraction(pct: number): number {

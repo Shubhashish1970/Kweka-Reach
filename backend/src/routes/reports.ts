@@ -326,7 +326,7 @@ router.get(
         const sheetData = [headerRow, [groupByNote], [activityDateNote], [], ...metricRows];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), 'EMS Report');
 
-        // Raw sheets (July Automated layout) for every Group By level — does not alter EMS Report
+        // Raw - MDO only (July Automated layout) — does not alter EMS Report; independent of Group By dropdown
         const rawByLevel = await Promise.all(
           EMS_RAW_GROUP_LEVELS.map(async ({ groupBy: levelGroupBy, sheetName, fdaType }) => {
             const levelRows =

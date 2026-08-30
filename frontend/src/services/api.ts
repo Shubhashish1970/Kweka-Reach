@@ -1038,6 +1038,10 @@ export interface EmsTrendRow {
 export interface EmsReportSummaryRow {
   groupKey: string;
   groupLabel: string;
+  buName?: string;
+  zoneName?: string;
+  regionName?: string;
+  territoryName?: string;
   totalAttempted: number;
   totalConnected: number;
   /** Connected line but form not progressed (not in hygiene "Connected" denominator) */

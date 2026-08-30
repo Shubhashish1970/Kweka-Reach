@@ -6,6 +6,17 @@ import { buildActivityMatch, buildActivityMatchWithoutDate } from './kpiService.
 
 export type EmsReportGroupBy = 'tm' | 'fda' | 'bu' | 'zone' | 'region' | 'territory';
 
+/** Purchase Intention % = (Willing Yes + Purchased) / (Willing Yes + Willing No + Purchased) among answered commercial conversion. */
+export function computePurchaseIntentionPct(
+  willingYesCount: number,
+  willingNoCount: number,
+  purchasedCount: number
+): number {
+  const numerator = willingYesCount + purchasedCount;
+  const denominator = numerator + willingNoCount;
+  return denominator > 0 ? Math.round((numerator / denominator) * 100) : 0;
+}
+
 /** Connected = callStatus === 'Connected' AND (didAttend set OR hasPurchased set OR willingToPurchase set) */
 function isConnectedAndProgressed(log: { callStatus?: string; didAttend?: string | null; hasPurchased?: boolean | null; willingToPurchase?: boolean | null }): boolean {
   if (!log || log.callStatus !== 'Connected') return false;
@@ -57,6 +68,11 @@ export interface EmsReportSummaryRow {
   maxCsScore: number;
   emsScore: number;
   relativeRemarks: string;
+  /** Geo hierarchy fields for column ordering (BU → Zone → Region → Territory) */
+  buName?: string;
+  zoneName?: string;
+  regionName?: string;
+  territoryName?: string;
 }
 
 /** One row per call with call-level metrics and relative remarks */
@@ -102,6 +118,70 @@ function getGroupField(groupBy: EmsReportGroupBy): string {
     case 'territory': return 'territoryName';
     default: return 'territoryName';
   }
+}
+
+type EmsHierarchySortable = {
+  groupLabel: string;
+  buName?: string;
+  zoneName?: string;
+  regionName?: string;
+  territoryName?: string;
+  state?: string;
+};
+
+function hierarchySortValue(value: string | undefined | null): string {
+  const trimmed = (value ?? '').trim();
+  return trimmed || '\uffff';
+}
+
+function compareHierarchyStrings(a: string | undefined | null, b: string | undefined | null): number {
+  return hierarchySortValue(a).localeCompare(hierarchySortValue(b), undefined, {
+    sensitivity: 'base',
+    numeric: true,
+  });
+}
+
+function hierarchyFieldValue(
+  row: EmsHierarchySortable,
+  dimension: 'bu' | 'zone' | 'region' | 'territory' | 'group',
+  groupBy: EmsReportGroupBy
+): string {
+  switch (dimension) {
+    case 'bu':
+      return row.buName || (groupBy === 'bu' ? row.groupLabel : '') || '';
+    case 'zone':
+      return row.zoneName || (groupBy === 'zone' ? row.groupLabel : '') || '';
+    case 'region':
+      return row.regionName || row.state || (groupBy === 'region' ? row.groupLabel : '') || '';
+    case 'territory':
+      return row.territoryName || (groupBy === 'territory' ? row.groupLabel : '') || '';
+    case 'group':
+      return row.groupLabel || '';
+    default:
+      return '';
+  }
+}
+
+/** Sort EMS report rows: BU → Zone → Region → Territory, then group label for MDO/TM. */
+export function compareEmsReportByHierarchy(
+  a: EmsHierarchySortable,
+  b: EmsHierarchySortable,
+  groupBy: EmsReportGroupBy
+): number {
+  const dimensions: Array<'bu' | 'zone' | 'region' | 'territory' | 'group'> = ['bu'];
+  if (groupBy !== 'bu') dimensions.push('zone');
+  if (groupBy !== 'bu' && groupBy !== 'zone') dimensions.push('region');
+  if (groupBy === 'territory' || groupBy === 'fda' || groupBy === 'tm') dimensions.push('territory');
+  if (groupBy === 'fda' || groupBy === 'tm') dimensions.push('group');
+
+  for (const dimension of dimensions) {
+    const cmp = compareHierarchyStrings(
+      hierarchyFieldValue(a, dimension, groupBy),
+      hierarchyFieldValue(b, dimension, groupBy)
+    );
+    if (cmp !== 0) return cmp;
+  }
+  return 0;
 }
 
 function first10Words(text: string | undefined | null): string {
@@ -237,6 +317,14 @@ export async function getEmsReportSummary(
     {
       $group: {
         _id: '$__group',
+        buName: { $first: { $ifNull: ['$activity.buName', ''] } },
+        zoneName: { $first: { $ifNull: ['$activity.zoneName', ''] } },
+        regionName: { $first: { $ifNull: ['$activity.state', ''] } },
+        territoryName: {
+          $first: {
+            $ifNull: ['$activity.territoryName', { $ifNull: ['$activity.territory', ''] }],
+          },
+        },
         totalAttempted: { $sum: 1 },
         totalConnected: { $sum: { $cond: ['$__isConnected', 1, 0] } },
         connectedIntakePendingCount: {
@@ -305,6 +393,10 @@ export async function getEmsReportSummary(
   const rows: EmsReportSummaryRow[] = [];
   for (const row of agg) {
     const label = row._id != null ? String(row._id).trim() || '—' : '—';
+    const buName = String(row.buName || '').trim();
+    const zoneName = String(row.zoneName || '').trim();
+    const regionName = String(row.regionName || '').trim();
+    const territoryName = String(row.territoryName || '').trim();
     const totalAttempted = Number(row.totalAttempted || 0);
     const totalConnected = Number(row.totalConnected || 0);
     const connectedIntakePendingCount = Number(row.connectedIntakePendingCount || 0);
@@ -338,8 +430,7 @@ export async function getEmsReportSummary(
         : 0;
     const meetingValidityPct = totalConnected > 0 ? Math.round((yesAttendedCount / totalConnected) * 100) : 0;
     const meetingConversionPct = totalConnected > 0 ? Math.round((purchasedCount / totalConnected) * 100) : 0;
-    const purchaseIntentionPct =
-      totalConnected > 0 ? Math.round(((willingYesCount + purchasedCount) / totalConnected) * 100) : 0;
+    const purchaseIntentionPct = computePurchaseIntentionPct(willingYesCount, willingNoCount, purchasedCount);
     // Snapshot formula: Total CS Score / Max CS Score. Max CS Score = totalAttempted × 5
     const totalCsScore = activityQualitySum;
     const maxCsScore = totalAttempted * 5;
@@ -390,10 +481,14 @@ export async function getEmsReportSummary(
       maxCsScore,
       emsScore,
       relativeRemarks,
+      buName,
+      zoneName,
+      regionName,
+      territoryName,
     });
   }
 
-  rows.sort((a, b) => b.totalAttempted - a.totalAttempted);
+  rows.sort((a, b) => compareEmsReportByHierarchy(a, b, groupBy));
   return rows;
 }
 
@@ -467,6 +562,7 @@ export async function getEmsReportLineLevel(
     const yesAttended = log.didAttend === 'Yes, I attended' ? 1 : 0;
     const purchased = log.hasPurchased === true ? 1 : 0;
     const willingYes = log.willingToPurchase === true ? 1 : 0;
+    const willingNo = log.willingToPurchase === false ? 1 : 0;
 
     const totalConnected = isConnected ? 1 : 0;
     const mobileValidityPct = isInvalid ? 0 : 100;
@@ -474,7 +570,7 @@ export async function getEmsReportLineLevel(
       totalConnected > 0 ? Math.round(((totalConnected - identityWrong - notAFarmer) / totalConnected) * 100) : 0;
     const meetingValidityPct = totalConnected > 0 ? (yesAttended / totalConnected) * 100 : 0;
     const meetingConversionPct = totalConnected > 0 ? (purchased / totalConnected) * 100 : 0;
-    const purchaseIntentionPct = totalConnected > 0 ? ((willingYes + purchased) / totalConnected) * 100 : 0;
+    const purchaseIntentionPct = computePurchaseIntentionPct(willingYes, willingNo, purchased);
     const q = log.activityQuality != null && log.activityQuality >= 1 && log.activityQuality <= 5 ? Number(log.activityQuality) : null;
     const cropSolutionsFocusPct = totalConnected > 0 && q != null ? Math.round((q / 5) * 100) : 0;
     // EMS Score = 25% Meeting Conversion + 25% Purchase Intention + 50% Crop Solutions Focus
@@ -518,6 +614,13 @@ export async function getEmsReportLineLevel(
     });
   }
 
+  rows.sort((a, b) =>
+    compareEmsReportByHierarchy(
+      { ...a, regionName: a.state },
+      { ...b, regionName: b.state },
+      groupBy
+    )
+  );
   return rows;
 }
 
@@ -627,6 +730,7 @@ export async function getEmsReportTrends(
         __yesAttended: { $eq: ['$callLog.didAttend', 'Yes, I attended'] },
         __purchased: { $eq: ['$callLog.hasPurchased', true] },
         __willingYes: { $eq: ['$callLog.willingToPurchase', true] },
+        __willingNo: { $eq: ['$callLog.willingToPurchase', false] },
         __hasQualityRating: {
           $and: [
             { $gte: [{ $ifNull: ['$callLog.activityQuality', 0] }, 1] },
@@ -646,6 +750,7 @@ export async function getEmsReportTrends(
         yesAttendedCount: { $sum: { $cond: ['$__yesAttended', 1, 0] } },
         purchasedCount: { $sum: { $cond: ['$__purchased', 1, 0] } },
         willingYesCount: { $sum: { $cond: ['$__willingYes', 1, 0] } },
+        willingNoCount: { $sum: { $cond: ['$__willingNo', 1, 0] } },
         activityQualitySum: {
           $sum: {
             $cond: [
@@ -675,14 +780,14 @@ export async function getEmsReportTrends(
     const yesAttendedCount = Number(row.yesAttendedCount || 0);
     const purchasedCount = Number(row.purchasedCount || 0);
     const willingYesCount = Number(row.willingYesCount || 0);
+    const willingNoCount = Number(row.willingNoCount || 0);
     const activityQualitySum = Number(row.activityQualitySum || 0);
 
     const mobileValidityPct =
       totalAttempted > 0 ? Math.round(((totalAttempted - invalidCount) / totalAttempted) * 100) : 0;
     const meetingValidityPct = totalConnected > 0 ? Math.round((yesAttendedCount / totalConnected) * 100) : 0;
     const meetingConversionPct = totalConnected > 0 ? Math.round((purchasedCount / totalConnected) * 100) : 0;
-    const purchaseIntentionPct =
-      totalConnected > 0 ? Math.round(((willingYesCount + purchasedCount) / totalConnected) * 100) : 0;
+    const purchaseIntentionPct = computePurchaseIntentionPct(willingYesCount, willingNoCount, purchasedCount);
     const maxCsScore = totalAttempted * 5;
     const cropSolutionsFocusPct =
       maxCsScore > 0 ? Math.round((activityQualitySum / maxCsScore) * 100) : 0;

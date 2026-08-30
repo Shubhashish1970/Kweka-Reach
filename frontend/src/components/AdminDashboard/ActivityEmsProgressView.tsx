@@ -218,7 +218,11 @@ function computeEmsTotals(rows: EmsReportSummaryRow[]): EmsTotals | null {
   const hygienePct = totalConnected > 0 ? Math.round(((totalConnected - identityWrongCount - notAFarmerCount) / totalConnected) * 100) : 0;
   const meetingValidityPct = totalConnected > 0 ? Math.round((yesAttendedCount / totalConnected) * 100) : 0;
   const meetingConversionPct = totalConnected > 0 ? Math.round((purchasedCount / totalConnected) * 100) : 0;
-  const purchaseIntentionPct = totalConnected > 0 ? Math.round(((willingYesCount + purchasedCount) / totalConnected) * 100) : 0;
+  const purchaseIntentionDenominator = yesPlusPurchasedCount + willingNoCount;
+  const purchaseIntentionPct =
+    purchaseIntentionDenominator > 0
+      ? Math.round((yesPlusPurchasedCount / purchaseIntentionDenominator) * 100)
+      : 0;
   // Snapshot formula: Total CS Score / Max CS Score. Max CS Score = totalAttempted × 5
   const cropSolutionsFocusPct =
     totalAttempted > 0 ? Math.round((activityQualitySum / (totalAttempted * 5)) * 100) : 0;
@@ -685,7 +689,7 @@ const ActivityEmsProgressView: React.FC = () => {
               { label: 'Hygiene (%)', value: totals.hygienePct, formula: '(Connected − Identity Wrong − Not Farmer) / Connected', icon: UserCheck },
               { label: 'Meeting Validity (%)', value: totals.meetingValidityPct, formula: 'Out of all farmers we successfully spoke to, how many actually attended the meeting or demo?', icon: Users },
               { label: 'Meeting Conversion (%)', value: totals.meetingConversionPct, formula: 'Out of all farmers we successfully spoke to, how many actually bought the product?', icon: ShoppingCart },
-              { label: 'Purchase Intention (%)', value: totals.purchaseIntentionPct, formula: 'Out of all farmers we successfully spoke to, how many either bought or said they are willing to buy?', icon: Target },
+              { label: 'Purchase Intention (%)', value: totals.purchaseIntentionPct, formula: 'Out of farmers who answered commercial conversion (Purchased, Willing Yes, or Willing No), how many either bought or said they are willing to buy?', icon: Target },
               { label: 'Crop Solutions Focus (%)', value: totals.cropSolutionsFocusPct, formula: 'How close were we to delivering a perfect crop solution experience, as judged by farmers (1–5 stars)?', icon: Award },
               { label: 'EMS Score (Totals)', value: totals.emsScore, formula: '25% × Meeting Conversion % + 25% × Purchase Intention % + 50% × Crop Solutions Focus %. Meeting Validity and Hygiene are displayed but not included in EMS Score.', icon: FileBarChart },
             ].map(({ label, value, formula, icon: Icon }) => {

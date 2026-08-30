@@ -280,7 +280,10 @@ router.get(
         const totalsMaxCsScore = totals.totalAttempted * 5;
         const totalsHygienePct = totals.totalConnected > 0 ? Math.round(((totals.totalConnected - totals.identityWrongCount - totals.notAFarmerCount) / totals.totalConnected) * 100) : 0;
         const totalsMeetingConversionPct = totals.totalConnected > 0 ? Math.round((totals.purchasedCount / totals.totalConnected) * 100) : 0;
-        const totalsPurchaseIntentionPct = totals.totalConnected > 0 ? Math.round((totals.yesPlusPurchasedCount / totals.totalConnected) * 100) : 0;
+        const totalsPurchaseIntentionPct =
+          totals.yesPlusPurchasedCount + totals.willingNoCount > 0
+            ? Math.round((totals.yesPlusPurchasedCount / (totals.yesPlusPurchasedCount + totals.willingNoCount)) * 100)
+            : 0;
         const totalsCropSolutionsFocusPct =
           totalsMaxCsScore > 0 ? Math.round((totalsTotalCsScore / totalsMaxCsScore) * 100) : 0;
         const totalsEmsScore = Math.round(
@@ -303,7 +306,6 @@ router.get(
           ['No Ans', ...summaryRows.map((r) => r.noAnswerCount), totals.noAnswerCount],
           ['Total calls', ...summaryRows.map((r) => r.totalAttempted), totals.totalAttempted],
           ['Meeting attendance'],
-          ['Maybe', ...summaryRows.map((r) => r.dontRecallCount), totals.dontRecallCount],
           ['No', ...summaryRows.map((r) => r.noMissedCount), totals.noMissedCount],
           ['Wrong identity', ...summaryRows.map((r) => r.identityWrongCount), totals.identityWrongCount],
           ['Yes', ...summaryRows.map((r) => r.yesAttendedCount), totals.yesAttendedCount],
@@ -313,7 +315,6 @@ router.get(
           ['Purchased', ...summaryRows.map((r) => r.purchasedCount), totals.purchasedCount],
           ['Meeting conversion (%)', ...summaryRows.map((r) => r.meetingConversionPct), totalsMeetingConversionPct],
           ['Purchase Intention'],
-          ['Maybe', ...summaryRows.map((r) => r.willingMaybeCount), totals.willingMaybeCount],
           ['No', ...summaryRows.map((r) => r.willingNoCount), totals.willingNoCount],
           ['Yes', ...summaryRows.map((r) => r.willingYesCount), totals.willingYesCount],
           ['Yes + Purchased', ...summaryRows.map((r) => r.yesPlusPurchasedCount), totals.yesPlusPurchasedCount],

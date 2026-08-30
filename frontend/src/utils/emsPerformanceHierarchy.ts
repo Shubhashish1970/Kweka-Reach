@@ -183,7 +183,7 @@ export function buildPerformanceHierarchy(rows: EmsReportSummaryRow[]): Performa
       const zoneId = `${buId}|zone:${zoneLabel}`;
       const regionNodes: PerformanceTreeNode[] = [];
 
-      for (const [regionLabel, regionRows] of sortEntries([...groupRows(regionRows, (r) => normHierarchyLabel(r.regionName))])) {
+      for (const [regionLabel, regionRows] of sortEntries([...groupRows(zoneRows, (r) => normHierarchyLabel(r.regionName))])) {
         const regionId = `${zoneId}|region:${regionLabel}`;
         const territoryNodes: PerformanceTreeNode[] = [];
 

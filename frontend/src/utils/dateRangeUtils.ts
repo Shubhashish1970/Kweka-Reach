@@ -3,8 +3,8 @@
  * ActivityEmsProgressView, ActivitySamplingView, AgentHistoryView, AgentAnalyticsView,
  * TaskList, TaskDashboardView, SamplingControlView, CallbackRequestView.
  *
- * Uses local date components (not toISOString()) so that YTD "1 Apr LY" is
- * consistently April 1st in all timezones.
+ * Uses local date components (not toISOString()) so that fiscal YTD (1 Apr)
+ * is consistently April 1st in all timezones.
  */
 
 export type DateRangePreset =
@@ -94,7 +94,9 @@ export interface PresetRangeResult {
 }
 
 /**
- * Get start/end dates for a preset. Uses local dates so YTD is always 1 Apr last year.
+ * Get start/end dates for a preset. Uses local dates.
+ * YTD = fiscal year to date (1 Apr of current FY → today): Apr–Dec use this year's Apr 1;
+ * Jan–Mar use previous year's Apr 1.
  * For Custom, pass the current custom range (customFrom, customTo); they are returned as-is.
  */
 export function getPresetRange(
@@ -152,8 +154,10 @@ export function getPresetRange(
       return { start: toISODateLocal(s), end: toISODateLocal(today) };
     }
     case 'YTD': {
-      const apr1LY = new Date(today.getFullYear() - 1, 3, 1); // April 1, last year (month 3 = April)
-      return { start: toISODateLocal(apr1LY), end: toISODateLocal(today) };
+      // Fiscal year starts 1 Apr: Apr–Dec → this year; Jan–Mar → previous year
+      const fyStartYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+      const apr1 = new Date(fyStartYear, 3, 1);
+      return { start: toISODateLocal(apr1), end: toISODateLocal(today) };
     }
     case 'Custom':
     default:

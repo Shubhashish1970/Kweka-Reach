@@ -3,7 +3,7 @@ import { Plus, Filter, Search, Users as UsersIcon, Grid3x3 } from 'lucide-react'
 import { usersAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import UserList from './UserList';
-import UserForm, { UserRole } from './UserForm';
+import UserForm, { UserRole, AgentKind } from './UserForm';
 import AgentLanguageMatrix from './AgentLanguageMatrix';
 import ConfirmationModal from '../shared/ConfirmationModal';
 import StyledSelect from '../shared/StyledSelect';
@@ -20,6 +20,8 @@ interface User {
   email: string;
   employeeId: string;
   role: UserRole;
+  roles?: UserRole[];
+  agentKind?: AgentKind;
   languageCapabilities: string[];
   teamLeadId?: string;
   teamLead?: {

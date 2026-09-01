@@ -809,6 +809,7 @@ import adminRoutes from './routes/admin.js';
 import aiRoutes from './routes/ai.js';
 import dashboardRoutes from './routes/dashboard.js';
 import reportRoutes from './routes/reports.js';
+import voiceRoutes from './routes/voice.js';
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/tasks', taskRoutes);
@@ -819,6 +820,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/kpi', dashboardRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/voice', voiceRoutes);
 
 // 404 handler
 app.use(notFound);
@@ -835,6 +837,9 @@ const startServer = async (): Promise<void> => {
     // FFA scheduled sync: always start the scheduler; on/off is controlled via Admin → Data Management (MongoDB config).
     const { setupCronJobs } = await import('./config/cron.js');
     setupCronJobs();
+
+    const { setupVoiceOrchestrator } = await import('./config/voiceOrchestrator.js');
+    setupVoiceOrchestrator();
 
     // Start Express server
     app.listen(PORT, () => {

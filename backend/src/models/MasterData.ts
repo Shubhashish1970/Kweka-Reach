@@ -42,6 +42,8 @@ export interface IMasterLanguage extends Document {
   code: string;        // e.g., "HI", "TE" (ISO 639-1 style)
   displayOrder: number;
   isActive: boolean;
+  /** Calling agent API trigger UUID for this language (Dograh) */
+  voiceTriggerUuid?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -170,6 +172,11 @@ const MasterLanguageSchema = new Schema<IMasterLanguage>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    voiceTriggerUuid: {
+      type: String,
+      trim: true,
+      default: null,
     },
   },
   {

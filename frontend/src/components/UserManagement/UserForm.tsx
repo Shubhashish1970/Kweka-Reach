@@ -6,6 +6,7 @@ import LanguageSelector from './LanguageSelector';
 import StyledSelect from '../shared/StyledSelect';
 
 export type UserRole = 'cc_agent' | 'team_lead' | 'mis_admin' | 'core_sales_head' | 'marketing_head';
+export type AgentKind = 'human' | 'virtual';
 
 interface User {
   _id?: string;
@@ -13,7 +14,8 @@ interface User {
   email: string;
   employeeId: string;
   role: UserRole;
-  roles?: UserRole[]; // Multiple roles support
+  roles?: UserRole[];
+  agentKind?: AgentKind;
   languageCapabilities: string[];
   teamLeadId?: string;
   teamLead?: {
@@ -51,6 +53,7 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
     role: 'cc_agent' as UserRole, // Primary role (first selected)
     roles: ['cc_agent'] as UserRole[], // All assigned roles
     languageCapabilities: [] as string[],
+    agentKind: 'human' as AgentKind,
     teamLeadId: '',
     isActive: true,
   });
@@ -70,6 +73,7 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
           role: user.role || 'cc_agent',
           roles: userRoles,
           languageCapabilities: user.languageCapabilities || [],
+          agentKind: user.agentKind === 'virtual' ? 'virtual' : 'human',
           teamLeadId: user.teamLeadId?.toString() || user.teamLead?._id || '',
           isActive: user.isActive !== undefined ? user.isActive : true,
         });
@@ -82,6 +86,7 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
           role: 'cc_agent',
           roles: ['cc_agent'],
           languageCapabilities: [],
+          agentKind: 'human',
           teamLeadId: '',
           isActive: true,
         });
@@ -124,6 +129,7 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
         teamLeadId: newRoles.includes('cc_agent') ? prev.teamLeadId : '',
         // Clear languages if cc_agent is no longer in roles
         languageCapabilities: newRoles.includes('cc_agent') ? prev.languageCapabilities : [],
+        agentKind: newRoles.includes('cc_agent') ? prev.agentKind : 'human',
       };
     });
   };
@@ -181,6 +187,7 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
       // Include teamLeadId if cc_agent is one of the roles
       if (formData.roles.includes('cc_agent')) {
         submitData.teamLeadId = formData.teamLeadId;
+        submitData.agentKind = formData.agentKind;
       }
 
       if (isEditMode && user?._id) {
@@ -371,6 +378,35 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
                   No active Team Leads found. Create a Team Lead first.
                 </p>
               )}
+            </div>
+          )}
+
+          {/* Agent kind (only for CC Agent) */}
+          {showLanguageField && (
+            <div>
+              <label className="block text-sm font-bold text-slate-700 uppercase tracking-wide mb-2">
+                Agent Type
+              </label>
+              <div className="flex gap-3">
+                {([
+                  { value: 'human' as AgentKind, label: 'Human (manual dialer)' },
+                  { value: 'virtual' as AgentKind, label: 'Virtual (voice agent)' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setFormData({ ...formData, agentKind: opt.value })}
+                    className={`flex-1 px-4 py-3 rounded-xl border-2 text-sm font-bold transition-all ${
+                      formData.agentKind === opt.value
+                        ? 'border-lime-500 bg-lime-50 text-slate-900'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

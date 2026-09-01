@@ -64,6 +64,10 @@ export interface ICallTask extends Document {
   /** Set when task is created by sampling run; used for adhoc vs first_sample stats */
   samplingRunId?: mongoose.Types.ObjectId | null;
   samplingRunType?: 'first_sample' | 'adhoc' | null;
+  /** Calling agent run id returned from outbound trigger API */
+  voiceWorkflowRunId?: number | null;
+  /** Per-dial attempt id sent in initial_context */
+  voiceAttemptId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -231,6 +235,15 @@ const CallTaskSchema = new Schema<ICallTask>(
       default: 0, // 0 = original, 1 = 1st callback, 2 = 2nd callback (max)
       min: [0, 'callbackNumber cannot be negative'],
       max: [2, 'callbackNumber cannot exceed 2 (maximum 2 callbacks allowed)'],
+    },
+    voiceWorkflowRunId: {
+      type: Number,
+      default: null,
+    },
+    voiceAttemptId: {
+      type: String,
+      default: null,
+      trim: true,
     },
   },
   {

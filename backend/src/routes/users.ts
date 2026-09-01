@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { body, validationResult, query } from 'express-validator';
-import { User, UserRole } from '../models/User.js';
+import { User, UserRole, AgentKind } from '../models/User.js';
 import { hashPassword } from '../utils/password.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole, requirePermission } from '../middleware/rbac.js';
@@ -166,6 +166,7 @@ router.post(
     body('languageCapabilities').optional().isArray(),
     body('assignedTerritories').optional().isArray(),
     body('teamLeadId').optional().isMongoId().withMessage('Invalid team lead ID'),
+    body('agentKind').optional().isIn(['human', 'virtual']).withMessage('Invalid agent kind'),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -177,12 +178,15 @@ router.post(
         });
       }
 
-      const { name, email, password, role, roles, employeeId, languageCapabilities = [], assignedTerritories = [], teamLeadId } = req.body;
+      const { name, email, password, role, roles, employeeId, languageCapabilities = [], assignedTerritories = [], teamLeadId, agentKind } = req.body;
 
       const normalizedLanguageCapabilities = await assertActiveMasterLanguages(
         languageCapabilities,
         'Language capability'
       );
+
+      const resolvedAgentKind: AgentKind =
+        role === 'cc_agent' && agentKind === 'virtual' ? 'virtual' : 'human';
 
       // Check if email already exists
       const existingUser = await User.findOne({ $or: [{ email }, { employeeId }] });
@@ -222,6 +226,7 @@ router.post(
         languageCapabilities: normalizedLanguageCapabilities,
         assignedTerritories,
         teamLeadId: teamLeadId || undefined,
+        agentKind: resolvedAgentKind,
       });
 
       logger.info(`User created: ${user.email} (${user.role}) by ${req.user?.email}`);
@@ -239,6 +244,7 @@ router.post(
             languageCapabilities: user.languageCapabilities,
             assignedTerritories: user.assignedTerritories,
             teamLeadId: user.teamLeadId,
+            agentKind: user.agentKind || 'human',
             isActive: user.isActive,
           },
         },
@@ -265,6 +271,7 @@ router.put(
     body('assignedTerritories').optional().isArray(),
     body('teamLeadId').optional().isMongoId(),
     body('isActive').optional().isBoolean(),
+    body('agentKind').optional().isIn(['human', 'virtual']).withMessage('Invalid agent kind'),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -312,6 +319,12 @@ router.put(
         }
       }
       if (req.body.isActive !== undefined) updateData.isActive = req.body.isActive;
+
+      if (req.body.agentKind !== undefined) {
+        const targetRole = req.body.role || (await User.findById(userId))?.role;
+        updateData.agentKind =
+          targetRole === 'cc_agent' && req.body.agentKind === 'virtual' ? 'virtual' : 'human';
+      }
 
       const user = await User.findByIdAndUpdate(
         userId,

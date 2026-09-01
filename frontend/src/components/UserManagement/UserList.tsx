@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Edit2, Trash2, UserCheck, UserX, Mail, Hash, Users as UsersIcon, ChevronUp, ChevronDown, KeyRound } from 'lucide-react';
-import { UserRole } from './UserForm';
+import { UserRole, AgentKind } from './UserForm';
 
 type UserTableColumnKey = 'name' | 'role' | 'languages' | 'teamLead' | 'status';
 
@@ -10,7 +10,8 @@ interface User {
   email: string;
   employeeId: string;
   role: UserRole;
-  roles?: UserRole[]; // Multiple roles support
+  roles?: UserRole[];
+  agentKind?: AgentKind;
   languageCapabilities: string[];
   teamLeadId?: string;
   teamLead?: {
@@ -168,7 +169,15 @@ const UserList: React.FC<UserListProps> = ({ users, isLoading, onEdit, onDelete,
                   <td className="px-6 py-4">
                     <div>
                       <div className="flex items-center gap-2">
-                        <div className="font-bold text-slate-900">{user.name}</div>
+                        <div className="font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                          <span>{user.name}</span>
+                          {(user.roles?.includes('cc_agent') || user.role === 'cc_agent') &&
+                            user.agentKind === 'virtual' && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-violet-100 text-violet-800">
+                                Virtual
+                              </span>
+                            )}
+                        </div>
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-sm text-slate-600">
                         <div className="flex items-center gap-1">

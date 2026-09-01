@@ -25,6 +25,7 @@ import {
   bulkCancelTasks,
 } from '../services/taskService.js';
 import { getOutcomeFromStatus } from '../utils/outcomeHelper.js';
+import { submitCallInteractionForTask } from '../services/taskSubmitService.js';
 import { getTaskStatusLabel } from '../utils/taskStatusLabels.js';
 import { exportAgentQueueTasksXlsx, getAgentQueue } from '../services/adminService.js';
 import logger from '../config/logger.js';
@@ -3234,23 +3235,7 @@ router.post(
       const taskId = req.params.id;
       const agentId = authReq.user._id.toString();
 
-      const task = await CallTask.findById(taskId);
-      if (!task) {
-        const error: AppError = new Error('Task not found');
-        error.statusCode = 404;
-        throw error;
-      }
-
-      // Verify task is assigned to this agent
-      if (!task.assignedAgentId || task.assignedAgentId.toString() !== agentId) {
-        const error: AppError = new Error('Task not assigned to you');
-        error.statusCode = 403;
-        throw error;
-      }
-
-      // Create call log
-      const callLog: ICallLog = {
-        timestamp: new Date(),
+      const task = await submitCallInteractionForTask(taskId, agentId, {
         callStatus: req.body.callStatus,
         callDurationSeconds: Number(req.body.callDurationSeconds || 0),
         didAttend: req.body.didAttend ?? null,
@@ -3265,34 +3250,7 @@ router.post(
         farmerComments: req.body.farmerComments || '',
         sentiment: req.body.sentiment || 'N/A',
         ...(req.body.activityQuality != null && { activityQuality: Number(req.body.activityQuality) }),
-      };
-
-      // Update task with call log
-      task.callLog = callLog;
-
-      // Determine final status based on call status
-      let finalStatus: TaskStatus = 'completed';
-      if (['Incoming N/A', 'No Answer', 'Disconnected', 'Not Reachable'].includes(req.body.callStatus)) {
-        finalStatus = 'not_reachable';
-      } else if (['Invalid', 'Invalid Number'].includes(req.body.callStatus)) {
-        finalStatus = 'invalid_number';
-      }
-
-      // Calculate and set outcome based on final status
-      const finalOutcome = getOutcomeFromStatus(finalStatus);
-
-      // Add to interaction history (record previous status before update)
-      const previousStatus = task.status;
-      // Add to interaction history
-      task.interactionHistory.push({
-        timestamp: new Date(),
-        status: previousStatus,
-        notes: 'Call interaction submitted',
       });
-
-      task.status = finalStatus;
-      task.outcome = finalOutcome;
-      await task.save();
 
       logger.info(`Task ${taskId} submitted by agent ${authReq.user.email}`);
 

@@ -2,6 +2,8 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export type UserRole = 'cc_agent' | 'team_lead' | 'mis_admin' | 'core_sales_head' | 'marketing_head';
 
+export type AgentKind = 'human' | 'virtual';
+
 export const ALL_ROLES: UserRole[] = ['cc_agent', 'team_lead', 'mis_admin', 'core_sales_head', 'marketing_head'];
 
 export interface IUser extends Document {
@@ -14,6 +16,8 @@ export interface IUser extends Document {
   languageCapabilities: string[];
   assignedTerritories: string[];
   teamLeadId?: mongoose.Types.ObjectId; // For cc_agent role - points to team_lead user
+  /** human = manual dialer; virtual = voice orchestrator */
+  agentKind?: AgentKind;
   isActive: boolean;
   /** When true, user may only call auth/me, logout, and change-password until they set a new password */
   mustChangePassword?: boolean;
@@ -77,6 +81,11 @@ const UserSchema = new Schema<IUser>(
       ref: 'User',
       default: null,
     },
+    agentKind: {
+      type: String,
+      enum: ['human', 'virtual'],
+      default: 'human',
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -102,6 +111,7 @@ UserSchema.index({ teamLeadId: 1 });
 // Performance optimization indexes
 UserSchema.index({ teamLeadId: 1, role: 1, isActive: 1 }); // For team member lookups
 UserSchema.index({ languageCapabilities: 1, role: 1, isActive: 1 }); // For agent language matching
+UserSchema.index({ agentKind: 1, role: 1, isActive: 1 }); // Virtual voice agents
 
 // Pre-save middleware to ensure roles array always contains the primary role
 UserSchema.pre('save', function(next) {

@@ -6,6 +6,7 @@ import { tasksAPI } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateTimeIST } from '../utils/dateRangeUtils';
 import { getTaskStatusLabel } from '../utils/taskStatusLabels';
+import { useAgentAccent } from '../utils/agentWorkspaceTheme';
 
 type HistoryStatus = '' | 'in_progress' | 'completed' | 'not_reachable' | 'invalid_number' | 'cancelled';
 
@@ -123,6 +124,7 @@ function loadSavedHistoryFilters(): SavedHistoryFilters {
 }
 
 const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promise<void> }> = ({ onOpenTask }) => {
+  const { accent } = useAgentAccent();
   const toast = useToast();
   const initialHistoryFilters = useMemo(() => loadSavedHistoryFilters(), []);
 
@@ -490,7 +492,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                 value={filters.search}
                 onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
                 placeholder="Name or mobile — filters the table as you type"
-                className="w-full min-h-12 pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                className={`w-full min-h-12 pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 placeholder-slate-400 ${accent.focusRingField}`}
                 aria-label="Search history by farmer name or mobile"
               />
             </div>
@@ -559,7 +561,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                           return next;
                         });
                       }}
-                      className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 flex items-center justify-between"
+                      className={`w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 ${accent.focusRingField} flex items-center justify-between`}
                     >
                       <span className="truncate">
                         {selectedPreset}
@@ -617,7 +619,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                                     setSelectedPreset('Custom');
                                     setDraftStart(e.target.value);
                                   }}
-                                  className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                                  className={`w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 ${accent.focusRingField}`}
                                 />
                               </div>
                               <div className="flex-1">
@@ -629,7 +631,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                                     setSelectedPreset('Custom');
                                     setDraftEnd(e.target.value);
                                   }}
-                                  className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                                  className={`w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 ${accent.focusRingField}`}
                                 />
                               </div>
                             </div>
@@ -675,7 +677,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
           <div className="bg-white rounded-3xl p-4 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <BarChart3 className="text-lime-600" size={18} />
+                <BarChart3 className={accent.chartIcon} size={18} />
                 <div>
                   <h2 className="text-base font-black text-slate-900">Statistics</h2>
                   <p className="text-[11px] text-slate-500 font-medium mt-0.5">
@@ -695,7 +697,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                 disabled={isExporting || isLoading}
                 className={`flex items-center justify-center h-10 w-10 rounded-2xl border transition-colors ${
                   isExporting
-                    ? 'bg-lime-50 border-lime-200 text-lime-700'
+                    ? accent.filterChipActive
                     : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                 }`}
                 title="Download Excel (all records matching current filters)"
@@ -745,7 +747,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
         {/* History Table - Matching Activity Sampling */}
         {isLoading ? (
           <div className="bg-white rounded-3xl p-12 border border-slate-200 shadow-sm text-center">
-            <Loader2 className="animate-spin mx-auto mb-4 text-lime-600" size={32} />
+            <Loader2 className={`animate-spin mx-auto mb-4 ${accent.loader}`} size={32} />
             <p className="text-sm text-slate-600 font-medium">Loading history...</p>
           </div>
         ) : !pagination || (pagination.total || 0) === 0 ? (
@@ -850,7 +852,7 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                                 }}
                               />
                             ) : (
-                              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center shadow-sm border-2 border-white shrink-0">
+                              <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full ${accent.avatarGradient} flex items-center justify-center shadow-sm border-2 border-white shrink-0`}>
                                 <span className="text-white font-bold text-xs sm:text-sm">{getInitials(farmer.name || '')}</span>
                               </div>
                             )}
@@ -894,14 +896,14 @@ const AgentHistoryView: React.FC<{ onOpenTask?: (taskId: string) => void | Promi
                               type="button"
                               onClick={() => handleOpenInDialer(String(t._id))}
                               disabled={openingTaskId === String(t._id)}
-                              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-lime-400/80 bg-lime-500/15 text-lime-800 hover:bg-lime-500/25 disabled:opacity-50 transition-colors mx-auto"
+                              className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border disabled:opacity-50 transition-colors mx-auto ${accent.callBtn}`}
                               title="Open in dialer — continue or update this call"
                               aria-label="Open task in dialer"
                             >
                               {openingTaskId === String(t._id) ? (
-                                <Loader2 size={18} className="animate-spin shrink-0 text-lime-700" />
+                                <Loader2 size={18} className={`animate-spin shrink-0 ${accent.callBtnIcon}`} />
                               ) : (
-                                <PhoneCall size={18} className="shrink-0 text-lime-700" strokeWidth={2.25} />
+                                <PhoneCall size={18} className={`shrink-0 ${accent.callBtnIcon}`} strokeWidth={2.25} />
                               )}
                             </button>
                           </td>

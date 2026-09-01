@@ -13,6 +13,7 @@ interface User {
   languageCapabilities: string[];
   assignedTerritories: string[];
   teamLeadId?: string;
+  agentKind?: 'human' | 'virtual';
   isActive: boolean;
   mustChangePassword?: boolean;
 }

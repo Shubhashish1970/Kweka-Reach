@@ -4,6 +4,7 @@ import Button from './shared/Button';
 import { tasksAPI } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { type DateRangePreset, getPresetRange, formatPretty, formatDateIST } from '../utils/dateRangeUtils';
+import { useAgentAccent } from '../utils/agentWorkspaceTheme';
 
 type Bucket = 'daily' | 'weekly' | 'monthly';
 
@@ -75,6 +76,7 @@ function loadSavedAnalyticsFilters(): SavedAnalyticsFilters {
 }
 
 const AgentAnalyticsView: React.FC = () => {
+  const { accent } = useAgentAccent();
   const toast = useToast();
   const initialAnalyticsFilters = useMemo(() => loadSavedAnalyticsFilters(), []);
   const [isLoading, setIsLoading] = useState(false);
@@ -196,7 +198,7 @@ const AgentAnalyticsView: React.FC = () => {
                       return next;
                     });
                   }}
-                  className="min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 flex items-center justify-between min-w-[280px]"
+                  className={`min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 flex items-center justify-between min-w-[280px] ${accent.focusRingField}`}
                 >
                   <span className="truncate">
                     {selectedPreset}
@@ -255,7 +257,7 @@ const AgentAnalyticsView: React.FC = () => {
                                 setSelectedPreset('Custom');
                                 setDraftStart(e.target.value);
                               }}
-                              className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                              className={`w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 ${accent.focusRingField}`}
                             />
                           </div>
                           <div className="flex-1">
@@ -267,7 +269,7 @@ const AgentAnalyticsView: React.FC = () => {
                                 setSelectedPreset('Custom');
                                 setDraftEnd(e.target.value);
                               }}
-                              className="w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+                              className={`w-full min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 ${accent.focusRingField}`}
                             />
                           </div>
                         </div>

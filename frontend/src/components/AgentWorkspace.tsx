@@ -4,7 +4,7 @@ import { useToast } from '../context/ToastContext';
 import { tasksAPI } from '../services/api';
 import {
   Phone, User, CheckCircle, Zap, LogOut, Globe, Loader2,
-  TrendingUp, MapPin, History, X, PhoneOff, PhoneCall
+  TrendingUp, MapPin, History, X, PhoneOff, PhoneCall, Mic
 } from 'lucide-react';
 import BinaryToggle from './BinaryToggle';
 import MultiTagSelect from './MultiTagSelect';
@@ -18,6 +18,7 @@ import Button from './shared/Button';
 import HeaderRoleSwitcher from './shared/HeaderRoleSwitcher';
 import AgentHistoryView from './AgentHistoryView';
 import AgentAnalyticsView from './AgentAnalyticsView';
+import { useAgentAccent } from '../utils/agentWorkspaceTheme';
 
 // Business Constants
 const IndianCrops = ['Paddy', 'Cotton', 'Chilli', 'Soybean', 'Maize', 'Wheat', 'Sugarcane'];
@@ -70,6 +71,7 @@ interface TaskData {
 
 const AgentWorkspace: React.FC = () => {
   const { user, logout, activeRole } = useAuth();
+  const { accent, isVoiceAgent } = useAgentAccent();
   const { showError, showWarning } = useToast();
   const [callDuration, setCallDuration] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -486,7 +488,7 @@ const AgentWorkspace: React.FC = () => {
       {isLoading && (
         <div className="absolute inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="bg-white rounded-2xl p-6 flex flex-col items-center gap-4 shadow-xl">
-            <Loader2 className="animate-spin text-lime-600" size={32} />
+            <Loader2 className={`animate-spin ${accent.loader}`} size={32} />
             <p className="font-bold text-slate-800">Loading tasks...</p>
             <Button 
               variant="secondary" 
@@ -525,7 +527,7 @@ const AgentWorkspace: React.FC = () => {
             onClick={() => setActiveSection('dialer')}
             className={`p-3 rounded-2xl border transition-all ${
               activeSection === 'dialer'
-                ? 'bg-lime-500/20 text-lime-400 border-lime-500/30 shadow-lg'
+                ? accent.sideNavActiveBordered
                 : 'bg-transparent text-slate-400 border-transparent hover:text-white hover:bg-slate-800'
             }`}
             title="Dialer"
@@ -536,7 +538,7 @@ const AgentWorkspace: React.FC = () => {
             onClick={() => setActiveSection('history')}
             className={`p-3 rounded-2xl transition-all ${
               activeSection === 'history' 
-                ? 'text-lime-400 bg-lime-500/20' 
+                ? accent.sideNavActive
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
             title="History"
@@ -547,7 +549,7 @@ const AgentWorkspace: React.FC = () => {
             onClick={() => setActiveSection('analytics')}
             className={`p-3 rounded-2xl transition-all ${
               activeSection === 'analytics' 
-                ? 'text-lime-400 bg-lime-500/20' 
+                ? accent.sideNavActive
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
             title="Performance"
@@ -563,15 +565,25 @@ const AgentWorkspace: React.FC = () => {
         <header className="h-20 bg-slate-900 px-4 lg:px-8 flex items-center justify-between shrink-0 shadow-lg z-20">
           <div className="flex items-center gap-4 lg:gap-8">
             <div className="flex flex-col">
-              <span className="text-[10px] font-black text-lime-400 uppercase tracking-[0.2em]">Kweka Reach</span>
-              <h1 className="text-base lg:text-xl font-black text-white tracking-tight">Agent Workspace</h1>
+              <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${accent.brandLabel}`}>Kweka Reach</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base lg:text-xl font-black text-white tracking-tight">
+                  {isVoiceAgent ? 'Voice Agent Workspace' : 'Agent Workspace'}
+                </h1>
+                {isVoiceAgent && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${accent.badge}`}>
+                    <Mic size={10} />
+                    Voice
+                  </span>
+                )}
+              </div>
             </div>
             <div className="h-10 w-px bg-slate-700 hidden md:block" />
             {taskData && formData.callStatus === 'Connected' && (
               <div className="hidden sm:flex items-center gap-3">
                 <CallTimer duration={callDuration} />
                 <div className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-700 rounded-2xl text-[11px] font-bold text-slate-300 uppercase">
-                  <Globe size={14} className="text-lime-400" />
+                  <Globe size={14} className={accent.globeIcon} />
                   {taskData.farmer.preferredLanguage}
                 </div>
               </div>
@@ -589,7 +601,7 @@ const AgentWorkspace: React.FC = () => {
                   }}
                   disabled={isLoading}
                   type="button"
-                  className="px-4 py-2 bg-lime-500 text-slate-900 rounded-2xl text-xs font-bold hover:bg-lime-400 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
+                  className={`px-4 py-2 rounded-2xl text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all ${accent.loadTasksBtn}`}
                 >
                   {isLoading ? (
                     <>
@@ -622,8 +634,8 @@ const AgentWorkspace: React.FC = () => {
                 onClick={toggleAIPanel}
                 className={`hidden lg:flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-xl transition-all ${
                   isAIPanelExpanded
-                    ? 'text-lime-400 bg-lime-500/15 hover:bg-lime-500/25'
-                    : 'text-slate-300 hover:text-lime-400 hover:bg-slate-800'
+                    ? accent.notetakerActive
+                    : accent.notetakerIdle
                 }`}
                 title={isAIPanelExpanded ? 'Hide Notetaker' : 'Show Notetaker'}
                 aria-pressed={isAIPanelExpanded}
@@ -673,6 +685,7 @@ const AgentWorkspace: React.FC = () => {
                 NonPurchaseReasons={NonPurchaseReasons}
                 isAIPanelExpanded={isAIPanelExpanded}
                 onOutboundStatusSelected={handleOutboundStatusSelected}
+                accentTheme={isVoiceAgent ? 'virtual' : 'human'}
               />
 
           {/* AI Copilot (AI) - Slides in from the right; toggled from header Notetaker icon */}
@@ -709,21 +722,21 @@ const AgentWorkspace: React.FC = () => {
         <div className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-slate-900 border-t border-slate-800 flex items-center justify-around z-50 shadow-[0_-10px_30px_rgba(0,0,0,0.2)] px-6">
           <button
             onClick={() => setActiveTab('details')}
-            className={`flex flex-col items-center gap-1.5 px-6 py-2 rounded-2xl transition-all ${activeTab === 'details' ? 'text-lime-400 bg-lime-500/20' : 'text-slate-400'}`}
+            className={`flex flex-col items-center gap-1.5 px-6 py-2 rounded-2xl transition-all ${activeTab === 'details' ? accent.mobileTabActive : 'text-slate-400'}`}
           >
             <User size={22} fill={activeTab === 'details' ? 'currentColor' : 'none'} />
             <span className="text-[10px] font-black uppercase tracking-tighter">Details</span>
           </button>
           <button
             onClick={() => setActiveTab('flow')}
-            className={`flex flex-col items-center gap-1.5 px-6 py-2 rounded-2xl transition-all ${activeTab === 'flow' ? 'text-lime-400 bg-lime-500/20' : 'text-slate-400'}`}
+            className={`flex flex-col items-center gap-1.5 px-6 py-2 rounded-2xl transition-all ${activeTab === 'flow' ? accent.mobileTabActive : 'text-slate-400'}`}
           >
             <CheckCircle size={22} fill={activeTab === 'flow' ? 'currentColor' : 'none'} />
             <span className="text-[10px] font-black uppercase tracking-tighter">Flow</span>
           </button>
           <button
             onClick={() => setActiveTab('ai')}
-            className={`flex flex-col items-center gap-1.5 px-6 py-2 rounded-2xl transition-all ${activeTab === 'ai' ? 'text-lime-400 bg-lime-500/20' : 'text-slate-400'}`}
+            className={`flex flex-col items-center gap-1.5 px-6 py-2 rounded-2xl transition-all ${activeTab === 'ai' ? accent.mobileTabActive : 'text-slate-400'}`}
           >
             <Zap size={22} fill={activeTab === 'ai' ? 'currentColor' : 'none'} />
             <span className="text-[10px] font-black uppercase tracking-tighter">Notetaker</span>
@@ -747,7 +760,7 @@ const AgentWorkspace: React.FC = () => {
             className={`fixed bottom-6 right-6 w-16 h-16 rounded-full shadow-2xl flex items-center justify-center z-40 transition-all border-4 border-white ${
               fabIsFinish
                 ? 'bg-rose-500 hover:bg-rose-400 text-white disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:scale-100 hover:scale-110 active:scale-95'
-                : 'bg-lime-500 hover:bg-lime-400 text-slate-900 hover:scale-110 active:scale-95 disabled:opacity-50'
+                : `${accent.fabOpenDialer} hover:scale-110 active:scale-95 disabled:opacity-50`
             }`}
             title={
               fabIsFinish
@@ -758,7 +771,7 @@ const AgentWorkspace: React.FC = () => {
             }
             aria-label={fabIsFinish ? finishLabel : 'Open contact dialer'}
           >
-            {fabIsFinish ? <PhoneOff size={28} className="text-white" strokeWidth={2.25} /> : <PhoneCall size={28} className="text-slate-900" />}
+            {fabIsFinish ? <PhoneOff size={28} className="text-white" strokeWidth={2.25} /> : <PhoneCall size={28} className={isVoiceAgent ? 'text-white' : 'text-slate-900'} />}
           </button>
         );
       })()}
@@ -768,6 +781,7 @@ const AgentWorkspace: React.FC = () => {
         isOpen={showTaskSelectionModal}
         onClose={() => setShowTaskSelectionModal(false)}
         onSelectTask={handleTaskSelected}
+        accentTheme={isVoiceAgent ? 'virtual' : 'human'}
       />
 
       {/* Call Review Modal */}

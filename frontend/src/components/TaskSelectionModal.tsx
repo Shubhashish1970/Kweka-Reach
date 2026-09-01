@@ -3,6 +3,7 @@ import { X, Phone, PhoneCall, MapPin, Loader2, Search, Clock, CheckCircle, XCirc
 import { tasksAPI } from '../services/api';
 import { formatDateIST } from '../utils/dateRangeUtils';
 import SearchableMultiSelect from './SearchableMultiSelect';
+import { AgentAccentTheme, getAgentAccentClasses } from '../utils/agentWorkspaceTheme';
 
 interface Task {
   taskId: string;
@@ -38,6 +39,7 @@ interface TaskSelectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectTask: (task: Task) => void;
+  accentTheme?: AgentAccentTheme;
 }
 
 type DialerFilterTab = 'in_progress' | 'sampled_in_queue' | 'completed';
@@ -84,7 +86,13 @@ function tabToApiTab(tab: DialerFilterTab): DialerApiTab {
   return 'queue';
 }
 
-const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose, onSelectTask }) => {
+const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({
+  isOpen,
+  onClose,
+  onSelectTask,
+  accentTheme = 'human',
+}) => {
+  const accent = getAgentAccentClasses(accentTheme);
   const savedDialerFilters = useMemo(() => loadSavedDialerFilters(), []);
   const hasSavedDialerFiltersRef = useRef(savedDialerFilters !== null);
 
@@ -326,7 +334,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
               placeholder="Search..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full min-h-12 pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
+              className={`w-full min-h-12 pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder-slate-400 ${accent.focusRingField}`}
             />
           </div>
 
@@ -337,7 +345,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
               <select
                 value={filterBy}
                 onChange={(e) => handleFilterByChange((e.target.value || '') as '' | 'territory' | 'tm' | 'fda')}
-                className="flex-1 min-w-0 h-9 pl-3 pr-8 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 appearance-none bg-no-repeat bg-right"
+                className={`flex-1 min-w-0 h-9 pl-3 pr-8 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 appearance-none bg-no-repeat bg-right ${accent.focusRingField}`}
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364758b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundPosition: 'right 8px center' }}
               >
                 <option value="">—</option>
@@ -379,7 +387,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
               onClick={() => setFilter('in_progress')}
               className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors whitespace-nowrap ${
                 filter === 'in_progress'
-                  ? 'bg-slate-900 text-lime-400'
+                  ? accent.tabActive
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -389,7 +397,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
               onClick={() => setFilter('sampled_in_queue')}
               className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors whitespace-nowrap ${
                 filter === 'sampled_in_queue'
-                  ? 'bg-slate-900 text-lime-400'
+                  ? accent.tabActive
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -399,7 +407,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
               onClick={() => setFilter('completed')}
               className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors whitespace-nowrap ${
                 filter === 'completed'
-                  ? 'bg-slate-900 text-lime-400'
+                  ? accent.tabActive
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -417,7 +425,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto bg-slate-50">
           {isLoadingInitial ? (
             <div className="flex items-center justify-center py-20">
-              <Loader2 className="animate-spin text-lime-600" size={32} />
+              <Loader2 className={`animate-spin ${accent.loader}`} size={32} />
               <span className="ml-3 text-slate-600 font-medium">Loading contacts...</span>
             </div>
           ) : error ? (
@@ -454,7 +462,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                 const rowClass = `w-full px-6 py-4 flex items-center gap-4 ${
                   isCompleted ? 'bg-slate-50/80' : 'hover:bg-white active:bg-slate-50'
                 } transition-colors ${
-                  isSelected && !isCompleted ? 'bg-green-50' : ''
+                  isSelected && !isCompleted ? accent.rowSelectedBg : ''
                 } ${isLoadingTask ? 'opacity-50' : ''} ${
                   !isCompleted && !isLoadingTask ? 'cursor-pointer' : ''
                 }`;
@@ -480,7 +488,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                         />
                       ) : null}
                       <div
-                        className="avatar-fallback w-14 h-14 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center shadow-md border-2 border-white"
+                        className={`avatar-fallback w-14 h-14 rounded-full ${accent.avatarGradient} flex items-center justify-center shadow-md border-2 border-white`}
                         style={{ display: task.farmer.photoUrl ? 'none' : 'flex' }}
                       >
                         <span className="text-white text-lg font-bold">
@@ -526,7 +534,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
 
                       {/* Mobile Number - Prominent */}
                       <div className="flex items-center gap-2 mb-1">
-                        <Phone size={12} className="text-lime-600 flex-shrink-0" />
+                        <Phone size={12} className={`${accent.phoneIcon} flex-shrink-0`} />
                         <a
                           href={`tel:${task.farmer.mobileNumber}`}
                           onClick={(e) => e.stopPropagation()}
@@ -584,14 +592,14 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                                 handleSelectTask(task);
                               }}
                               disabled={isLoadingTask}
-                              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-lime-400/80 bg-lime-500/15 text-lime-800 hover:bg-lime-500/25 disabled:opacity-50 transition-colors shrink-0"
+                              className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border disabled:opacity-50 transition-colors shrink-0 ${accent.callBtn}`}
                               title="Open in dialer — continue or update this call"
                               aria-label="Continue task in dialer"
                             >
                               {isSelected && isLoadingTask ? (
-                                <Loader2 size={18} className="animate-spin text-lime-700" />
+                                <Loader2 size={18} className={`animate-spin ${accent.callBtnIcon}`} />
                               ) : (
-                                <PhoneCall size={18} className="text-lime-700" strokeWidth={2.25} />
+                                <PhoneCall size={18} className={accent.callBtnIcon} strokeWidth={2.25} />
                               )}
                             </button>
                           </div>
@@ -609,9 +617,9 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
                             } ${isLoadingTask ? 'opacity-50' : ''}`}
                           >
                             {isSelected && isLoadingTask ? (
-                              <Loader2 size={18} className="animate-spin text-lime-400" />
+                              <Loader2 size={18} className={`animate-spin ${accent.loaderDark}`} />
                             ) : (
-                              <Phone size={18} className="text-lime-400" />
+                              <Phone size={18} className={accent.loaderDark} />
                             )}
                           </div>
                         </>
@@ -645,7 +653,7 @@ const TaskSelectionModal: React.FC<TaskSelectionModalProps> = ({ isOpen, onClose
               })}
               {isLoadingMore && (
                 <div className="flex items-center justify-center py-4 text-slate-500 text-sm">
-                  <Loader2 className="animate-spin text-lime-600 mr-2" size={18} />
+                  <Loader2 className={`animate-spin ${accent.loader} mr-2`} size={18} />
                   Loading more…
                 </div>
               )}

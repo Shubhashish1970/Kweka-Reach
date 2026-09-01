@@ -5,6 +5,7 @@ import MultiTagSelect from './MultiTagSelect';
 import PurchasedProductsInput from './PurchasedProductsInput';
 import { masterDataAPI } from '../services/api';
 import Button from './shared/Button';
+import { AgentAccentTheme, getAgentAccentClasses } from '../utils/agentWorkspaceTheme';
 
 interface CallInteractionFormProps {
   taskData: any;
@@ -33,6 +34,7 @@ interface CallInteractionFormProps {
   NonPurchaseReasons: string[];
   isAIPanelExpanded?: boolean;
   onOutboundStatusSelected?: (status: string) => void;
+  accentTheme?: AgentAccentTheme;
 }
 
 const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
@@ -48,7 +50,9 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
   NonPurchaseReasons,
   isAIPanelExpanded = false,
   onOutboundStatusSelected,
+  accentTheme = 'human',
 }) => {
+  const accent = getAgentAccentClasses(accentTheme);
   const [masterCrops, setMasterCrops] = useState<string[]>([]);
   const [masterProducts, setMasterProducts] = useState<string[]>([]);
   const [loadingMasterData, setLoadingMasterData] = useState(true);
@@ -270,7 +274,7 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                         className={`py-2 px-2.5 rounded-lg border text-[9px] font-black uppercase tracking-tighter transition-all min-h-[32px] flex items-center justify-center ${
                           isSelected
                             ? isConnected
-                              ? 'bg-green-700 text-white border-green-700 shadow-sm'
+                              ? accent.btnSolid
                               : 'bg-slate-950 text-white border-slate-950 shadow-sm'
                             : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                         }`}
@@ -303,9 +307,9 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                           className={`py-2 px-2.5 rounded-lg border text-[9px] font-black uppercase tracking-tighter transition-all min-h-[32px] flex items-center justify-center ${
                             isSelected
                               ? isYes
-                                ? 'bg-green-700 text-white border-green-700 shadow-sm'
+                                ? accent.btnSolid
                                 : isMaybe
-                                ? 'bg-green-400 text-white border-green-400 shadow-sm'
+                                ? accent.btnSolidLight
                                 : 'bg-red-600 text-white border-red-600 shadow-sm'
                               : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                           }`}
@@ -338,7 +342,7 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                                 className={`py-2 px-2.5 rounded-lg border text-[9px] font-black tracking-tighter transition-all min-h-[32px] flex items-center justify-center ${
                                   isSelected
                                     ? value
-                                      ? 'bg-green-700 text-white border-green-700 shadow-sm'
+                                      ? accent.btnSolid
                                       : 'bg-red-600 text-white border-red-600 shadow-sm'
                                     : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
@@ -362,7 +366,7 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                           <div className="space-y-4">
                             {loadingMasterData ? (
                               <div className="flex items-center justify-center py-8">
-                                <Loader2 className="animate-spin text-lime-600" size={24} />
+                                <Loader2 className={`animate-spin ${accent.loader}`} size={24} />
                               </div>
                             ) : (
                               <>
@@ -410,8 +414,8 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                                   : value === 3
                                     ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
                                     : value === 4
-                                      ? 'bg-green-400 text-white border-green-400 shadow-sm'
-                                      : 'bg-green-700 text-white border-green-700 shadow-sm';
+                                      ? accent.btnSolidLight
+                                      : accent.btnSolid;
                               return (
                                 <button
                                   key={value}
@@ -455,7 +459,7 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                                             className={`py-2 px-2.5 rounded-lg border text-[9px] font-black uppercase tracking-tighter transition-all min-h-[32px] flex items-center justify-center ${
                                               isSelected
                                                 ? option === 'Yes'
-                                                  ? 'bg-green-700 text-white border-green-700 shadow-sm'
+                                                  ? accent.btnSolid
                                                   : 'bg-red-600 text-white border-red-600 shadow-sm'
                                                 : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                                             }`}
@@ -506,7 +510,7 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                                               className={`py-2 px-2.5 rounded-lg border text-[9px] font-black uppercase tracking-tighter transition-all min-h-[32px] flex items-center justify-center ${
                                                 isSelected
                                                   ? option === 'Yes'
-                                                    ? 'bg-green-700 text-white border-green-700 shadow-sm'
+                                                    ? accent.btnSolid
                                                     : 'bg-red-600 text-white border-red-600 shadow-sm'
                                                   : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                                               }`}
@@ -529,7 +533,7 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                                           type="date"
                                           value={formData.likelyPurchaseDate || ''}
                                           onChange={(e) => setFormData((p: any) => ({ ...p, likelyPurchaseDate: e.target.value }))}
-                                          className="min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 w-auto max-w-[200px]"
+                                          className={`min-h-12 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 w-auto max-w-[200px] ${accent.focusRingField}`}
                                           min={new Date().toISOString().split('T')[0]}
                                         />
                                       </div>
@@ -587,7 +591,7 @@ const CallInteractionForm: React.FC<CallInteractionFormProps> = ({
                                 onChange={(e) => {
                                   setFormData(prev => ({ ...prev, farmerComments: e.target.value }));
                                 }}
-                                className="w-full min-h-12 px-4 py-3 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400 resize-none"
+                                className={`w-full min-h-12 px-4 py-3 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder-slate-400 resize-none ${accent.focusRingField}`}
                                 placeholder="3 bullet points summarizing the conversation (20-25 words each)"
                                 rows={6}
                               />

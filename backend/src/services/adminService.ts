@@ -61,6 +61,7 @@ export interface AgentQueueSummary {
   agentName: string;
   agentEmail: string;
   employeeId: string;
+  agentKind: 'human' | 'virtual';
   languageCapabilities: string[];
   statusBreakdown: {
     sampled_in_queue: number;
@@ -78,6 +79,7 @@ export interface AgentQueueDetail {
     agentName: string;
     agentEmail: string;
     employeeId: string;
+    agentKind: 'human' | 'virtual';
     languageCapabilities: string[];
   };
   statusBreakdown: {
@@ -1098,7 +1100,7 @@ export const getAgentQueues = async (filters?: {
 
     // Get all CC agents
     const agents = await User.find(agentQuery).select(
-      'name email employeeId languageCapabilities isActive'
+      'name email employeeId languageCapabilities isActive agentKind'
     );
 
     // Get all tasks for these agents
@@ -1159,6 +1161,7 @@ export const getAgentQueues = async (filters?: {
         agentName: agent.name,
         agentEmail: agent.email,
         employeeId: agent.employeeId,
+        agentKind: agent.agentKind === 'virtual' ? 'virtual' : 'human',
         languageCapabilities: agent.languageCapabilities || [],
         statusBreakdown: {
           ...breakdown,
@@ -1211,7 +1214,7 @@ export const getAgentQueue = async (
 
     // Get agent
     const agent = await User.findById(agentId).select(
-      'name email employeeId languageCapabilities role isActive'
+      'name email employeeId languageCapabilities role isActive agentKind'
     );
 
     if (!agent) {
@@ -1407,6 +1410,7 @@ export const getAgentQueue = async (
           agentName: agent.name,
           agentEmail: agent.email,
           employeeId: agent.employeeId,
+          agentKind: agent.agentKind === 'virtual' ? 'virtual' : 'human',
           languageCapabilities: agent.languageCapabilities || [],
         },
         statusBreakdown,
@@ -1501,6 +1505,7 @@ export const getAgentQueue = async (
         agentName: agent.name,
         agentEmail: agent.email,
         employeeId: agent.employeeId,
+        agentKind: agent.agentKind === 'virtual' ? 'virtual' : 'human',
         languageCapabilities: agent.languageCapabilities || [],
       },
       statusBreakdown,

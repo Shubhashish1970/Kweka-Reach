@@ -12,6 +12,7 @@
     "seed:admin": "tsx src/scripts/seedAdmin.ts",
     "seed:agent": "tsx src/scripts/seedAgent.ts",
     "seed:state-language": "tsx src/scripts/seedStateLanguageMapping.ts",
+    "apply:virtual-agent-passwords": "tsx src/scripts/applyVirtualAgentDefaultPasswords.ts",
     "create:test-task": "tsx src/scripts/createTestTask.ts",
     "create:test-data": "tsx src/scripts/createTestData.ts",
     "update:task-dates": "tsx src/scripts/updateTaskDates.ts",

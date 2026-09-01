@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useToast } from '../../context/ToastContext';
 import { adminAPI } from '../../services/api';
-import { Loader2, Filter, RefreshCw, Users as UsersIcon, CheckCircle, Clock, XCircle, AlertCircle, ChevronRight, ChevronDown } from 'lucide-react';
+import { Loader2, Filter, RefreshCw, Users as UsersIcon, Mic, CheckCircle, Clock, XCircle, AlertCircle, ChevronRight, ChevronDown } from 'lucide-react';
 import Button from '../shared/Button';
 import StyledSelect from '../shared/StyledSelect';
 import InfoBanner from '../shared/InfoBanner';
@@ -17,6 +17,7 @@ interface AgentQueueSummary {
   agentName: string;
   agentEmail: string;
   employeeId: string;
+  agentKind?: 'human' | 'virtual';
   languageCapabilities: string[];
   statusBreakdown: {
     sampled_in_queue: number;
@@ -34,6 +35,7 @@ interface AgentQueueDetail {
     agentName: string;
     agentEmail: string;
     employeeId: string;
+    agentKind?: 'human' | 'virtual';
     languageCapabilities: string[];
   };
   statusBreakdown: {
@@ -115,6 +117,10 @@ function loadSavedAgentQueueFilters(): SavedAgentQueueFilters {
       };
     }
   );
+}
+
+function isVoiceAgent(agentKind?: 'human' | 'virtual'): boolean {
+  return agentKind === 'virtual';
 }
 
 const AgentQueueView: React.FC = () => {
@@ -233,10 +239,18 @@ const AgentQueueView: React.FC = () => {
 
   // If agent detail is selected, show detail view
   if (agentDetail && selectedAgentId) {
+    const detailIsVoiceAgent = isVoiceAgent(agentDetail.agent.agentKind);
+
     return (
       <div className="space-y-6">
         {/* Header */}
-        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+        <div
+          className={`rounded-3xl p-6 border shadow-sm ${
+            detailIsVoiceAgent
+              ? 'bg-violet-50 border-violet-300 border-2'
+              : 'bg-white border-slate-200'
+          }`}
+        >
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <Button variant="ghost" size="sm" onClick={() => { setAgentDetail(null); setSelectedAgentId(null); }}>
@@ -265,11 +279,28 @@ const AgentQueueView: React.FC = () => {
           </div>
 
           <div className="flex items-start gap-4">
-            <div className="w-16 h-16 rounded-full bg-slate-100 border-2 border-slate-200 flex items-center justify-center">
-              <UsersIcon className="text-slate-400" size={32} />
+            <div
+              className={`w-16 h-16 rounded-full border-2 flex items-center justify-center ${
+                detailIsVoiceAgent
+                  ? 'bg-violet-100 border-violet-300'
+                  : 'bg-slate-100 border-slate-200'
+              }`}
+            >
+              {detailIsVoiceAgent ? (
+                <Mic className="text-violet-600" size={32} />
+              ) : (
+                <UsersIcon className="text-slate-400" size={32} />
+              )}
             </div>
             <div className="flex-1">
-              <h2 className="text-2xl font-black text-slate-900 mb-1">{agentDetail.agent.agentName}</h2>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-2xl font-black text-slate-900">{agentDetail.agent.agentName}</h2>
+                {detailIsVoiceAgent && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-violet-200 text-violet-900 border border-violet-300">
+                    Voice Agent
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-slate-600 mb-2">{agentDetail.agent.agentEmail}</p>
               <div className="flex items-center gap-4 text-xs text-slate-500">
                 <span>Employee ID: {agentDetail.agent.employeeId}</span>
@@ -481,6 +512,7 @@ const AgentQueueView: React.FC = () => {
     <div className="space-y-6">
       <InfoBanner>
         Monitor task queues and workload by agent. Click an agent to see their tasks and status breakdown.
+        Voice agents are shown with a violet card.
       </InfoBanner>
 
       {/* Header */}
@@ -533,17 +565,33 @@ const AgentQueueView: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {queues.map((queue) => (
+          {queues.map((queue) => {
+            const voiceAgent = isVoiceAgent(queue.agentKind);
+
+            return (
             <div
               key={queue.agentId}
-              className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+              className={`rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+                voiceAgent
+                  ? 'bg-violet-50 border-2 border-violet-300 hover:border-violet-400'
+                  : 'bg-white border border-slate-200'
+              }`}
               onClick={() => fetchAgentDetail(queue.agentId)}
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <UsersIcon size={18} className="text-green-700" />
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    {voiceAgent ? (
+                      <Mic size={18} className="text-violet-600" />
+                    ) : (
+                      <UsersIcon size={18} className="text-green-700" />
+                    )}
                     <h3 className="text-base font-black text-slate-900">{queue.agentName}</h3>
+                    {voiceAgent && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-violet-200 text-violet-900 border border-violet-300">
+                        Voice Agent
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-600 mb-1">{queue.agentEmail}</p>
                   <p className="text-xs text-slate-500">ID: {queue.employeeId}</p>
@@ -559,7 +607,11 @@ const AgentQueueView: React.FC = () => {
                   {queue.languageCapabilities.map((lang, idx) => (
                     <span
                       key={idx}
-                      className="px-2 py-1 bg-green-50 text-green-700 rounded-lg text-xs font-medium border border-green-200"
+                      className={`px-2 py-1 rounded-lg text-xs font-medium border ${
+                        voiceAgent
+                          ? 'bg-violet-100 text-violet-800 border-violet-200'
+                          : 'bg-green-50 text-green-700 border-green-200'
+                      }`}
                     >
                       {lang}
                     </span>
@@ -567,10 +619,12 @@ const AgentQueueView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="border-t border-slate-200 pt-4">
+              <div className={`border-t pt-4 ${voiceAgent ? 'border-violet-200' : 'border-slate-200'}`}>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm font-black text-slate-900">Total Tasks</span>
-                  <span className="text-xl font-black text-green-700">{queue.statusBreakdown.total}</span>
+                  <span className={`text-xl font-black ${voiceAgent ? 'text-violet-700' : 'text-green-700'}`}>
+                    {queue.statusBreakdown.total}
+                  </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="flex items-center justify-between">
@@ -592,7 +646,8 @@ const AgentQueueView: React.FC = () => {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

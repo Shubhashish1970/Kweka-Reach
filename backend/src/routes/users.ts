@@ -7,19 +7,12 @@ import { requireRole, requirePermission } from '../middleware/rbac.js';
 import { AppError } from '../middleware/errorHandler.js';
 import logger from '../config/logger.js';
 import { assertActiveMasterLanguages } from '../utils/masterLanguageValidation.js';
+import {
+  resolveDefaultResetPassword,
+  resolveVirtualAgentDefaultPassword,
+} from '../config/userPasswordDefaults.js';
 
 const router = express.Router();
-
-/** Plaintext password applied on admin "reset to default"; set env USER_DEFAULT_RESET_PASSWORD (min 8 chars) in production */
-function resolveDefaultResetPassword(): string | null {
-  const fromEnv = process.env.USER_DEFAULT_RESET_PASSWORD?.trim();
-  if (fromEnv && fromEnv.length >= 8) return fromEnv;
-  if (process.env.NODE_ENV !== 'production') {
-    logger.warn('[users] USER_DEFAULT_RESET_PASSWORD unset; using dev-only temporary default');
-    return 'KwekaReach#Temp1';
-  }
-  return null;
-}
 
 // All routes require authentication
 router.use(authenticate);
@@ -158,7 +151,10 @@ router.post(
   [
     body('name').trim().notEmpty().withMessage('Name is required'),
     body('email').isEmail().withMessage('Please provide a valid email'),
-    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+    body('password')
+      .optional({ values: 'falsy' })
+      .isLength({ min: 6 })
+      .withMessage('Password must be at least 6 characters'),
     body('role').isIn(['cc_agent', 'team_lead', 'mis_admin', 'core_sales_head', 'marketing_head']).withMessage('Invalid role'),
     body('roles').optional().isArray().withMessage('Roles must be an array'),
     body('roles.*').optional().isIn(['cc_agent', 'team_lead', 'mis_admin', 'core_sales_head', 'marketing_head']).withMessage('Invalid role in roles array'),
@@ -188,6 +184,28 @@ router.post(
       const resolvedAgentKind: AgentKind =
         role === 'cc_agent' && agentKind === 'virtual' ? 'virtual' : 'human';
 
+      let plainPassword = typeof password === 'string' ? password.trim() : '';
+      if (!plainPassword) {
+        if (resolvedAgentKind === 'virtual') {
+          const defaultPwd = resolveVirtualAgentDefaultPassword();
+          if (!defaultPwd) {
+            return res.status(503).json({
+              success: false,
+              error: {
+                message:
+                  'Virtual agent default password is not configured. Set USER_VIRTUAL_AGENT_DEFAULT_PASSWORD (at least 8 characters) on the server.',
+              },
+            });
+          }
+          plainPassword = defaultPwd;
+        } else {
+          return res.status(400).json({
+            success: false,
+            error: { message: 'Password is required' },
+          });
+        }
+      }
+
       // Check if email already exists
       const existingUser = await User.findOne({ $or: [{ email }, { employeeId }] });
       if (existingUser) {
@@ -207,7 +225,7 @@ router.post(
       }
 
       // Hash password
-      const hashedPassword = await hashPassword(password);
+      const hashedPassword = await hashPassword(plainPassword);
 
       // Ensure roles array contains at least the primary role
       let userRoles = roles && roles.length > 0 ? roles : [role];
@@ -408,37 +426,54 @@ router.post(
         throw error;
       }
 
-      const defaultPlain = resolveDefaultResetPassword();
-      if (!defaultPlain) {
-        return res.status(503).json({
-          success: false,
-          error: {
-            message:
-              'Default reset password is not configured. Set USER_DEFAULT_RESET_PASSWORD (at least 8 characters) on the server.',
-          },
-        });
-      }
-
-      const hashedPassword = await hashPassword(defaultPlain);
-
-      const user = await User.findByIdAndUpdate(
-        userId,
-        { password: hashedPassword, mustChangePassword: true },
-        { new: true }
-      ).select('-password');
-
+      const user = await User.findById(userId).select('agentKind role');
       if (!user) {
         const error: AppError = new Error('User not found');
         error.statusCode = 404;
         throw error;
       }
 
-      logger.info(`Default password reset (must change on login) for user: ${user.email} by ${req.user?.email}`);
+      const isVirtualAgent = user.role === 'cc_agent' && user.agentKind === 'virtual';
+      const defaultPlain = isVirtualAgent
+        ? resolveVirtualAgentDefaultPassword()
+        : resolveDefaultResetPassword();
+      if (!defaultPlain) {
+        return res.status(503).json({
+          success: false,
+          error: {
+            message: isVirtualAgent
+              ? 'Virtual agent default password is not configured. Set USER_VIRTUAL_AGENT_DEFAULT_PASSWORD (at least 8 characters) on the server.'
+              : 'Default reset password is not configured. Set USER_DEFAULT_RESET_PASSWORD (at least 8 characters) on the server.',
+          },
+        });
+      }
+
+      const hashedPassword = await hashPassword(defaultPlain);
+
+      const updatedUser = await User.findByIdAndUpdate(
+        userId,
+        {
+          password: hashedPassword,
+          mustChangePassword: isVirtualAgent ? false : true,
+        },
+        { new: true }
+      ).select('-password');
+
+      if (!updatedUser) {
+        const error: AppError = new Error('User not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      logger.info(
+        `Default password reset for user: ${updatedUser.email} by ${req.user?.email} (virtual=${isVirtualAgent})`
+      );
 
       res.json({
         success: true,
-        message:
-          'Temporary password applied. The user must sign in with the configured default password and choose a new password.',
+        message: isVirtualAgent
+          ? 'Virtual agent default password applied. The agent can sign in with the configured virtual agent default password.'
+          : 'Temporary password applied. The user must sign in with the configured default password and choose a new password.',
       });
     } catch (error) {
       next(error);

@@ -275,7 +275,9 @@ const UserList: React.FC<UserListProps> = ({ users, isLoading, onEdit, onDelete,
                               ? 'Cannot reset your own password here'
                               : !user.isActive
                                 ? 'Inactive user'
-                                : 'Reset to default password (user must set a new password on next login)'
+                                : user.agentKind === 'virtual'
+                                  ? 'Reset to virtual agent default password'
+                                  : 'Reset to default password (user must set a new password on next login)'
                           }
                         >
                           <KeyRound size={18} />

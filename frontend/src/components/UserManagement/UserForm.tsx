@@ -150,7 +150,7 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
       showError('Employee ID is required');
       return;
     }
-    if (!isEditMode && !formData.password.trim()) {
+    if (!isEditMode && !formData.password.trim() && formData.agentKind !== 'virtual') {
       showError('Password is required for new users');
       return;
     }
@@ -179,8 +179,8 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
         isActive: formData.isActive,
       };
 
-      // Only include password for new users
-      if (!isEditMode) {
+      // Only include password for new human users; virtual agents use server default
+      if (!isEditMode && formData.agentKind !== 'virtual' && formData.password.trim()) {
         submitData.password = formData.password;
       }
 
@@ -283,8 +283,8 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
             )}
           </div>
 
-          {/* Password (only for new users) */}
-          {!isEditMode && (
+          {/* Password (only for new human CC agents; virtual agents use server default) */}
+          {!isEditMode && formData.agentKind !== 'virtual' && (
             <div>
               <label className="block text-sm font-bold text-slate-700 uppercase tracking-wide mb-2">
                 Password <span className="text-red-500">*</span>
@@ -299,6 +299,14 @@ const UserForm: React.FC<UserFormProps> = ({ isOpen, onClose, onSuccess, user, t
                 minLength={6}
               />
               <p className="text-xs text-slate-500 mt-1">Minimum 6 characters</p>
+            </div>
+          )}
+
+          {!isEditMode && formData.agentKind === 'virtual' && formData.roles.includes('cc_agent') && (
+            <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900">
+              A server-configured default password will be applied for this voice agent (
+              <span className="font-mono text-xs">USER_VIRTUAL_AGENT_DEFAULT_PASSWORD</span>
+              ). No password change is required on first login.
             </div>
           )}
 

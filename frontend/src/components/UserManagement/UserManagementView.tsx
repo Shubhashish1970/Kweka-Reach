@@ -232,10 +232,16 @@ const UserManagementView: React.FC = () => {
 
   const confirmResetDefaultPassword = async () => {
     if (!resetPwdModal.user) return;
+    const isVirtual =
+      resetPwdModal.user.agentKind === 'virtual' &&
+      (resetPwdModal.user.roles?.includes('cc_agent') || resetPwdModal.user.role === 'cc_agent');
     try {
-      await usersAPI.resetUserToDefaultPassword(resetPwdModal.user._id);
+      const res = await usersAPI.resetUserToDefaultPassword(resetPwdModal.user._id);
       showSuccess(
-        'Temporary password applied. User must sign in with the server default password, then choose a new one.'
+        res.message ||
+          (isVirtual
+            ? 'Virtual agent default password applied.'
+            : 'Temporary password applied. User must sign in with the server default password, then choose a new one.')
       );
       setResetPwdModal({ isOpen: false, user: null });
       fetchUsers(pagination.page);
@@ -473,7 +479,11 @@ const UserManagementView: React.FC = () => {
         onClose={() => setResetPwdModal({ isOpen: false, user: null })}
         onConfirm={confirmResetDefaultPassword}
         title="Reset to default password?"
-        message={`Apply the server-configured temporary password for ${resetPwdModal.user?.name}? They must sign in with that password once, then set a new password before using the app. Ensure USER_DEFAULT_RESET_PASSWORD is set on the server (see deployment notes).`}
+        message={
+          resetPwdModal.user?.agentKind === 'virtual'
+            ? `Apply the server-configured virtual agent default password for ${resetPwdModal.user?.name}? They can sign in with USER_VIRTUAL_AGENT_DEFAULT_PASSWORD (no forced password change).`
+            : `Apply the server-configured temporary password for ${resetPwdModal.user?.name}? They must sign in with that password once, then set a new password before using the app. Ensure USER_DEFAULT_RESET_PASSWORD is set on the server (see deployment notes).`
+        }
         confirmText="Reset password"
         cancelText="Cancel"
         confirmVariant="danger"

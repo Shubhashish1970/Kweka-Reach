@@ -346,6 +346,8 @@ curl -X POST \
 | `VOICE_ORCHESTRATOR_INTERVAL_SEC` | Poll interval (default `30`) |
 | `VOICE_USE_TEST_ENDPOINT` | `true` (default) → `/public/agent/test/{uuid}` |
 | `VOICE_STUCK_TASK_MINUTES` | Release stuck `in_progress` voice tasks (default `15`) |
+| `USER_VIRTUAL_AGENT_DEFAULT_PASSWORD` | Default login password for virtual CC agents (min 8 chars; dev fallback `Nacl@1234` if unset) |
+| `USER_DEFAULT_RESET_PASSWORD` | Fallback for human admin reset and virtual agents if virtual-specific var unset |
 
 Reach webhook URL for Calling agent to configure: `POST {REACH_API}/api/voice/webhook`
 

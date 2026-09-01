@@ -81,6 +81,36 @@ describe('U1: admin can create a new user', () => {
 
     expect(res.status).toBe(400);
   });
+
+  test('POST /api/users creates virtual agent without password using server default', async () => {
+    const admin = await makeAdmin();
+    const token = await login(admin.email);
+    const teamLead = await makeTeamLead();
+    const email = uniqueEmail();
+
+    const res = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Voice Agent',
+        email,
+        role: 'cc_agent',
+        agentKind: 'virtual',
+        employeeId: uniqueEmpId(),
+        languageCapabilities: ['Hindi'],
+        teamLeadId: teamLead._id.toString(),
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.user.agentKind).toBe('virtual');
+
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email, password: 'Nacl@1234' });
+
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.data?.token).toBeTruthy();
+  });
 });
 
 // ─── U2: cc_agent cannot create users ────────────────────────────────────────

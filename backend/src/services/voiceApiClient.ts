@@ -1,4 +1,5 @@
 import logger from '../config/logger.js';
+import type { VoiceTriggerRouteType } from '../models/User.js';
 
 export interface VoiceTriggerResponse {
   status: string;
@@ -10,6 +11,11 @@ export interface VoiceTriggerPayload {
   phone_number: string;
   initial_context: Record<string, string>;
   telephony_configuration_id?: number | null;
+}
+
+export interface VoiceTriggerOptions {
+  triggerRouteType?: VoiceTriggerRouteType;
+  useTestEndpoint?: boolean;
 }
 
 function getVoiceApiBaseUrl(): string {
@@ -28,10 +34,19 @@ function getVoiceApiKey(): string {
   return key;
 }
 
-/** Build outbound trigger URL for API Trigger UUID (not workflow UUID path). */
-export function buildVoiceTriggerUrl(triggerUuid: string): string {
+/** Build outbound trigger URL for API Trigger UUID or workflow UUID path. */
+export function buildVoiceTriggerUrl(triggerUuid: string, options?: VoiceTriggerOptions): string {
   const base = getVoiceApiBaseUrl();
-  const useTest = process.env.VOICE_USE_TEST_ENDPOINT !== 'false';
+  const routeType = options?.triggerRouteType ?? 'api_trigger';
+  const useTest =
+    options?.useTestEndpoint !== undefined
+      ? options.useTestEndpoint
+      : process.env.VOICE_USE_TEST_ENDPOINT !== 'false';
+
+  if (routeType === 'workflow') {
+    return `${base}/api/v1/public/agent/workflow/${triggerUuid}`;
+  }
+
   const path = useTest
     ? `/api/v1/public/agent/test/${triggerUuid}`
     : `/api/v1/public/agent/${triggerUuid}`;
@@ -40,9 +55,10 @@ export function buildVoiceTriggerUrl(triggerUuid: string): string {
 
 export async function triggerVoiceOutboundCall(
   triggerUuid: string,
-  payload: VoiceTriggerPayload
+  payload: VoiceTriggerPayload,
+  options?: VoiceTriggerOptions
 ): Promise<VoiceTriggerResponse> {
-  const url = buildVoiceTriggerUrl(triggerUuid);
+  const url = buildVoiceTriggerUrl(triggerUuid, options);
   const response = await fetch(url, {
     method: 'POST',
     headers: {

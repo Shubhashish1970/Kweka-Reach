@@ -1016,6 +1016,78 @@ export const adminAPI = {
   },
 };
 
+export const voiceAdminAPI = {
+  getSettings: async () => {
+    const res = await apiRequest('/admin/voice/settings');
+    return res.data;
+  },
+  updateSettings: async (payload: Record<string, unknown>) => {
+    const res = await apiRequest('/admin/voice/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return res.data;
+  },
+  listAgents: async () => {
+    const res = await apiRequest('/admin/voice/agents');
+    return res.data;
+  },
+  getAgent: async (agentId: string) => {
+    const res = await apiRequest(`/admin/voice/agents/${agentId}`);
+    return res.data;
+  },
+  updateAgent: async (agentId: string, payload: Record<string, unknown>) => {
+    const res = await apiRequest(`/admin/voice/agents/${agentId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return res.data;
+  },
+  testTrigger: async (agentId: string, phoneNumber: string) => {
+    const res = await apiRequest(`/admin/voice/agents/${agentId}/test-trigger`, {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber }),
+    }, undefined, 30000);
+    return res.data;
+  },
+  getMetrics: async () => {
+    const res = await apiRequest('/admin/voice/metrics');
+    return res.data;
+  },
+};
+
+export const teamVoiceAPI = {
+  listAgents: async () => {
+    const res = await apiRequest('/team/voice/agents');
+    return res.data;
+  },
+  getAgent: async (agentId: string) => {
+    const res = await apiRequest(`/team/voice/agents/${agentId}`);
+    return res.data;
+  },
+  updateStatus: async (agentId: string, voiceStatus: 'running' | 'paused' | 'stopped', pauseReason?: string) => {
+    const res = await apiRequest(`/team/voice/agents/${agentId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ voiceStatus, pauseReason }),
+    });
+    return res.data;
+  },
+  testTrigger: async (agentId: string, phoneNumber: string) => {
+    const res = await apiRequest(`/team/voice/agents/${agentId}/test-trigger`, {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber }),
+    }, undefined, 30000);
+    return res.data;
+  },
+};
+
+export const voiceAPI = {
+  getAgentStatus: async () => {
+    const res = await apiRequest('/voice/agent-status');
+    return res.data;
+  },
+};
+
 // KPI / EMS Progress API (MIS Admin)
 export type EmsDrilldownGroupBy = 'state' | 'territory' | 'zone' | 'bu' | 'activityType';
 

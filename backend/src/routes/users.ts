@@ -11,6 +11,7 @@ import {
   resolveDefaultResetPassword,
   resolveVirtualAgentDefaultPassword,
 } from '../config/userPasswordDefaults.js';
+import { ensureVirtualAgentVoiceConfig, DEFAULT_VOICE_AGENT_CONFIG } from '../services/voiceAgentAdminService.js';
 
 const router = express.Router();
 
@@ -245,7 +246,12 @@ router.post(
         assignedTerritories,
         teamLeadId: teamLeadId || undefined,
         agentKind: resolvedAgentKind,
+        ...(resolvedAgentKind === 'virtual' ? { voiceAgentConfig: DEFAULT_VOICE_AGENT_CONFIG() } : {}),
       });
+
+      if (resolvedAgentKind === 'virtual') {
+        await ensureVirtualAgentVoiceConfig(user._id.toString());
+      }
 
       logger.info(`User created: ${user.email} (${user.role}) by ${req.user?.email}`);
 

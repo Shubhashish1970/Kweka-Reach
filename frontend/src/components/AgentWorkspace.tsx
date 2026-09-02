@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { tasksAPI } from '../services/api';
+import { tasksAPI, voiceAPI } from '../services/api';
 import {
   Phone, User, CheckCircle, Zap, LogOut, Globe, Loader2,
   TrendingUp, MapPin, History, X, PhoneOff, PhoneCall, Mic
@@ -89,9 +89,34 @@ const AgentWorkspace: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('agent.workspace.activeSection', activeSection);
   }, [activeSection]);
+
+  useEffect(() => {
+    if (!isVoiceAgent) return;
+    let cancelled = false;
+    const loadVoiceStatus = async () => {
+      try {
+        const data = await voiceAPI.getAgentStatus();
+        if (!cancelled) setVoiceRuntime(data);
+      } catch {
+        /* non-blocking */
+      }
+    };
+    loadVoiceStatus();
+    const interval = setInterval(loadVoiceStatus, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isVoiceAgent]);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showTaskSelectionModal, setShowTaskSelectionModal] = useState(false);
   const [isAIPanelExpanded, setIsAIPanelExpanded] = useState(false);
+  const [voiceRuntime, setVoiceRuntime] = useState<{
+    runtimeState: string;
+    voiceStatus: string;
+    queueCounts?: { sampled_in_queue: number; in_progress: number };
+    lastTriggerError?: string | null;
+  } | null>(null);
   const hasMarkedInProgressRef = useRef(false);
 
   const toggleAIPanel = () => {
@@ -655,6 +680,30 @@ const AgentWorkspace: React.FC = () => {
             </button>
           </div>
         </header>
+
+        {isVoiceAgent && voiceRuntime && (
+          <div className="bg-violet-950/90 border-b border-violet-700 px-4 lg:px-8 py-2 flex flex-wrap items-center gap-3 text-xs text-violet-100 shrink-0">
+            <Mic size={14} className="text-violet-400" />
+            <span className="font-bold uppercase tracking-wide text-violet-300">Voice status</span>
+            <span className="px-2 py-0.5 rounded-full bg-violet-500/30 border border-violet-400/40 font-bold capitalize">
+              {voiceRuntime.runtimeState.replace(/_/g, ' ')}
+            </span>
+            <span className="text-violet-300">·</span>
+            <span>Admin: {voiceRuntime.voiceStatus}</span>
+            {voiceRuntime.queueCounts && (
+              <>
+                <span className="text-violet-300">·</span>
+                <span>{voiceRuntime.queueCounts.sampled_in_queue} queued</span>
+                {voiceRuntime.queueCounts.in_progress > 0 && (
+                  <span className="text-violet-200">· {voiceRuntime.queueCounts.in_progress} in progress</span>
+                )}
+              </>
+            )}
+            {voiceRuntime.lastTriggerError && (
+              <span className="text-amber-300 truncate max-w-xs">· {voiceRuntime.lastTriggerError}</span>
+            )}
+          </div>
+        )}
 
         {activeSection !== 'dialer' ? (
           <div className="flex-1 min-w-0 overflow-hidden relative">

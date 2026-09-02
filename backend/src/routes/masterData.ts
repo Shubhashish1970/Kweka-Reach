@@ -1263,7 +1263,6 @@ router.post(
     body('code').trim().notEmpty().withMessage('Language code is required'),
     body('displayOrder').optional().isInt({ min: 0 }),
     body('isActive').optional().isBoolean(),
-    body('voiceTriggerUuid').optional({ nullable: true }).isString().trim(),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -1275,7 +1274,7 @@ router.post(
         });
       }
 
-      const { name, code, displayOrder = 0, isActive = true, voiceTriggerUuid } = req.body;
+      const { name, code, displayOrder = 0, isActive = true } = req.body;
 
       const codeUpper = code.toUpperCase();
       
@@ -1306,7 +1305,6 @@ router.post(
         code: codeUpper,
         displayOrder,
         isActive,
-        voiceTriggerUuid: voiceTriggerUuid?.trim() || null,
       });
 
       try {
@@ -1352,7 +1350,6 @@ router.put(
     body('code').optional().trim().notEmpty(),
     body('displayOrder').optional().isInt({ min: 0 }),
     body('isActive').optional().isBoolean(),
-    body('voiceTriggerUuid').optional({ nullable: true }).isString().trim(),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -1365,7 +1362,7 @@ router.put(
       }
 
       const { id } = req.params;
-      const { name, code, displayOrder, isActive, voiceTriggerUuid } = req.body;
+      const { name, code, displayOrder, isActive } = req.body;
 
       const language = await MasterLanguage.findById(id);
       if (!language) {
@@ -1406,9 +1403,6 @@ router.put(
 
       if (displayOrder !== undefined) language.displayOrder = displayOrder;
       if (isActive !== undefined) language.isActive = isActive;
-      if (voiceTriggerUuid !== undefined) {
-        language.voiceTriggerUuid = voiceTriggerUuid?.trim() || null;
-      }
 
       try {
         await language.save();

@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sliders, List, LogOut, User as UserIcon, PhoneForwarded, Leaf } from 'lucide-react';
+import { Sliders, List, LogOut, User as UserIcon, PhoneForwarded, Leaf, Mic } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import HeaderRoleSwitcher from '../shared/HeaderRoleSwitcher';
 import SamplingControlView from './SamplingControlView';
 import TaskDashboardView from './TaskDashboardView';
 import CallbackRequestView from './CallbackRequestView';
+import TeamLeadVoiceAgentsView from './TeamLeadVoiceAgentsView';
 
-type TeamLeadTab = 'sampling' | 'tasks' | 'callbacks';
-const TEAM_LEAD_TAB_VALUES: TeamLeadTab[] = ['sampling', 'tasks', 'callbacks'];
+type TeamLeadTab = 'sampling' | 'tasks' | 'callbacks' | 'voice';
+const TEAM_LEAD_TAB_VALUES: TeamLeadTab[] = ['sampling', 'tasks', 'callbacks', 'voice'];
 const TEAM_LEAD_ACTIVE_TAB_KEY = 'teamLead.dashboard.activeTab';
 
 const TeamLeadDashboardContainer: React.FC = () => {
@@ -35,6 +36,7 @@ const TeamLeadDashboardContainer: React.FC = () => {
   const tabs = [
     { id: 'sampling' as const, label: 'Sampling Control', icon: Sliders },
     { id: 'tasks' as const, label: 'Task Allocation', icon: List },
+    { id: 'voice' as const, label: 'Voice Agents', icon: Mic },
     { id: 'callbacks' as const, label: 'Request Callbacks', icon: PhoneForwarded },
   ];
 
@@ -98,6 +100,7 @@ const TeamLeadDashboardContainer: React.FC = () => {
       <div className="max-w-7xl mx-auto p-6 min-w-0 overflow-x-hidden">
         {activeTab === 'sampling' && <SamplingControlView />}
         {activeTab === 'tasks' && <TaskDashboardView />}
+        {activeTab === 'voice' && <TeamLeadVoiceAgentsView />}
         {activeTab === 'callbacks' && <CallbackRequestView />}
       </div>
     </div>

@@ -1,0 +1,41 @@
+name: Verify Voice Integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/verify-voice-config.yml'
+      - 'scripts/verify-voice-config.sh'
+      - 'backend/src/routes/voice.ts'
+      - 'backend/src/services/voiceAgentService.ts'
+
+jobs:
+  verify:
+    name: Verify Voice Config on Cloud Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Run voice configuration verification
+        run: |
+          chmod +x scripts/verify-voice-config.sh
+          ./scripts/verify-voice-config.sh
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: us-central1
+          BACKEND_SERVICE: kweka-reach-backend
+          VOICE_WEBHOOK_API_KEY: ${{ secrets.VOICE_WEBHOOK_API_KEY }}

@@ -810,6 +810,7 @@ import aiRoutes from './routes/ai.js';
 import dashboardRoutes from './routes/dashboard.js';
 import reportRoutes from './routes/reports.js';
 import voiceRoutes from './routes/voice.js';
+import teamVoiceRoutes from './routes/teamVoice.js';
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/tasks', taskRoutes);
@@ -821,6 +822,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/kpi', dashboardRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/voice', voiceRoutes);
+app.use('/api/team/voice', teamVoiceRoutes);
 
 // 404 handler
 app.use(notFound);
@@ -839,7 +841,7 @@ const startServer = async (): Promise<void> => {
     setupCronJobs();
 
     const { setupVoiceOrchestrator } = await import('./config/voiceOrchestrator.js');
-    setupVoiceOrchestrator();
+    await setupVoiceOrchestrator();
 
     // Start Express server
     app.listen(PORT, () => {

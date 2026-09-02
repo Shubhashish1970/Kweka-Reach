@@ -12,7 +12,6 @@ interface Language {
   code: string;
   displayOrder: number;
   isActive: boolean;
-  voiceTriggerUuid?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,7 +37,7 @@ const LanguagesMasterView: React.FC = () => {
   const [showInactive, setShowInactive] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingLanguage, setEditingLanguage] = useState<Language | null>(null);
-  const [formData, setFormData] = useState({ name: '', code: '', displayOrder: 0, isActive: true, voiceTriggerUuid: '' });
+  const [formData, setFormData] = useState({ name: '', code: '', displayOrder: 0, isActive: true });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
@@ -79,11 +78,10 @@ const LanguagesMasterView: React.FC = () => {
         code: language.code,
         displayOrder: language.displayOrder,
         isActive: language.isActive,
-        voiceTriggerUuid: language.voiceTriggerUuid || '',
       });
     } else {
       setEditingLanguage(null);
-      setFormData({ name: '', code: '', displayOrder: languages.length, isActive: true, voiceTriggerUuid: '' });
+      setFormData({ name: '', code: '', displayOrder: languages.length, isActive: true });
     }
     setIsModalOpen(true);
   };
@@ -91,7 +89,7 @@ const LanguagesMasterView: React.FC = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingLanguage(null);
-    setFormData({ name: '', code: '', displayOrder: 0, isActive: true, voiceTriggerUuid: '' });
+    setFormData({ name: '', code: '', displayOrder: 0, isActive: true });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -107,10 +105,7 @@ const LanguagesMasterView: React.FC = () => {
       const response = await fetch(url, {
         method,
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          ...formData,
-          voiceTriggerUuid: formData.voiceTriggerUuid.trim() || null,
-        }),
+        body: JSON.stringify(formData),
       });
 
       const data = await response.json();
@@ -455,9 +450,6 @@ const LanguagesMasterView: React.FC = () => {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
                   Order
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  Voice Trigger UUID
-                </th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">
                   Status
                 </th>
@@ -493,11 +485,6 @@ const LanguagesMasterView: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{language.displayOrder}</td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs font-mono text-slate-500 truncate max-w-[180px] inline-block" title={language.voiceTriggerUuid || ''}>
-                      {language.voiceTriggerUuid ? `${language.voiceTriggerUuid.slice(0, 8)}…` : '—'}
-                    </span>
-                  </td>
                   <td className="px-4 py-3 text-center">
                     <button
                       onClick={() => handleToggleActive(language)}
@@ -580,17 +567,6 @@ const LanguagesMasterView: React.FC = () => {
                   min="0"
                   className="w-full min-h-12 px-4 py-3 border border-slate-200 rounded-xl bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Voice Trigger UUID</label>
-                <input
-                  type="text"
-                  value={formData.voiceTriggerUuid}
-                  onChange={(e) => setFormData({ ...formData, voiceTriggerUuid: e.target.value })}
-                  placeholder="e5a72e34-d77d-46f3-8645-5bdff1e560dc"
-                  className="w-full min-h-12 px-4 py-3 border border-slate-200 rounded-xl bg-white text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-lime-400 focus:border-lime-400"
-                />
-                <p className="text-xs text-slate-500 mt-1">Calling agent API trigger UUID for this language (optional if env default is set)</p>
               </div>
               <div className="flex items-center gap-2">
                 <input

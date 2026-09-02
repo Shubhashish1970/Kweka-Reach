@@ -4,20 +4,31 @@ import { CallTask } from '../models/CallTask.js';
 import { Farmer } from '../models/Farmer.js';
 import { Activity } from '../models/Activity.js';
 import { User, IUser } from '../models/User.js';
-import { MasterLanguage } from '../models/MasterData.js';
 import { VoiceWebhookReceipt } from '../models/VoiceWebhookReceipt.js';
 import { ICallLog } from '../models/CallTask.js';
 import logger from '../config/logger.js';
 import { getNextTaskForAgent } from './taskService.js';
 import {
-  agentHasActiveVoiceCall,
   markTaskInProgressForAgent,
   submitCallInteractionForTask,
   SubmitCallInteractionInput,
 } from './taskSubmitService.js';
-import { toIndianE164, triggerVoiceOutboundCall } from './voiceApiClient.js';
+import { triggerVoiceOutboundCall } from './voiceApiClient.js';
+import { resolveVoiceDialNumber } from '../utils/voiceDialNumber.js';
+import {
+  getOrCreateVoicePlatformSettings,
+  resolveAgentVoiceTriggerUuid,
+  resolveEffectiveLimits,
+  deriveAgentRuntimeState,
+  recordAgentTriggerResult,
+  recordAgentWebhook,
+  resolveVoiceTriggerOptions,
+} from './voiceAgentAdminService.js';
 
-const STUCK_MINUTES = Number(process.env.VOICE_STUCK_TASK_MINUTES || 15);
+async function getStuckMinutes(): Promise<number> {
+  const platform = await getOrCreateVoicePlatformSettings();
+  return platform.stuckCallTimeoutMinutes || Number(process.env.VOICE_STUCK_TASK_MINUTES || 15);
+}
 
 export interface VoiceInitialContext {
   task_id: string;
@@ -126,6 +137,13 @@ function mapSentiment(value: unknown): ICallLog['sentiment'] {
 }
 
 export function mapVoiceWebhookToSubmitInput(body: Record<string, unknown>): SubmitCallInteractionInput {
+  const recordingUrl = String(
+    body.recording_url ?? body.recordingUrl ?? body.recording ?? ''
+  ).trim();
+  const transcriptUrl = String(
+    body.transcript_url ?? body.transcriptUrl ?? body.transcript ?? ''
+  ).trim();
+
   return {
     callStatus: mapVoiceCallStatus(body),
     callDurationSeconds: Number(body.call_duration_seconds ?? body.callDurationSeconds ?? 0),
@@ -145,23 +163,17 @@ export function mapVoiceWebhookToSubmitInput(body: Record<string, unknown>): Sub
         : body.activityQuality != null && body.activityQuality !== ''
           ? Number(body.activityQuality)
           : null,
+    ...(recordingUrl && { recordingUrl }),
+    ...(transcriptUrl && { transcriptUrl }),
   };
 }
 
-export async function resolveVoiceTriggerUuid(preferredLanguage: string): Promise<string | null> {
-  const lang = await MasterLanguage.findOne({
-    name: { $regex: new RegExp(`^${preferredLanguage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-    isActive: true,
-  })
-    .select('voiceTriggerUuid')
-    .lean();
-
-  if (lang?.voiceTriggerUuid?.trim()) {
-    return lang.voiceTriggerUuid.trim();
+export async function resolveVoiceTriggerUuid(_preferredLanguage: string, agent?: IUser): Promise<string | null> {
+  if (agent) {
+    return resolveAgentVoiceTriggerUuid(agent);
   }
-
-  const fallback = process.env.VOICE_TRIGGER_UUID?.trim();
-  return fallback || null;
+  const envFallback = process.env.VOICE_TRIGGER_UUID?.trim();
+  return envFallback || null;
 }
 
 export async function buildVoiceInitialContext(
@@ -192,7 +204,8 @@ export async function buildVoiceInitialContext(
 }
 
 export async function releaseStuckVoiceTasks(): Promise<number> {
-  const cutoff = new Date(Date.now() - STUCK_MINUTES * 60 * 1000);
+  const stuckMinutes = await getStuckMinutes();
+  const cutoff = new Date(Date.now() - stuckMinutes * 60 * 1000);
   const stuck = await CallTask.find({
     status: 'in_progress',
     callLog: { $exists: false },
@@ -209,7 +222,7 @@ export async function releaseStuckVoiceTasks(): Promise<number> {
     task.interactionHistory.push({
       timestamp: new Date(),
       status: 'in_progress',
-      notes: `Voice call timed out after ${STUCK_MINUTES} minutes — returned to queue`,
+      notes: `Voice call timed out after ${stuckMinutes} minutes — returned to queue`,
     });
     await task.save();
     count += 1;
@@ -221,7 +234,9 @@ export async function releaseStuckVoiceTasks(): Promise<number> {
 }
 
 export async function processVirtualAgentQueueOnce(): Promise<void> {
-  if (process.env.VOICE_ORCHESTRATOR_ENABLED !== 'true') {
+  const platform = await getOrCreateVoicePlatformSettings();
+  const envEnabled = process.env.VOICE_ORCHESTRATOR_ENABLED === 'true';
+  if (!platform.orchestratorEnabled && !envEnabled) {
     return;
   }
 
@@ -231,24 +246,36 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
     role: 'cc_agent',
     agentKind: 'virtual',
     isActive: true,
-  }).select('_id name languageCapabilities');
+  }).select('_id name languageCapabilities voiceAgentConfig');
 
   for (const agent of virtualAgents) {
     try {
       const agentId = agent._id.toString();
+      const runtimeState = await deriveAgentRuntimeState(agent, platform);
 
-      if (await agentHasActiveVoiceCall(agentId)) {
+      if (runtimeState !== 'idle') {
+        if (runtimeState === 'not_configured') {
+          logger.warn(`Voice agent ${agent.name} not configured (missing trigger UUID)`);
+        }
         continue;
+      }
+
+      const limits = resolveEffectiveLimits(agent, platform);
+
+      if (limits.minGapBetweenCallsSec > 0 && agent.voiceAgentConfig?.lastTriggerAt) {
+        const elapsedSec = (Date.now() - new Date(agent.voiceAgentConfig.lastTriggerAt).getTime()) / 1000;
+        if (elapsedSec < limits.minGapBetweenCallsSec) {
+          continue;
+        }
       }
 
       const task = await getNextTaskForAgent(agentId);
       if (!task) continue;
 
       const farmer = task.farmerId as any;
-      const preferredLanguage = farmer?.preferredLanguage || '';
-      const triggerUuid = await resolveVoiceTriggerUuid(preferredLanguage);
+      const triggerUuid = resolveAgentVoiceTriggerUuid(agent);
       if (!triggerUuid) {
-        logger.warn(`No voice trigger UUID for language "${preferredLanguage}" (agent ${agent.name})`);
+        logger.warn(`No voice trigger UUID for agent ${agent.name}`);
         continue;
       }
 
@@ -260,24 +287,40 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
       await markTaskInProgressForAgent(task._id.toString(), agentId, 'Voice orchestrator started call');
 
       const initialContext = await buildVoiceInitialContext(task, agent);
-      const phone = toIndianE164(farmer.mobileNumber);
+      const { dialNumber, overridden } = resolveVoiceDialNumber(farmer.mobileNumber, {
+        taskId: task._id.toString(),
+        source: 'orchestrator',
+        agentDialOverride: agent.voiceAgentConfig,
+      });
+
+      const triggerOptions = resolveVoiceTriggerOptions(agent, platform);
 
       try {
-        const result = await triggerVoiceOutboundCall(triggerUuid, {
-          phone_number: phone,
-          initial_context: { ...initialContext },
-        });
+        const result = await triggerVoiceOutboundCall(
+          triggerUuid,
+          {
+            phone_number: dialNumber,
+            initial_context: { ...initialContext },
+            telephony_configuration_id: agent.voiceAgentConfig?.telephonyConfigurationId ?? null,
+          },
+          triggerOptions
+        );
 
         await CallTask.findByIdAndUpdate(task._id, {
           voiceWorkflowRunId: result.workflow_run_id,
           voiceAttemptId: initialContext.attempt_id,
         });
 
+        await recordAgentTriggerResult(agentId, true);
+
         logger.info(
-          `Voice call initiated: task=${task._id} run=${result.workflow_run_id} agent=${agent.name}`
+          `Voice call initiated: task=${task._id} run=${result.workflow_run_id} agent=${agent.name}` +
+            (overridden ? ` (dial override → ${dialNumber})` : '')
         );
       } catch (callError) {
+        const msg = callError instanceof Error ? callError.message : 'Trigger failed';
         logger.error(`Voice trigger failed for task ${task._id}:`, callError);
+        await recordAgentTriggerResult(agentId, false, msg);
         await CallTask.findByIdAndUpdate(task._id, {
           status: 'sampled_in_queue',
           voiceWorkflowRunId: null,
@@ -291,7 +334,21 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
   }
 }
 
-export async function handleVoiceWebhook(body: Record<string, unknown>): Promise<{ duplicate: boolean; taskId: string }> {
+export async function getVoiceTaskContext(taskId: string): Promise<VoiceInitialContext | null> {
+  if (!mongoose.Types.ObjectId.isValid(taskId)) return null;
+  const task = await CallTask.findById(taskId)
+    .populate('farmerId')
+    .populate('activityId')
+    .lean();
+  if (!task?.assignedAgentId) return null;
+
+  const agent = await User.findById(task.assignedAgentId).lean();
+  if (!agent || agent.agentKind !== 'virtual') return null;
+
+  return buildVoiceInitialContext(task, agent as unknown as IUser);
+}
+
+export async function handleVoiceWebhook(body: Record<string, unknown>): Promise<{ duplicate: boolean; taskId: string; staleAttempt?: boolean }> {
   const taskId = String(body.task_id || body.taskId || '').trim();
   if (!taskId || !mongoose.Types.ObjectId.isValid(taskId)) {
     const err = new Error('Invalid or missing task_id');
@@ -303,9 +360,21 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
   const workflowRunId =
     workflowRunIdRaw != null && workflowRunIdRaw !== '' ? Number(workflowRunIdRaw) : null;
 
+  const incomingAttemptId = String(body.attempt_id || body.attemptId || '').trim();
+
   if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
     const existing = await VoiceWebhookReceipt.findOne({ workflowRunId }).lean();
     if (existing) {
+      return { duplicate: true, taskId };
+    }
+  }
+
+  if (incomingAttemptId) {
+    const attemptReceipt = await VoiceWebhookReceipt.findOne({
+      taskId: new mongoose.Types.ObjectId(taskId),
+      attemptId: incomingAttemptId,
+    }).lean();
+    if (attemptReceipt) {
       return { duplicate: true, taskId };
     }
   }
@@ -315,6 +384,17 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
     const err = new Error('Task not found');
     (err as any).statusCode = 404;
     throw err;
+  }
+
+  if (
+    incomingAttemptId &&
+    task.voiceAttemptId &&
+    incomingAttemptId !== task.voiceAttemptId
+  ) {
+    logger.warn(
+      `Ignoring stale voice webhook attempt_id for task ${taskId}: expected ${task.voiceAttemptId}, got ${incomingAttemptId}`
+    );
+    return { duplicate: true, taskId, staleAttempt: true };
   }
 
   if (task.callLog) {
@@ -344,6 +424,8 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
     skipAgentCheck: true,
     historyNotes: 'Voice agent webhook submitted call interaction',
   });
+
+  await recordAgentWebhook(agentId);
 
   if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
     await VoiceWebhookReceipt.create({

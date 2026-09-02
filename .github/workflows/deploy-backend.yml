@@ -304,6 +304,7 @@ jobs:
             [ -n "${{ secrets.VOICE_WEBHOOK_API_KEY }}" ] && echo "VOICE_WEBHOOK_API_KEY: \"${{ secrets.VOICE_WEBHOOK_API_KEY }}\""
             [ -n "${{ secrets.VOICE_ORCHESTRATOR_ENABLED }}" ] && echo "VOICE_ORCHESTRATOR_ENABLED: \"${{ secrets.VOICE_ORCHESTRATOR_ENABLED }}\""
             [ -n "${{ secrets.VOICE_USE_TEST_ENDPOINT }}" ] && echo "VOICE_USE_TEST_ENDPOINT: \"${{ secrets.VOICE_USE_TEST_ENDPOINT }}\""
+            [ -n "${{ secrets.REACH_PUBLIC_API_URL }}" ] && echo "REACH_PUBLIC_API_URL: \"${{ secrets.REACH_PUBLIC_API_URL }}\""
           } > "$ENV_FILE"
           
           # Verify env file was created correctly
@@ -476,4 +477,26 @@ jobs:
           sleep 10
           curl -f ${{ steps.get-url.outputs.url }}/api/health || exit 1
           echo "✅ Health check passed"
+
+      - name: Set REACH_PUBLIC_API_URL on Cloud Run
+        run: |
+          gcloud run services update ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --update-env-vars "REACH_PUBLIC_API_URL=${{ steps.get-url.outputs.url }}" \
+            --quiet
+          echo "✅ REACH_PUBLIC_API_URL set to ${{ steps.get-url.outputs.url }}"
+
+      - name: Verify Voice Status Endpoint
+        run: |
+          sleep 5
+          VOICE_STATUS=$(curl -sf "${{ steps.get-url.outputs.url }}/api/voice/status" || echo "")
+          if [ -z "$VOICE_STATUS" ]; then
+            echo "⚠️ Voice status endpoint unreachable (voice may not be configured yet)"
+            exit 0
+          fi
+          echo "$VOICE_STATUS" | python3 -m json.tool || echo "$VOICE_STATUS"
+          API_OK=$(echo "$VOICE_STATUS" | python3 -c "import sys,json; d=json.load(sys.stdin).get('data',{}); exit(0 if d.get('apiConfigured') and d.get('webhookConfigured') else 1)" 2>/dev/null) && \
+            echo "✅ Voice API and webhook secrets are active on Cloud Run" || \
+            echo "⚠️ Voice secrets incomplete — set VOICE_API_BASE_URL, VOICE_API_KEY, VOICE_WEBHOOK_API_KEY in GitHub secrets"
 

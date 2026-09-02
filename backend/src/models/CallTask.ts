@@ -34,6 +34,8 @@ export interface ICallLog {
   farmerComments: string; // Replaces agentObservations
   sentiment: 'Positive' | 'Negative' | 'Neutral' | 'N/A'; // Sentiment indicator
   activityQuality?: number; // 1-5: MDO holistic crop solution understanding (4B. Activity Quality)
+  recordingUrl?: string;
+  transcriptUrl?: string;
 }
 
 export type Outcome = 
@@ -143,6 +145,14 @@ const CallLogSchema = new Schema<ICallLog>({
     min: 1,
     max: 5,
     default: undefined,
+  },
+  recordingUrl: {
+    type: String,
+    default: '',
+  },
+  transcriptUrl: {
+    type: String,
+    default: '',
   },
 }, { _id: false });
 

@@ -18,6 +18,8 @@ export interface SubmitCallInteractionInput {
   farmerComments?: string;
   sentiment?: ICallLog['sentiment'];
   activityQuality?: number | null;
+  recordingUrl?: string;
+  transcriptUrl?: string;
 }
 
 export interface SubmitCallInteractionOptions {
@@ -70,6 +72,8 @@ export async function submitCallInteractionForTask(
     farmerComments: input.farmerComments || '',
     sentiment: input.sentiment || 'N/A',
     ...(input.activityQuality != null && { activityQuality: Number(input.activityQuality) }),
+    ...(input.recordingUrl && { recordingUrl: input.recordingUrl }),
+    ...(input.transcriptUrl && { transcriptUrl: input.transcriptUrl }),
   };
 
   task.callLog = callLog;

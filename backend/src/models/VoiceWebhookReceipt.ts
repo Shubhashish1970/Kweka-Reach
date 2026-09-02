@@ -35,6 +35,8 @@ const VoiceWebhookReceiptSchema = new Schema<IVoiceWebhookReceipt>(
   { timestamps: true }
 );
 
+VoiceWebhookReceiptSchema.index({ taskId: 1, attemptId: 1 }, { unique: true, sparse: true });
+
 export const VoiceWebhookReceipt = mongoose.model<IVoiceWebhookReceipt>(
   'VoiceWebhookReceipt',
   VoiceWebhookReceiptSchema

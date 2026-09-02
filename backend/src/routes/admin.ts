@@ -23,6 +23,7 @@ import {
 } from '../services/stockParkingService.js';
 import logger from '../config/logger.js';
 import * as XLSX from 'xlsx';
+import voiceAdminRoutes from './voiceAdmin.js';
 
 const router = express.Router();
 
@@ -540,6 +541,8 @@ router.post(
     }
   }
 );
+
+router.use('/voice', voiceAdminRoutes);
 
 export default router;
 

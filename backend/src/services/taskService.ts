@@ -360,25 +360,9 @@ export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | n
       select: 'type date officerName tmName location territory territoryName state crops products',
     };
 
-    const queued = await CallTask.find({
+    let task = await CallTask.findOne({
       assignedAgentId: oid,
       status: 'sampled_in_queue',
-    })
-      .populate(populateFarmer)
-      .populate(populateActivity)
-      .sort({ scheduledDate: 1 })
-      .limit(25)
-      .lean();
-
-    const withMobile = queued.find((task) => {
-      const farmer = task.farmerId as { mobileNumber?: string } | null;
-      return Boolean(farmer?.mobileNumber?.trim());
-    });
-    if (withMobile) return withMobile;
-
-    const inProgress = await CallTask.find({
-      assignedAgentId: oid,
-      status: 'in_progress',
     })
       .populate(populateFarmer)
       .populate(populateActivity)
@@ -386,7 +370,19 @@ export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | n
       .limit(1)
       .lean();
 
-    return inProgress[0] || null;
+    if (!task) {
+      task = await CallTask.findOne({
+        assignedAgentId: oid,
+        status: 'in_progress',
+      })
+        .populate(populateFarmer)
+        .populate(populateActivity)
+        .sort({ scheduledDate: 1 })
+        .limit(1)
+        .lean();
+    }
+
+    return task;
   } catch (error) {
     logger.error('Error fetching next voice task for agent:', error);
     throw error;

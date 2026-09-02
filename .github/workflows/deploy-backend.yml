@@ -304,6 +304,7 @@ jobs:
             [ -n "${{ secrets.VOICE_WEBHOOK_API_KEY }}" ] && echo "VOICE_WEBHOOK_API_KEY: \"${{ secrets.VOICE_WEBHOOK_API_KEY }}\""
             [ -n "${{ secrets.VOICE_ORCHESTRATOR_ENABLED }}" ] && echo "VOICE_ORCHESTRATOR_ENABLED: \"${{ secrets.VOICE_ORCHESTRATOR_ENABLED }}\""
             [ -n "${{ secrets.VOICE_USE_TEST_ENDPOINT }}" ] && echo "VOICE_USE_TEST_ENDPOINT: \"${{ secrets.VOICE_USE_TEST_ENDPOINT }}\""
+            echo "VOICE_STUCK_TASK_MINUTES: \"1\""
             [ -n "${{ secrets.REACH_PUBLIC_API_URL }}" ] && echo "REACH_PUBLIC_API_URL: \"${{ secrets.REACH_PUBLIC_API_URL }}\""
           } > "$ENV_FILE"
           

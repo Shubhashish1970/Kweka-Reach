@@ -32,7 +32,7 @@ const VoicePlatformSettingsSchema = new Schema<IVoicePlatformSettings>(
     defaultMinGapBetweenCallsSec: { type: Number, default: 45, min: 0, max: 3600 },
     defaultMaxCallsPerDay: { type: Number, default: 50, min: 0, max: 5000 },
     defaultMaxConcurrentCalls: { type: Number, default: 1, min: 1, max: 5 },
-    stuckCallTimeoutMinutes: { type: Number, default: 15, min: 5, max: 120 },
+    stuckCallTimeoutMinutes: { type: Number, default: 1, min: 1, max: 120 },
     autoPauseAfterConsecutiveFailures: { type: Number, default: 5, min: 1, max: 50 },
     useTestEndpoint: { type: Boolean, default: true },
     updatedByUserId: { type: Schema.Types.ObjectId, ref: 'User' },

@@ -48,7 +48,7 @@ export const VOICE_DEBUG_CATALOG: Record<VoiceDebugCode, Omit<VoiceDebugInfo, 'c
   },
   'VA-007': {
     message: 'Agent already has a call in progress',
-    fix: 'Wait for the current call webhook, or release stuck in-progress tasks.',
+    fix: 'Stuck calls auto-release after 1 min with no webhook. Wait one poll cycle or lower stuckCallTimeoutMinutes.',
   },
   'VA-008': {
     message: 'Minimum gap between calls not satisfied',

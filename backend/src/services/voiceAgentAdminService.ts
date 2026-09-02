@@ -37,7 +37,7 @@ function seedPlatformFromEnv(): Partial<IVoicePlatformSettings> {
     defaultMinGapBetweenCallsSec: 45,
     defaultMaxCallsPerDay: 50,
     defaultMaxConcurrentCalls: 1,
-    stuckCallTimeoutMinutes: Math.max(5, Number(process.env.VOICE_STUCK_TASK_MINUTES || 15)),
+    stuckCallTimeoutMinutes: Math.max(1, Number(process.env.VOICE_STUCK_TASK_MINUTES || 1)),
     autoPauseAfterConsecutiveFailures: 5,
     useTestEndpoint: process.env.VOICE_USE_TEST_ENDPOINT !== 'false',
   };

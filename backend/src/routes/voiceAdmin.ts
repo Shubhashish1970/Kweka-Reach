@@ -42,7 +42,7 @@ router.put(
     body('defaultMinGapBetweenCallsSec').optional().isInt({ min: 0, max: 3600 }),
     body('defaultMaxCallsPerDay').optional().isInt({ min: 0, max: 5000 }),
     body('defaultMaxConcurrentCalls').optional().isInt({ min: 1, max: 5 }),
-    body('stuckCallTimeoutMinutes').optional().isInt({ min: 5, max: 120 }),
+    body('stuckCallTimeoutMinutes').optional().isInt({ min: 1, max: 120 }),
     body('autoPauseAfterConsecutiveFailures').optional().isInt({ min: 1, max: 50 }),
     body('useTestEndpoint').optional().isBoolean(),
   ],

@@ -148,7 +148,15 @@ export async function agentHasActiveVoiceCall(agentId: string): Promise<boolean>
   const active = await CallTask.findOne({
     assignedAgentId: new mongoose.Types.ObjectId(agentId),
     status: 'in_progress',
-    $or: [{ callLog: { $exists: false } }, { callLog: null }],
+    $and: [
+      { $or: [{ callLog: { $exists: false } }, { callLog: null }] },
+      {
+        $or: [
+          { voiceWorkflowRunId: { $ne: null } },
+          { voiceAttemptId: { $nin: [null, ''] } },
+        ],
+      },
+    ],
   }).select('_id');
   return !!active;
 }

@@ -6,7 +6,7 @@ export const VOICE_DEBUG_FIXES: Record<string, string> = {
   'VA-004': 'Set the Dograh API Trigger UUID on the agent in Voice Agents.',
   'VA-005': 'Wait until calling hours, or adjust the agent/platform calling window.',
   'VA-006': 'Wait until tomorrow or raise maxCallsPerDay on the agent/platform.',
-  'VA-007': 'Wait for the current call webhook, or release stuck in-progress tasks.',
+  'VA-007': 'Stuck calls auto-release after 1 min with no webhook. Wait one poll cycle or lower stuckCallTimeoutMinutes.',
   'VA-008': 'Wait for the cooldown shown in the trace, or lower minGapBetweenCallsSec.',
   'VA-009': 'Assign sampled tasks to this agent, or check queue filters.',
   'VA-010': 'Add mobileNumber on the farmer record for this task.',

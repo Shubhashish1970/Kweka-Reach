@@ -14,6 +14,7 @@ import {
   SubmitCallInteractionInput,
 } from './taskSubmitService.js';
 import { triggerVoiceOutboundCall } from './voiceApiClient.js';
+import { getOutcomeFromStatus } from '../utils/outcomeHelper.js';
 import { resolveVoiceDialNumber } from '../utils/voiceDialNumber.js';
 import { explainRuntimeBlock, formatVoiceDebugLine, voiceDebugInfo } from '../utils/voiceDebugCodes.js';
 import { VoicePipelineTracer, advancePipelineOnWebhook } from './voicePipelineService.js';
@@ -28,9 +29,18 @@ import {
   resolveVoiceTriggerOptions,
 } from './voiceAgentAdminService.js';
 
-async function getStuckMinutes(): Promise<number> {
+async function getStuckCallTimeoutMs(): Promise<number> {
   const platform = await getOrCreateVoicePlatformSettings();
-  return platform.stuckCallTimeoutMinutes || Number(process.env.VOICE_STUCK_TASK_MINUTES || 15);
+  const envSec = process.env.VOICE_STUCK_TASK_SECONDS;
+  if (envSec && !Number.isNaN(Number(envSec))) {
+    return Math.max(30, Number(envSec)) * 1000;
+  }
+  const envMin = process.env.VOICE_STUCK_TASK_MINUTES;
+  if (envMin && !Number.isNaN(Number(envMin))) {
+    return Math.max(1, Number(envMin)) * 60 * 1000;
+  }
+  const minutes = platform.stuckCallTimeoutMinutes || 1;
+  return Math.max(1, minutes) * 60 * 1000;
 }
 
 /** Peek next queued farmer for pipeline debug (does not claim the task). */
@@ -224,32 +234,70 @@ export async function buildVoiceInitialContext(
   };
 }
 
-export async function releaseStuckVoiceTasks(): Promise<number> {
-  const stuckMinutes = await getStuckMinutes();
-  const cutoff = new Date(Date.now() - stuckMinutes * 60 * 1000);
-  const stuck = await CallTask.find({
+export async function releaseStuckVoiceTasks(agentId?: string): Promise<number> {
+  const timeoutMs = await getStuckCallTimeoutMs();
+  const cutoff = new Date(Date.now() - timeoutMs);
+  const timeoutLabel =
+    timeoutMs >= 60_000 ? `${Math.round(timeoutMs / 60_000)} min` : `${Math.round(timeoutMs / 1000)}s`;
+
+  const query: Record<string, unknown> = {
     status: 'in_progress',
-    callLog: { $exists: false },
-    callStartedAt: { $lt: cutoff },
-    voiceWorkflowRunId: { $ne: null },
-  });
+    $or: [{ callLog: { $exists: false } }, { callLog: null }],
+    $and: [
+      {
+        $or: [
+          { voiceWorkflowRunId: { $ne: null } },
+          { voiceAttemptId: { $nin: [null, ''] } },
+        ],
+      },
+    ],
+  };
+
+  if (agentId && mongoose.Types.ObjectId.isValid(agentId)) {
+    query.assignedAgentId = new mongoose.Types.ObjectId(agentId);
+  }
+
+  const stuck = await CallTask.find(query);
 
   let count = 0;
   for (const task of stuck) {
-    task.status = 'sampled_in_queue';
+    const startedAt = task.callStartedAt || task.updatedAt;
+    if (!startedAt || startedAt >= cutoff) continue;
+
+    task.status = 'not_reachable';
+    task.outcome = getOutcomeFromStatus('not_reachable');
     task.voiceWorkflowRunId = null;
     task.voiceAttemptId = null;
     task.callStartedAt = null;
+    task.callLog = {
+      timestamp: new Date(),
+      callStatus: 'No Answer',
+      didAttend: null,
+      didRecall: false,
+      cropsDiscussed: [],
+      productsDiscussed: [],
+      hasPurchased: null,
+      willingToPurchase: null,
+      likelyPurchaseDate: '',
+      nonPurchaseReason: `Voice call timed out after ${timeoutLabel} — no webhook received`,
+      purchasedProducts: [],
+      farmerComments: '',
+      sentiment: 'N/A',
+    };
     task.interactionHistory.push({
       timestamp: new Date(),
-      status: 'in_progress',
-      notes: `Voice call timed out after ${stuckMinutes} minutes — returned to queue`,
+      status: 'not_reachable',
+      notes: `Voice call auto-released after ${timeoutLabel} — moving to next queue item`,
     });
     await task.save();
     count += 1;
+    logger.warn(
+      `Released stuck voice task ${task._id} for agent ${task.assignedAgentId} after ${timeoutLabel}`
+    );
   }
+
   if (count > 0) {
-    logger.warn(`Released ${count} stuck voice task(s) to queue`);
+    logger.warn(`Released ${count} stuck voice task(s) — marked not_reachable`);
   }
   return count;
 }
@@ -286,6 +334,8 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
     }
 
     try {
+      await releaseStuckVoiceTasks(agentId);
+
       const runtimeState = await deriveAgentRuntimeState(agent, platform);
 
       if (runtimeState !== 'idle') {

@@ -350,29 +350,43 @@ export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]>
  */
 export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | null> => {
   try {
-    let task = await CallTask.findOne({
-      assignedAgentId: new mongoose.Types.ObjectId(agentId),
+    const oid = new mongoose.Types.ObjectId(agentId);
+    const populateFarmer = {
+      path: 'farmerId',
+      select: 'name location preferredLanguage mobileNumber photoUrl',
+    };
+    const populateActivity = {
+      path: 'activityId',
+      select: 'type date officerName tmName location territory territoryName state crops products',
+    };
+
+    const queued = await CallTask.find({
+      assignedAgentId: oid,
       status: 'sampled_in_queue',
     })
-      .populate('farmerId', 'name location preferredLanguage mobileNumber photoUrl')
-      .populate('activityId', 'type date officerName tmName location territory territoryName state crops products')
+      .populate(populateFarmer)
+      .populate(populateActivity)
+      .sort({ scheduledDate: 1 })
+      .limit(25)
+      .lean();
+
+    const withMobile = queued.find((task) => {
+      const farmer = task.farmerId as { mobileNumber?: string } | null;
+      return Boolean(farmer?.mobileNumber?.trim());
+    });
+    if (withMobile) return withMobile;
+
+    const inProgress = await CallTask.find({
+      assignedAgentId: oid,
+      status: 'in_progress',
+    })
+      .populate(populateFarmer)
+      .populate(populateActivity)
       .sort({ scheduledDate: 1 })
       .limit(1)
       .lean();
 
-    if (!task) {
-      task = await CallTask.findOne({
-        assignedAgentId: new mongoose.Types.ObjectId(agentId),
-        status: 'in_progress',
-      })
-        .populate('farmerId', 'name location preferredLanguage mobileNumber photoUrl')
-        .populate('activityId', 'type date officerName tmName location territory territoryName state crops products')
-        .sort({ scheduledDate: 1 })
-        .limit(1)
-        .lean();
-    }
-
-    return task;
+    return inProgress[0] || null;
   } catch (error) {
     logger.error('Error fetching next voice task for agent:', error);
     throw error;

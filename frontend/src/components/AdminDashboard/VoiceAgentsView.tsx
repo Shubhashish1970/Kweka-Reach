@@ -28,7 +28,7 @@ interface VoiceAgentRow {
   voiceStatus: 'running' | 'paused' | 'stopped';
   voiceTriggerUuid: string | null;
   runtimeState: RuntimeState;
-  queueCounts: { sampled_in_queue: number; in_progress: number; completed_today: number };
+  queueCounts: { sampled_in_queue: number; due_now?: number; in_progress: number; completed_today: number };
   consecutiveApiFailures: number;
   lastTriggerAt: string | null;
   lastWebhookAt: string | null;
@@ -438,10 +438,16 @@ const VoiceAgentsView: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="mt-2 grid grid-cols-4 gap-2 text-center text-xs">
                     <div className="bg-slate-50 rounded-lg py-1">
                       <p className="font-black text-violet-700">{agent.queueCounts.sampled_in_queue}</p>
                       <p className="text-slate-500">Queued</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg py-1">
+                      <p className={`font-black ${(agent.queueCounts.due_now ?? agent.queueCounts.sampled_in_queue) === 0 && agent.queueCounts.sampled_in_queue > 0 ? 'text-red-700' : 'text-indigo-700'}`}>
+                        {agent.queueCounts.due_now ?? agent.queueCounts.sampled_in_queue}
+                      </p>
+                      <p className="text-slate-500">Due now</p>
                     </div>
                     <div className="bg-slate-50 rounded-lg py-1">
                       <p className="font-black text-amber-700">{agent.queueCounts.in_progress}</p>

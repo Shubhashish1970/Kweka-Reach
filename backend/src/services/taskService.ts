@@ -345,10 +345,43 @@ export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]>
 };
 
 /**
- * Get the next pending task for an agent
- * Prioritizes tasks by scheduledDate (earliest first)
- * Also returns in_progress tasks if agent is already working on them
- * Note: Returns lean document (plain object) for better performance
+ * Next task for the voice orchestrator — matches human dialer open queue (no scheduledDate gate).
+ * Human agents see all sampled_in_queue tasks in the workspace; voice should dequeue the same pool.
+ */
+export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | null> => {
+  try {
+    let task = await CallTask.findOne({
+      assignedAgentId: new mongoose.Types.ObjectId(agentId),
+      status: 'sampled_in_queue',
+    })
+      .populate('farmerId', 'name location preferredLanguage mobileNumber photoUrl')
+      .populate('activityId', 'type date officerName tmName location territory territoryName state crops products')
+      .sort({ scheduledDate: 1 })
+      .limit(1)
+      .lean();
+
+    if (!task) {
+      task = await CallTask.findOne({
+        assignedAgentId: new mongoose.Types.ObjectId(agentId),
+        status: 'in_progress',
+      })
+        .populate('farmerId', 'name location preferredLanguage mobileNumber photoUrl')
+        .populate('activityId', 'type date officerName tmName location territory territoryName state crops products')
+        .sort({ scheduledDate: 1 })
+        .limit(1)
+        .lean();
+    }
+
+    return task;
+  } catch (error) {
+    logger.error('Error fetching next voice task for agent:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get the next pending task for an agent (legacy /active route — due-date gate).
+ * Prioritizes tasks by scheduledDate (earliest first).
  */
 export const getNextTaskForAgent = async (agentId: string): Promise<any | null> => {
   try {

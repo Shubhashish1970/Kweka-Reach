@@ -7,7 +7,7 @@ import { User, IUser } from '../models/User.js';
 import { VoiceWebhookReceipt } from '../models/VoiceWebhookReceipt.js';
 import { ICallLog } from '../models/CallTask.js';
 import logger from '../config/logger.js';
-import { getNextTaskForAgent } from './taskService.js';
+import { getNextVoiceTaskForAgent } from './taskService.js';
 import {
   markTaskInProgressForAgent,
   submitCallInteractionForTask,
@@ -269,8 +269,17 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         }
       }
 
-      const task = await getNextTaskForAgent(agentId);
-      if (!task) continue;
+      const task = await getNextVoiceTaskForAgent(agentId);
+      if (!task) {
+        const queued = await CallTask.countDocuments({
+          assignedAgentId: agent._id,
+          status: 'sampled_in_queue',
+        });
+        if (queued > 0) {
+          logger.debug(`Voice orchestrator: agent ${agent.name} has ${queued} queued task(s) but none available to dequeue`);
+        }
+        continue;
+      }
 
       const farmer = task.farmerId as any;
       const triggerUuid = resolveAgentVoiceTriggerUuid(agent);

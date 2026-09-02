@@ -108,6 +108,13 @@ export async function updateVoicePlatformSettings(
     userEmail,
   });
 
+  try {
+    const { restartVoiceOrchestrator } = await import('../config/voiceOrchestrator.js');
+    await restartVoiceOrchestrator();
+  } catch (error) {
+    logger.warn('Voice orchestrator restart after settings update failed:', error);
+  }
+
   return getVoicePlatformSettingsResponse();
 }
 
@@ -276,8 +283,14 @@ export function resolveAgentVoiceTriggerUuid(agent: VoiceAgentConfigSource): str
 
 export async function getAgentQueueCounts(agentId: string) {
   const oid = new mongoose.Types.ObjectId(agentId);
-  const [sampled, inProgress, completedToday] = await Promise.all([
+  const now = new Date();
+  const [sampled, dueNow, inProgress, completedToday] = await Promise.all([
     CallTask.countDocuments({ assignedAgentId: oid, status: 'sampled_in_queue' }),
+    CallTask.countDocuments({
+      assignedAgentId: oid,
+      status: 'sampled_in_queue',
+      scheduledDate: { $lte: now },
+    }),
     CallTask.countDocuments({ assignedAgentId: oid, status: 'in_progress' }),
     CallTask.countDocuments({
       assignedAgentId: oid,
@@ -285,7 +298,12 @@ export async function getAgentQueueCounts(agentId: string) {
       updatedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
     }),
   ]);
-  return { sampled_in_queue: sampled, in_progress: inProgress, completed_today: completedToday };
+  return {
+    sampled_in_queue: sampled,
+    due_now: dueNow,
+    in_progress: inProgress,
+    completed_today: completedToday,
+  };
 }
 
 export async function listVoiceAgents(options?: { teamLeadId?: string }) {

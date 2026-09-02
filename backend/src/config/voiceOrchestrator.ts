@@ -56,3 +56,9 @@ export const stopVoiceOrchestrator = (): void => {
   scheduledTask?.stop();
   scheduledTask = null;
 };
+
+/** Re-read platform settings and reschedule (e.g. after admin toggles orchestrator in UI). */
+export async function restartVoiceOrchestrator(): Promise<void> {
+  stopVoiceOrchestrator();
+  await setupVoiceOrchestrator();
+}

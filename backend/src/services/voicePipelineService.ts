@@ -69,7 +69,8 @@ export class VoicePipelineTracer {
     key: string,
     status: PipelineStepStatus,
     message?: string,
-    overallStatus?: VoicePipelineOverallStatus
+    overallStatus?: VoicePipelineOverallStatus,
+    errorCode?: string
   ): Promise<void> {
     const label = PIPELINE_STEP_LABELS[key] || key;
     const step: IPipelineStep = {
@@ -77,6 +78,7 @@ export class VoicePipelineTracer {
       label,
       status,
       message,
+      errorCode,
       at: new Date(),
     };
 
@@ -88,7 +90,7 @@ export class VoicePipelineTracer {
     if (overallStatus) {
       update.$set = {
         overallStatus,
-        ...(status === 'failed' ? { failedAtStep: key } : {}),
+        ...(status === 'failed' ? { failedAtStep: key, ...(errorCode ? { failedErrorCode: errorCode } : {}) } : {}),
       };
     }
 
@@ -103,12 +105,12 @@ export class VoicePipelineTracer {
     await this.pushStep(key, 'running', message, 'running');
   }
 
-  async fail(key: string, message: string): Promise<void> {
-    await this.pushStep(key, 'failed', message, 'failed');
+  async fail(key: string, message: string, errorCode?: string): Promise<void> {
+    await this.pushStep(key, 'failed', message, 'failed', errorCode);
   }
 
-  async block(key: string, message: string): Promise<void> {
-    await this.pushStep(key, 'failed', message, 'blocked');
+  async block(key: string, message: string, errorCode?: string): Promise<void> {
+    await this.pushStep(key, 'failed', message, 'blocked', errorCode);
   }
 
   async complete(message?: string): Promise<void> {

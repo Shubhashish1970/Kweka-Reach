@@ -15,6 +15,7 @@ import {
 } from './taskSubmitService.js';
 import { triggerVoiceOutboundCall } from './voiceApiClient.js';
 import { resolveVoiceDialNumber } from '../utils/voiceDialNumber.js';
+import { explainRuntimeBlock, formatVoiceDebugLine, voiceDebugInfo } from '../utils/voiceDebugCodes.js';
 import { VoicePipelineTracer, advancePipelineOnWebhook } from './voicePipelineService.js';
 import { VoiceCallPipeline } from '../models/VoiceCallPipeline.js';
 import {
@@ -266,7 +267,7 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
     role: 'cc_agent',
     agentKind: 'virtual',
     isActive: true,
-  }).select('_id name languageCapabilities voiceAgentConfig');
+  }).select('_id name isActive languageCapabilities voiceAgentConfig');
 
   for (const agent of virtualAgents) {
     const agentId = agent._id.toString();
@@ -286,7 +287,6 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
 
     try {
       const runtimeState = await deriveAgentRuntimeState(agent, platform);
-      const voiceStatus = agent.voiceAgentConfig?.voiceStatus || 'paused';
 
       if (runtimeState !== 'idle') {
         if (runtimeState === 'not_configured') {
@@ -294,12 +294,11 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         } else if (runtimeState !== 'calling') {
           logger.debug(`Voice orchestrator: agent ${agent.name} skipped (state=${runtimeState})`);
         }
-        await tracer.block(
-          'agent_runtime',
+        const debug =
           runtimeState === 'calling'
-            ? 'Agent already on a call'
-            : `Agent not ready (state: ${runtimeState}, voiceStatus: ${voiceStatus})`
-        );
+            ? voiceDebugInfo('VA-007')
+            : explainRuntimeBlock(agent, runtimeState);
+        await tracer.block('agent_runtime', formatVoiceDebugLine(debug), debug.code);
         continue;
       }
       await tracer.pass('agent_runtime', 'Agent is ready');
@@ -310,7 +309,8 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         const elapsedSec = (Date.now() - new Date(agent.voiceAgentConfig.lastTriggerAt).getTime()) / 1000;
         if (elapsedSec < limits.minGapBetweenCallsSec) {
           const waitSec = Math.ceil(limits.minGapBetweenCallsSec - elapsedSec);
-          await tracer.block('min_gap', `Wait ${waitSec}s before next call`);
+          const debug = voiceDebugInfo('VA-008', `wait ${waitSec}s`);
+          await tracer.block('min_gap', formatVoiceDebugLine(debug), debug.code);
           continue;
         }
       }
@@ -322,12 +322,14 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
           assignedAgentId: agent._id,
           status: 'sampled_in_queue',
         });
+        const debug =
+          queued > 0
+            ? voiceDebugInfo('VA-009', `${queued} task(s) queued but none dequeued`)
+            : voiceDebugInfo('VA-009');
         if (queued > 0) {
           logger.debug(`Voice orchestrator: agent ${agent.name} has ${queued} queued task(s) but none available to dequeue`);
-          await tracer.block('queue_pickup', `${queued} task(s) queued but none could be dequeued`);
-        } else {
-          await tracer.block('queue_pickup', 'Queue is empty');
         }
+        await tracer.block('queue_pickup', formatVoiceDebugLine(debug), debug.code);
         continue;
       }
 
@@ -343,14 +345,16 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
       const triggerUuid = resolveAgentVoiceTriggerUuid(agent);
       if (!triggerUuid) {
         logger.warn(`No voice trigger UUID for agent ${agent.name}`);
-        await tracer.fail('trigger_uuid', 'No API Trigger UUID on agent');
+        const debug = voiceDebugInfo('VA-004');
+        await tracer.fail('trigger_uuid', formatVoiceDebugLine(debug), debug.code);
         continue;
       }
       await tracer.pass('trigger_uuid', triggerUuid.slice(0, 8) + '…');
 
       if (!farmer?.mobileNumber) {
         logger.warn(`Task ${task._id} missing farmer mobile number`);
-        await tracer.fail('farmer_mobile', `${farmerName} has no mobile number`);
+        const debug = voiceDebugInfo('VA-010', farmerName);
+        await tracer.fail('farmer_mobile', formatVoiceDebugLine(debug), debug.code);
         continue;
       }
       await tracer.pass('farmer_mobile', `${farmerName} mobile present`);
@@ -405,7 +409,8 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
       } catch (callError) {
         const msg = callError instanceof Error ? callError.message : 'Trigger failed';
         logger.error(`Voice trigger failed for task ${task._id}:`, callError);
-        await tracer.fail('dograh_api', `${farmerName}: ${msg}`);
+        const debug = voiceDebugInfo('VA-011', `${farmerName}: ${msg}`);
+        await tracer.fail('dograh_api', formatVoiceDebugLine(debug), debug.code);
         await recordAgentTriggerResult(agentId, false, msg);
         await CallTask.findByIdAndUpdate(task._id, {
           status: 'sampled_in_queue',

@@ -9,6 +9,7 @@ export interface IPipelineStep {
   label: string;
   status: PipelineStepStatus;
   message?: string;
+  errorCode?: string;
   at?: Date;
 }
 
@@ -20,6 +21,7 @@ export interface IVoiceCallPipeline extends Document {
   workflowRunId?: number;
   overallStatus: VoicePipelineOverallStatus;
   failedAtStep?: string;
+  failedErrorCode?: string;
   steps: IPipelineStep[];
   dialNumberMasked?: string;
   /** Farmer (or test) name for the dial target / next queue item */
@@ -38,6 +40,7 @@ const PipelineStepSchema = new Schema<IPipelineStep>(
       required: true,
     },
     message: { type: String },
+    errorCode: { type: String },
     at: { type: Date },
   },
   { _id: false }
@@ -60,6 +63,7 @@ const VoiceCallPipelineSchema = new Schema<IVoiceCallPipeline>(
       default: 'running',
     },
     failedAtStep: { type: String },
+    failedErrorCode: { type: String },
     steps: { type: [PipelineStepSchema], default: [] },
     dialNumberMasked: { type: String },
     farmerName: { type: String, trim: true },

@@ -255,7 +255,7 @@ export async function deriveAgentRuntimeState(
   const cfg = agent.voiceAgentConfig || DEFAULT_VOICE_AGENT_CONFIG();
   const status = cfg.voiceStatus || 'paused';
 
-  if (!agent.isActive) return 'stopped';
+  if (agent.isActive === false) return 'stopped';
   if (status === 'stopped') return 'stopped';
   if (status === 'paused') return 'paused';
 
@@ -638,7 +638,9 @@ export async function testVoiceAgentTrigger(
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Test trigger failed';
-    await tracer.fail('dograh_api', msg);
+    const { voiceDebugInfo, formatVoiceDebugLine } = await import('../utils/voiceDebugCodes.js');
+    const debug = voiceDebugInfo('VA-011', msg);
+    await tracer.fail('dograh_api', formatVoiceDebugLine(debug), debug.code);
     await recordAgentTriggerResult(agentId, false, msg);
     throw error;
   }

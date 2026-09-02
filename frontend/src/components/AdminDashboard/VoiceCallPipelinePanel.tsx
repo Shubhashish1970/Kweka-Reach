@@ -11,6 +11,7 @@ import {
   User,
 } from 'lucide-react';
 import { formatDateTimeIST } from '../../utils/dateRangeUtils';
+import { VOICE_DEBUG_FIXES } from '../../utils/voiceDebugCodes';
 
 export type PipelineStepStatus = 'pending' | 'success' | 'failed' | 'skipped' | 'running';
 
@@ -19,6 +20,7 @@ export interface PipelineStep {
   label: string;
   status: PipelineStepStatus;
   message?: string;
+  errorCode?: string;
   at?: string;
 }
 
@@ -27,6 +29,7 @@ export interface PipelineTrace {
   traceKind: 'orchestrator_tick' | 'test_call' | 'queue_call';
   overallStatus: 'running' | 'success' | 'failed' | 'blocked';
   failedAtStep?: string;
+  failedErrorCode?: string;
   steps: PipelineStep[];
   dialNumberMasked?: string;
   farmerName?: string;
@@ -191,9 +194,19 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
                           }`}
                         >
                           {step.label}
+                          {step.errorCode && (
+                            <span className="ml-2 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-200">
+                              {step.errorCode}
+                            </span>
+                          )}
                         </p>
                         {step.message && (
                           <p className="text-xs text-slate-500 break-words">{step.message}</p>
+                        )}
+                        {step.errorCode && VOICE_DEBUG_FIXES[step.errorCode] && (
+                          <p className="text-xs text-amber-800 mt-0.5">
+                            Fix: {VOICE_DEBUG_FIXES[step.errorCode]}
+                          </p>
                         )}
                         {step.at && (
                           <p className="text-[10px] text-slate-400">{formatDateTimeIST(step.at)}</p>
@@ -204,11 +217,19 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
                 </ol>
 
                 {trace.failedAtStep && trace.overallStatus !== 'success' && (
-                  <div className="px-3 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-900">
-                    Stopped at:{' '}
-                    <strong>
-                      {trace.steps.find((s) => s.key === trace.failedAtStep)?.label || trace.failedAtStep}
-                    </strong>
+                  <div className="px-3 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-900 space-y-1">
+                    <p>
+                      Stopped at:{' '}
+                      <strong>
+                        {trace.steps.find((s) => s.key === trace.failedAtStep)?.label || trace.failedAtStep}
+                      </strong>
+                      {trace.failedErrorCode && (
+                        <span className="ml-2 font-mono font-bold text-red-800">{trace.failedErrorCode}</span>
+                      )}
+                    </p>
+                    {trace.failedErrorCode && VOICE_DEBUG_FIXES[trace.failedErrorCode] && (
+                      <p>Fix: {VOICE_DEBUG_FIXES[trace.failedErrorCode]}</p>
+                    )}
                   </div>
                 )}
               </div>

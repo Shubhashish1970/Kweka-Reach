@@ -32,6 +32,24 @@ async function getStuckMinutes(): Promise<number> {
   return platform.stuckCallTimeoutMinutes || Number(process.env.VOICE_STUCK_TASK_MINUTES || 15);
 }
 
+/** Peek next queued farmer for pipeline debug (does not claim the task). */
+async function peekNextQueuedFarmer(agentId: string): Promise<{ taskId: string; farmerName: string } | null> {
+  if (!mongoose.Types.ObjectId.isValid(agentId)) return null;
+  const task = await CallTask.findOne({
+    assignedAgentId: new mongoose.Types.ObjectId(agentId),
+    status: 'sampled_in_queue',
+  })
+    .populate({ path: 'farmerId', select: 'name' })
+    .sort({ scheduledDate: 1 })
+    .select('_id farmerId')
+    .lean();
+
+  if (!task) return null;
+  const farmer = task.farmerId as { name?: string } | null;
+  const farmerName = farmer?.name?.trim() || 'Unknown farmer';
+  return { taskId: String(task._id), farmerName };
+}
+
 export interface VoiceInitialContext {
   task_id: string;
   attempt_id: string;
@@ -255,8 +273,20 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
     const tracer = await VoicePipelineTracer.start(agentId, 'orchestrator_tick');
     await tracer.pass('orchestrator_enabled', 'Platform orchestrator is on');
 
+    const nextQueued = await peekNextQueuedFarmer(agentId);
+    if (nextQueued) {
+      await tracer.setFarmerName(nextQueued.farmerName);
+      await tracer.pass(
+        'queue_peek',
+        `${nextQueued.farmerName} (task …${nextQueued.taskId.slice(-6)})`
+      );
+    } else {
+      await tracer.pass('queue_peek', 'Queue is empty — no farmer to dial');
+    }
+
     try {
       const runtimeState = await deriveAgentRuntimeState(agent, platform);
+      const voiceStatus = agent.voiceAgentConfig?.voiceStatus || 'paused';
 
       if (runtimeState !== 'idle') {
         if (runtimeState === 'not_configured') {
@@ -268,7 +298,7 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
           'agent_runtime',
           runtimeState === 'calling'
             ? 'Agent already on a call'
-            : `Agent not ready (state: ${runtimeState})`
+            : `Agent not ready (state: ${runtimeState}, voiceStatus: ${voiceStatus})`
         );
         continue;
       }
@@ -300,13 +330,16 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         }
         continue;
       }
+
+      const farmer = task.farmerId as any;
+      const farmerName = farmer?.name?.trim() || 'Unknown farmer';
       await VoiceCallPipeline.findByIdAndUpdate(tracer.id, {
         traceKind: 'queue_call',
         taskId: task._id,
+        farmerName,
       });
-      await tracer.pass('queue_pickup', `Task ${task._id}`);
+      await tracer.pass('queue_pickup', `Picked ${farmerName} (task ${String(task._id).slice(-6)})`);
 
-      const farmer = task.farmerId as any;
       const triggerUuid = resolveAgentVoiceTriggerUuid(agent);
       if (!triggerUuid) {
         logger.warn(`No voice trigger UUID for agent ${agent.name}`);
@@ -317,13 +350,13 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
 
       if (!farmer?.mobileNumber) {
         logger.warn(`Task ${task._id} missing farmer mobile number`);
-        await tracer.fail('farmer_mobile', 'Farmer record has no mobile number');
+        await tracer.fail('farmer_mobile', `${farmerName} has no mobile number`);
         continue;
       }
-      await tracer.pass('farmer_mobile', 'Farmer mobile present');
+      await tracer.pass('farmer_mobile', `${farmerName} mobile present`);
 
       await markTaskInProgressForAgent(task._id.toString(), agentId, 'Voice orchestrator started call');
-      await tracer.pass('mark_in_progress', 'Task status → in progress');
+      await tracer.pass('mark_in_progress', `${farmerName} → in progress`);
 
       const initialContext = await buildVoiceInitialContext(task, agent);
       await VoiceCallPipeline.findByIdAndUpdate(tracer.id, { attemptId: initialContext.attempt_id });
@@ -336,7 +369,9 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
       await tracer.setDialNumber(dialNumber);
       await tracer.pass(
         'safe_dial',
-        overridden ? `Safe dial override → team number` : `Dialing farmer number`
+        overridden
+          ? `Calling ${farmerName} via safe dial override`
+          : `Dialing ${farmerName}`
       );
 
       const triggerOptions = resolveVoiceTriggerOptions(agent, platform);
@@ -358,19 +393,19 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         });
 
         await tracer.setWorkflowRunId(result.workflow_run_id);
-        await tracer.pass('dograh_api', `Workflow run ${result.workflow_run_id}`);
-        await tracer.running('awaiting_webhook', 'Waiting for Dograh to POST call result');
+        await tracer.pass('dograh_api', `Workflow run ${result.workflow_run_id} for ${farmerName}`);
+        await tracer.running('awaiting_webhook', `Waiting for Dograh webhook (${farmerName})`);
 
         await recordAgentTriggerResult(agentId, true);
 
         logger.info(
-          `Voice call initiated: task=${task._id} run=${result.workflow_run_id} agent=${agent.name}` +
+          `Voice call initiated: task=${task._id} farmer=${farmerName} run=${result.workflow_run_id} agent=${agent.name}` +
             (overridden ? ` (dial override → ${dialNumber})` : '')
         );
       } catch (callError) {
         const msg = callError instanceof Error ? callError.message : 'Trigger failed';
         logger.error(`Voice trigger failed for task ${task._id}:`, callError);
-        await tracer.fail('dograh_api', msg);
+        await tracer.fail('dograh_api', `${farmerName}: ${msg}`);
         await recordAgentTriggerResult(agentId, false, msg);
         await CallTask.findByIdAndUpdate(task._id, {
           status: 'sampled_in_queue',

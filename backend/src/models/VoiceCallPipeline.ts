@@ -22,6 +22,8 @@ export interface IVoiceCallPipeline extends Document {
   failedAtStep?: string;
   steps: IPipelineStep[];
   dialNumberMasked?: string;
+  /** Farmer (or test) name for the dial target / next queue item */
+  farmerName?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +62,7 @@ const VoiceCallPipelineSchema = new Schema<IVoiceCallPipeline>(
     failedAtStep: { type: String },
     steps: { type: [PipelineStepSchema], default: [] },
     dialNumberMasked: { type: String },
+    farmerName: { type: String, trim: true },
   },
   { timestamps: true }
 );

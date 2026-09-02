@@ -15,6 +15,7 @@ export const PIPELINE_STEP_LABELS: Record<string, string> = {
   orchestrator_enabled: 'Orchestrator enabled',
   agent_runtime: 'Agent ready to dial',
   min_gap: 'Minimum gap between calls',
+  queue_peek: 'Next in queue',
   queue_pickup: 'Task picked from queue',
   trigger_uuid: 'API Trigger UUID configured',
   farmer_mobile: 'Farmer mobile on task',
@@ -46,6 +47,7 @@ export class VoicePipelineTracer {
       attemptId?: string;
       taskId?: string;
       dialNumber?: string;
+      farmerName?: string;
     }
   ): Promise<VoicePipelineTracer> {
     const doc = await VoiceCallPipeline.create({
@@ -56,6 +58,7 @@ export class VoicePipelineTracer {
         ? new mongoose.Types.ObjectId(meta.taskId)
         : undefined,
       dialNumberMasked: meta?.dialNumber ? maskPhone(meta.dialNumber) : undefined,
+      farmerName: meta?.farmerName?.trim() || undefined,
       overallStatus: 'running',
       steps: [],
     });
@@ -126,6 +129,15 @@ export class VoicePipelineTracer {
   async setDialNumber(dialNumber: string): Promise<void> {
     await VoiceCallPipeline.findByIdAndUpdate(this.docId, {
       dialNumberMasked: maskPhone(dialNumber),
+      updatedAt: new Date(),
+    });
+  }
+
+  async setFarmerName(farmerName: string): Promise<void> {
+    const name = farmerName?.trim();
+    if (!name) return;
+    await VoiceCallPipeline.findByIdAndUpdate(this.docId, {
+      farmerName: name,
       updatedAt: new Date(),
     });
   }

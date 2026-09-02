@@ -8,6 +8,7 @@ import {
   Radio,
   PhoneCall,
   ListOrdered,
+  User,
 } from 'lucide-react';
 import { formatDateTimeIST } from '../../utils/dateRangeUtils';
 
@@ -28,6 +29,7 @@ export interface PipelineTrace {
   failedAtStep?: string;
   steps: PipelineStep[];
   dialNumberMasked?: string;
+  farmerName?: string;
   workflowRunId?: number;
   attemptId?: string;
   taskId?: string;
@@ -142,16 +144,37 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
                     {trace.overallStatus}
                   </span>
                   <span className="text-slate-500">{formatDateTimeIST(trace.createdAt)}</span>
-                  {trace.dialNumberMasked && (
-                    <span className="flex items-center gap-1 text-slate-600">
-                      <PhoneCall size={11} />
-                      {trace.dialNumberMasked}
-                    </span>
-                  )}
                   {trace.workflowRunId != null && (
                     <span className="text-slate-500">run #{trace.workflowRunId}</span>
                   )}
                 </div>
+
+                {trace.farmerName && (
+                  <div className="px-3 py-2 bg-sky-50 border-b border-sky-100 flex items-center gap-2 text-sm">
+                    <User size={14} className="text-sky-700 shrink-0" />
+                    <span className="font-bold text-sky-950">{trace.farmerName}</span>
+                    <span className="text-xs text-sky-700">
+                      {trace.traceKind === 'test_call'
+                        ? '· manual test (not from queue)'
+                        : trace.traceKind === 'queue_call'
+                          ? '· dialing from queue'
+                          : '· next in queue'}
+                    </span>
+                    {trace.dialNumberMasked && (
+                      <span className="ml-auto flex items-center gap-1 text-xs text-slate-600">
+                        <PhoneCall size={11} />
+                        {trace.dialNumberMasked}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {!trace.farmerName && trace.dialNumberMasked && (
+                  <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-1 text-xs text-slate-600">
+                    <PhoneCall size={11} />
+                    {trace.dialNumberMasked}
+                  </div>
+                )}
 
                 <ol className="px-3 py-2 space-y-2">
                   {trace.steps.map((step, idx) => (
@@ -182,7 +205,10 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
 
                 {trace.failedAtStep && trace.overallStatus !== 'success' && (
                   <div className="px-3 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-900">
-                    Stopped at: <strong>{trace.steps.find((s) => s.key === trace.failedAtStep)?.label || trace.failedAtStep}</strong>
+                    Stopped at:{' '}
+                    <strong>
+                      {trace.steps.find((s) => s.key === trace.failedAtStep)?.label || trace.failedAtStep}
+                    </strong>
                   </div>
                 )}
               </div>

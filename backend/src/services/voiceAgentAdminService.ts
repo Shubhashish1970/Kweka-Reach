@@ -582,9 +582,11 @@ export async function testVoiceAgentTrigger(
   const tracer = await VoicePipelineTracer.start(agentId, 'test_call', {
     attemptId,
     dialNumber,
+    farmerName: 'Test Farmer (manual)',
   });
   await tracer.pass('orchestrator_enabled', 'Manual test trigger (bypasses queue)');
   await tracer.pass('agent_runtime', 'Test call initiated by admin');
+  await tracer.pass('queue_peek', 'Not from queue — manual test dial');
   await tracer.pass('trigger_uuid', triggerUuid.slice(0, 8) + '…');
   await tracer.pass('safe_dial', `Test dial → ${dialNumber.replace(/\d(?=\d{4})/g, '*')}`);
 

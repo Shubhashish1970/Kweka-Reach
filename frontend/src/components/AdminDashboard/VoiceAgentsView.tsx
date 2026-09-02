@@ -8,6 +8,7 @@ import { voiceAdminAPI } from '../../services/api';
 import Button from '../shared/Button';
 import InfoBanner from '../shared/InfoBanner';
 import { formatDateTimeIST } from '../../utils/dateRangeUtils';
+import VoiceCallPipelinePanel from './VoiceCallPipelinePanel';
 
 type RuntimeState =
   | 'idle'
@@ -140,16 +141,20 @@ const VoiceAgentsView: React.FC = () => {
   }, [showError]);
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    if (!selectedAgentId) {
+      setAgentDetail(null);
+      return;
+    }
+    loadAgentDetail(selectedAgentId);
+    const interval = setInterval(() => {
+      loadAgentDetail(selectedAgentId);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [selectedAgentId, loadAgentDetail]);
 
   useEffect(() => {
-    if (selectedAgentId) {
-      loadAgentDetail(selectedAgentId);
-    } else {
-      setAgentDetail(null);
-    }
-  }, [selectedAgentId, loadAgentDetail]);
+    loadAll();
+  }, [loadAll]);
 
   const handleSavePlatform = async () => {
     if (!settings) return;
@@ -652,6 +657,12 @@ const VoiceAgentsView: React.FC = () => {
                 <PhoneCall size={16} />
                 Test trigger call
               </Button>
+
+              {/* TEMP: pipeline debug panel — remove from Voice Agents once a dedicated diagnostics view exists */}
+              <VoiceCallPipelinePanel
+                traces={agentDetail.pipelineTraces || []}
+                orchestrator={agentDetail.orchestratorDiagnostics}
+              />
             </div>
           )}
         </div>

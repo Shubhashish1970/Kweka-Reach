@@ -10,6 +10,8 @@ import { agentHasActiveVoiceCall } from './taskSubmitService.js';
 import { toIndianE164, triggerVoiceOutboundCall, VoiceTriggerOptions } from './voiceApiClient.js';
 import { isAgentDialOverrideActive } from '../utils/voiceDialNumber.js';
 import logger from '../config/logger.js';
+import { VoicePipelineTracer, getRecentPipelineTraces } from './voicePipelineService.js';
+import { getVoiceOrchestratorDiagnostics } from '../config/voiceOrchestrator.js';
 
 export const DEFAULT_VOICE_AGENT_CONFIG = (): IVoiceAgentConfig => ({
   voiceTriggerUuid: null,
@@ -363,6 +365,8 @@ export async function getVoiceAgentDetail(agentId: string) {
     .limit(20)
     .lean();
 
+  const pipelineTraces = await getRecentPipelineTraces(agentId, 12);
+
   return {
     agent: agent.toObject(),
     voiceAgentConfig: agent.voiceAgentConfig || DEFAULT_VOICE_AGENT_CONFIG(),
@@ -372,6 +376,8 @@ export async function getVoiceAgentDetail(agentId: string) {
     effectiveCallingWindow: resolveEffectiveCallingWindow(agent, platform),
     effectiveLimits: resolveEffectiveLimits(agent, platform),
     auditLog,
+    pipelineTraces,
+    orchestratorDiagnostics: getVoiceOrchestratorDiagnostics(),
   };
 }
 
@@ -571,12 +577,22 @@ export async function testVoiceAgentTrigger(
   const attemptId = crypto.randomUUID();
   const platform = await getOrCreateVoicePlatformSettings();
   const triggerOptions = resolveVoiceTriggerOptions(agent, platform);
+  const dialNumber = toIndianE164(phoneNumber);
+
+  const tracer = await VoicePipelineTracer.start(agentId, 'test_call', {
+    attemptId,
+    dialNumber,
+  });
+  await tracer.pass('orchestrator_enabled', 'Manual test trigger (bypasses queue)');
+  await tracer.pass('agent_runtime', 'Test call initiated by admin');
+  await tracer.pass('trigger_uuid', triggerUuid.slice(0, 8) + '…');
+  await tracer.pass('safe_dial', `Test dial → ${dialNumber.replace(/\d(?=\d{4})/g, '*')}`);
 
   try {
     const result = await triggerVoiceOutboundCall(
       triggerUuid,
       {
-        phone_number: toIndianE164(phoneNumber),
+        phone_number: dialNumber,
         initial_context: {
           task_id: 'voice-test',
           attempt_id: attemptId,
@@ -593,13 +609,17 @@ export async function testVoiceAgentTrigger(
       triggerOptions
     );
 
+    await tracer.setWorkflowRunId(result.workflow_run_id);
+    await tracer.pass('dograh_api', `Workflow run ${result.workflow_run_id}`);
+    await tracer.running('awaiting_webhook', 'Test call — webhook optional for manual test');
+
     await recordAgentTriggerResult(agentId, true);
 
     await VoiceConfigAuditLog.create({
       scope: 'agent',
       agentId: agent._id,
       action: 'test_trigger',
-      summary: `Test trigger to ${toIndianE164(phoneNumber)} (run ${result.workflow_run_id})`,
+      summary: `Test trigger to ${dialNumber} (run ${result.workflow_run_id})`,
       userId:
         actor?.userId && mongoose.Types.ObjectId.isValid(actor.userId)
           ? new mongoose.Types.ObjectId(actor.userId)
@@ -611,10 +631,12 @@ export async function testVoiceAgentTrigger(
       workflowRunId: result.workflow_run_id,
       workflowRunName: result.workflow_run_name,
       attemptId,
-      phoneNumber: toIndianE164(phoneNumber),
+      phoneNumber: dialNumber,
+      pipelineTraceId: tracer.id,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Test trigger failed';
+    await tracer.fail('dograh_api', msg);
     await recordAgentTriggerResult(agentId, false, msg);
     throw error;
   }

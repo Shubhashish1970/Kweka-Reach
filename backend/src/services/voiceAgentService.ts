@@ -15,6 +15,8 @@ import {
 } from './taskSubmitService.js';
 import { triggerVoiceOutboundCall } from './voiceApiClient.js';
 import { resolveVoiceDialNumber } from '../utils/voiceDialNumber.js';
+import { VoicePipelineTracer, advancePipelineOnWebhook } from './voicePipelineService.js';
+import { VoiceCallPipeline } from '../models/VoiceCallPipeline.js';
 import {
   getOrCreateVoicePlatformSettings,
   resolveAgentVoiceTriggerUuid,
@@ -249,8 +251,11 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
   }).select('_id name languageCapabilities voiceAgentConfig');
 
   for (const agent of virtualAgents) {
+    const agentId = agent._id.toString();
+    const tracer = await VoicePipelineTracer.start(agentId, 'orchestrator_tick');
+    await tracer.pass('orchestrator_enabled', 'Platform orchestrator is on');
+
     try {
-      const agentId = agent._id.toString();
       const runtimeState = await deriveAgentRuntimeState(agent, platform);
 
       if (runtimeState !== 'idle') {
@@ -259,17 +264,27 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         } else if (runtimeState !== 'calling') {
           logger.debug(`Voice orchestrator: agent ${agent.name} skipped (state=${runtimeState})`);
         }
+        await tracer.block(
+          'agent_runtime',
+          runtimeState === 'calling'
+            ? 'Agent already on a call'
+            : `Agent not ready (state: ${runtimeState})`
+        );
         continue;
       }
+      await tracer.pass('agent_runtime', 'Agent is ready');
 
       const limits = resolveEffectiveLimits(agent, platform);
 
       if (limits.minGapBetweenCallsSec > 0 && agent.voiceAgentConfig?.lastTriggerAt) {
         const elapsedSec = (Date.now() - new Date(agent.voiceAgentConfig.lastTriggerAt).getTime()) / 1000;
         if (elapsedSec < limits.minGapBetweenCallsSec) {
+          const waitSec = Math.ceil(limits.minGapBetweenCallsSec - elapsedSec);
+          await tracer.block('min_gap', `Wait ${waitSec}s before next call`);
           continue;
         }
       }
+      await tracer.pass('min_gap', 'Gap satisfied');
 
       const task = await getNextVoiceTaskForAgent(agentId);
       if (!task) {
@@ -279,30 +294,50 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         });
         if (queued > 0) {
           logger.debug(`Voice orchestrator: agent ${agent.name} has ${queued} queued task(s) but none available to dequeue`);
+          await tracer.block('queue_pickup', `${queued} task(s) queued but none could be dequeued`);
+        } else {
+          await tracer.block('queue_pickup', 'Queue is empty');
         }
         continue;
       }
+      await VoiceCallPipeline.findByIdAndUpdate(tracer.id, {
+        traceKind: 'queue_call',
+        taskId: task._id,
+      });
+      await tracer.pass('queue_pickup', `Task ${task._id}`);
 
       const farmer = task.farmerId as any;
       const triggerUuid = resolveAgentVoiceTriggerUuid(agent);
       if (!triggerUuid) {
         logger.warn(`No voice trigger UUID for agent ${agent.name}`);
+        await tracer.fail('trigger_uuid', 'No API Trigger UUID on agent');
         continue;
       }
+      await tracer.pass('trigger_uuid', triggerUuid.slice(0, 8) + '…');
 
       if (!farmer?.mobileNumber) {
         logger.warn(`Task ${task._id} missing farmer mobile number`);
+        await tracer.fail('farmer_mobile', 'Farmer record has no mobile number');
         continue;
       }
+      await tracer.pass('farmer_mobile', 'Farmer mobile present');
 
       await markTaskInProgressForAgent(task._id.toString(), agentId, 'Voice orchestrator started call');
+      await tracer.pass('mark_in_progress', 'Task status → in progress');
 
       const initialContext = await buildVoiceInitialContext(task, agent);
+      await VoiceCallPipeline.findByIdAndUpdate(tracer.id, { attemptId: initialContext.attempt_id });
+
       const { dialNumber, overridden } = resolveVoiceDialNumber(farmer.mobileNumber, {
         taskId: task._id.toString(),
         source: 'orchestrator',
         agentDialOverride: agent.voiceAgentConfig,
       });
+      await tracer.setDialNumber(dialNumber);
+      await tracer.pass(
+        'safe_dial',
+        overridden ? `Safe dial override → team number` : `Dialing farmer number`
+      );
 
       const triggerOptions = resolveVoiceTriggerOptions(agent, platform);
 
@@ -322,6 +357,10 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
           voiceAttemptId: initialContext.attempt_id,
         });
 
+        await tracer.setWorkflowRunId(result.workflow_run_id);
+        await tracer.pass('dograh_api', `Workflow run ${result.workflow_run_id}`);
+        await tracer.running('awaiting_webhook', 'Waiting for Dograh to POST call result');
+
         await recordAgentTriggerResult(agentId, true);
 
         logger.info(
@@ -331,6 +370,7 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
       } catch (callError) {
         const msg = callError instanceof Error ? callError.message : 'Trigger failed';
         logger.error(`Voice trigger failed for task ${task._id}:`, callError);
+        await tracer.fail('dograh_api', msg);
         await recordAgentTriggerResult(agentId, false, msg);
         await CallTask.findByIdAndUpdate(task._id, {
           status: 'sampled_in_queue',
@@ -340,7 +380,9 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         });
       }
     } catch (agentError) {
+      const msg = agentError instanceof Error ? agentError.message : 'Orchestrator error';
       logger.error(`Voice orchestrator error for agent ${agent._id}:`, agentError);
+      await tracer.fail('agent_runtime', msg);
     }
   }
 }
@@ -437,6 +479,12 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
   });
 
   await recordAgentWebhook(agentId);
+
+  await advancePipelineOnWebhook(
+    taskId,
+    String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
+    workflowRunId
+  );
 
   if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
     await VoiceWebhookReceipt.create({

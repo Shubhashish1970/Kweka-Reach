@@ -344,9 +344,25 @@ export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]>
   }
 };
 
+/** First-pass queue: not yet deferred for hang / no-response. */
+const VOICE_PRIMARY_QUEUE_FILTER = {
+  status: 'sampled_in_queue',
+  $or: [
+    { voiceHangRetryCount: { $exists: false } },
+    { voiceHangRetryCount: null },
+    { voiceHangRetryCount: { $lte: 0 } },
+  ],
+};
+
+/** Retry-once tasks (exactly one try used), picked only after the rest of the queue. */
+const VOICE_DEFERRED_QUEUE_FILTER = {
+  status: 'sampled_in_queue',
+  voiceHangRetryCount: 1,
+};
+
 /**
  * Next task for the voice orchestrator — matches human dialer open queue (no scheduledDate gate).
- * Human agents see all sampled_in_queue tasks in the workspace; voice should dequeue the same pool.
+ * Hang/no-response retries are picked only after remaining first-pass tasks.
  */
 export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | null> => {
   try {
@@ -360,15 +376,19 @@ export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | n
       select: 'type date officerName tmName location territory territoryName state crops products',
     };
 
-    let task = await CallTask.findOne({
-      assignedAgentId: oid,
-      status: 'sampled_in_queue',
-    })
-      .populate(populateFarmer)
-      .populate(populateActivity)
-      .sort({ scheduledDate: 1 })
-      .limit(1)
-      .lean();
+    const findQueued = (filter: Record<string, unknown>) =>
+      CallTask.findOne({ assignedAgentId: oid, ...filter })
+        .populate(populateFarmer)
+        .populate(populateActivity)
+        .sort({ scheduledDate: 1 })
+        .limit(1)
+        .lean();
+
+    let task = await findQueued(VOICE_PRIMARY_QUEUE_FILTER);
+
+    if (!task) {
+      task = await findQueued(VOICE_DEFERRED_QUEUE_FILTER);
+    }
 
     if (!task) {
       task = await CallTask.findOne({

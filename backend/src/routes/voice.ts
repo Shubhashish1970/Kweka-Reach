@@ -36,7 +36,11 @@ router.post(
         success: true,
         duplicate: result.duplicate,
         staleAttempt: result.staleAttempt || false,
-        message: result.duplicate ? 'Webhook already processed' : 'Call interaction recorded',
+        message: result.duplicate
+          ? 'Webhook already processed'
+          : result.deferredRetry
+            ? 'No answer — queued for one retry after remaining tasks'
+            : 'Call interaction recorded',
         data: { taskId: result.taskId },
       });
     } catch (error) {

@@ -1,11 +1,10 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import { CallTask } from '../models/CallTask.js';
+import { CallTask, ICallLog, ICallTask } from '../models/CallTask.js';
 import { Farmer } from '../models/Farmer.js';
 import { Activity } from '../models/Activity.js';
 import { User, IUser } from '../models/User.js';
 import { VoiceWebhookReceipt } from '../models/VoiceWebhookReceipt.js';
-import { ICallLog } from '../models/CallTask.js';
 import logger from '../config/logger.js';
 import { getNextVoiceTaskForAgent } from './taskService.js';
 import {
@@ -43,18 +42,110 @@ async function getStuckCallTimeoutMs(): Promise<number> {
   return Math.max(1, minutes) * 60 * 1000;
 }
 
-/** Peek next queued farmer for pipeline debug (does not claim the task). */
-async function peekNextQueuedFarmer(agentId: string): Promise<{ taskId: string; farmerName: string } | null> {
-  if (!mongoose.Types.ObjectId.isValid(agentId)) return null;
-  const task = await CallTask.findOne({
+const VOICE_MAX_TRIES = 2;
+const MAX_BLANK_MOBILE_SKIPS_PER_TICK = 20;
+
+function blankCallLog(callStatus: ICallLog['callStatus'], nonPurchaseReason: string): ICallLog {
+  return {
+    timestamp: new Date(),
+    callStatus,
+    didAttend: null,
+    didRecall: false,
+    cropsDiscussed: [],
+    productsDiscussed: [],
+    hasPurchased: null,
+    willingToPurchase: null,
+    likelyPurchaseDate: '',
+    nonPurchaseReason,
+    purchasedProducts: [],
+    farmerComments: '',
+    sentiment: 'N/A',
+  };
+}
+
+export function isFarmerMobileBlank(farmer: { mobileNumber?: string | null } | null | undefined): boolean {
+  if (!farmer) return true;
+  return !String(farmer.mobileNumber || '').trim();
+}
+
+export async function skipVoiceTaskMissingMobile(
+  taskId: string,
+  farmerName?: string
+): Promise<void> {
+  const task = await CallTask.findById(taskId);
+  if (!task) return;
+  if (['invalid_number', 'completed', 'cancelled'].includes(task.status)) return;
+
+  const name = farmerName?.trim() || 'farmer';
+  task.status = 'invalid_number';
+  task.outcome = getOutcomeFromStatus('invalid_number');
+  task.voiceWorkflowRunId = null;
+  task.voiceAttemptId = null;
+  task.callStartedAt = null;
+  task.callLog = blankCallLog(
+    'Invalid',
+    'Skipped by voice orchestrator — farmer mobile number is blank'
+  );
+  task.interactionHistory.push({
+    timestamp: new Date(),
+    status: 'invalid_number',
+    notes: `Skipped ${name} — blank mobile; moved to next queue item`,
+  });
+  await task.save();
+  logger.warn(`Skipped voice task ${task._id} — blank farmer mobile`);
+}
+
+export async function deferOrFinalizeVoiceNoResponse(
+  task: ICallTask,
+  reason: string
+): Promise<'deferred' | 'finalized'> {
+  const used = task.voiceHangRetryCount || 0;
+  if (used >= VOICE_MAX_TRIES) {
+    task.status = 'not_reachable';
+    task.outcome = getOutcomeFromStatus('not_reachable');
+    task.voiceWorkflowRunId = null;
+    task.voiceAttemptId = null;
+    task.callStartedAt = null;
+    task.callLog = blankCallLog('No Answer', reason);
+    task.interactionHistory.push({
+      timestamp: new Date(),
+      status: 'not_reachable',
+      notes: `${reason} — max ${VOICE_MAX_TRIES} tries reached; marking not reachable`,
+    });
+    await task.save();
+    return 'finalized';
+  }
+
+  if (used < 1) {
+    task.voiceHangRetryCount = 1;
+  }
+  task.status = 'sampled_in_queue';
+  task.outcome = getOutcomeFromStatus('sampled_in_queue');
+  task.callStartedAt = null;
+  task.interactionHistory.push({
+    timestamp: new Date(),
+    status: 'sampled_in_queue',
+    notes: `${reason} — disconnected; will retry once after remaining queue items (try ${task.voiceHangRetryCount}/${VOICE_MAX_TRIES})`,
+  });
+  await task.save();
+  return 'deferred';
+}
+
+async function finalizeExhaustedVoiceTries(agentId: string): Promise<void> {
+  if (!mongoose.Types.ObjectId.isValid(agentId)) return;
+  const exhausted = await CallTask.find({
     assignedAgentId: new mongoose.Types.ObjectId(agentId),
     status: 'sampled_in_queue',
-  })
-    .populate({ path: 'farmerId', select: 'name' })
-    .sort({ scheduledDate: 1 })
-    .select('_id farmerId')
-    .lean();
+    voiceHangRetryCount: { $gte: VOICE_MAX_TRIES },
+  });
+  for (const task of exhausted) {
+    await deferOrFinalizeVoiceNoResponse(task, `Voice max ${VOICE_MAX_TRIES} tries already used`);
+  }
+}
 
+/** Peek next queued farmer for pipeline debug (does not claim the task). */
+async function peekNextQueuedFarmer(agentId: string): Promise<{ taskId: string; farmerName: string } | null> {
+  const task = await getNextVoiceTaskForAgent(agentId);
   if (!task) return null;
   const farmer = task.farmerId as { name?: string } | null;
   const farmerName = farmer?.name?.trim() || 'Unknown farmer';
@@ -264,40 +355,18 @@ export async function releaseStuckVoiceTasks(agentId?: string): Promise<number> 
     const startedAt = task.callStartedAt || task.updatedAt;
     if (!startedAt || startedAt >= cutoff) continue;
 
-    task.status = 'not_reachable';
-    task.outcome = getOutcomeFromStatus('not_reachable');
-    task.voiceWorkflowRunId = null;
-    task.voiceAttemptId = null;
-    task.callStartedAt = null;
-    task.callLog = {
-      timestamp: new Date(),
-      callStatus: 'No Answer',
-      didAttend: null,
-      didRecall: false,
-      cropsDiscussed: [],
-      productsDiscussed: [],
-      hasPurchased: null,
-      willingToPurchase: null,
-      likelyPurchaseDate: '',
-      nonPurchaseReason: `Voice call timed out after ${timeoutLabel} — no webhook received`,
-      purchasedProducts: [],
-      farmerComments: '',
-      sentiment: 'N/A',
-    };
-    task.interactionHistory.push({
-      timestamp: new Date(),
-      status: 'not_reachable',
-      notes: `Voice call auto-released after ${timeoutLabel} — moving to next queue item`,
-    });
-    await task.save();
+    const result = await deferOrFinalizeVoiceNoResponse(
+      task,
+      `Voice call timed out after ${timeoutLabel} — no webhook received`
+    );
     count += 1;
     logger.warn(
-      `Released stuck voice task ${task._id} for agent ${task.assignedAgentId} after ${timeoutLabel}`
+      `Released stuck voice task ${task._id} for agent ${task.assignedAgentId} after ${timeoutLabel} (${result})`
     );
   }
 
   if (count > 0) {
-    logger.warn(`Released ${count} stuck voice task(s) — marked not_reachable`);
+    logger.warn(`Released ${count} stuck voice task(s) — deferred or finalized`);
   }
   return count;
 }
@@ -335,6 +404,7 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
 
     try {
       await releaseStuckVoiceTasks(agentId);
+      await finalizeExhaustedVoiceTries(agentId);
 
       const runtimeState = await deriveAgentRuntimeState(agent, platform);
 
@@ -366,108 +436,129 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
       }
       await tracer.pass('min_gap', 'Gap satisfied');
 
-      const task = await getNextVoiceTaskForAgent(agentId);
-      if (!task) {
-        const queued = await CallTask.countDocuments({
-          assignedAgentId: agent._id,
-          status: 'sampled_in_queue',
-        });
-        const debug =
-          queued > 0
-            ? voiceDebugInfo('VA-009', `${queued} task(s) queued but none dequeued`)
-            : voiceDebugInfo('VA-009');
-        if (queued > 0) {
-          logger.debug(`Voice orchestrator: agent ${agent.name} has ${queued} queued task(s) but none available to dequeue`);
+      let dialedThisTick = false;
+      for (let skip = 0; skip < MAX_BLANK_MOBILE_SKIPS_PER_TICK && !dialedThisTick; skip++) {
+        const task = await getNextVoiceTaskForAgent(agentId);
+        if (!task) {
+          const queued = await CallTask.countDocuments({
+            assignedAgentId: agent._id,
+            status: 'sampled_in_queue',
+          });
+          const debug =
+            queued > 0
+              ? voiceDebugInfo('VA-009', `${queued} task(s) queued but none dequeued`)
+              : voiceDebugInfo('VA-009');
+          if (queued > 0) {
+            logger.debug(`Voice orchestrator: agent ${agent.name} has ${queued} queued task(s) but none available to dequeue`);
+          }
+          await tracer.block('queue_pickup', formatVoiceDebugLine(debug), debug.code);
+          break;
         }
-        await tracer.block('queue_pickup', formatVoiceDebugLine(debug), debug.code);
-        continue;
-      }
 
-      const farmer = task.farmerId as any;
-      const farmerName = farmer?.name?.trim() || 'Unknown farmer';
-      await VoiceCallPipeline.findByIdAndUpdate(tracer.id, {
-        traceKind: 'queue_call',
-        taskId: task._id,
-        farmerName,
-      });
-      await tracer.pass('queue_pickup', `Picked ${farmerName} (task ${String(task._id).slice(-6)})`);
+        const farmer = task.farmerId as any;
+        const farmerName = farmer?.name?.trim() || 'Unknown farmer';
+        await VoiceCallPipeline.findByIdAndUpdate(tracer.id, {
+          traceKind: 'queue_call',
+          taskId: task._id,
+          farmerName,
+        });
+        await tracer.pass('queue_pickup', `Picked ${farmerName} (task ${String(task._id).slice(-6)})`);
 
-      const triggerUuid = resolveAgentVoiceTriggerUuid(agent);
-      if (!triggerUuid) {
-        logger.warn(`No voice trigger UUID for agent ${agent.name}`);
-        const debug = voiceDebugInfo('VA-004');
-        await tracer.fail('trigger_uuid', formatVoiceDebugLine(debug), debug.code);
-        continue;
-      }
-      await tracer.pass('trigger_uuid', triggerUuid.slice(0, 8) + '…');
+        const triggerUuid = resolveAgentVoiceTriggerUuid(agent);
+        if (!triggerUuid) {
+          logger.warn(`No voice trigger UUID for agent ${agent.name}`);
+          const debug = voiceDebugInfo('VA-004');
+          await tracer.fail('trigger_uuid', formatVoiceDebugLine(debug), debug.code);
+          break;
+        }
+        await tracer.pass('trigger_uuid', triggerUuid.slice(0, 8) + '…');
 
-      if (!farmer?.mobileNumber) {
-        logger.warn(`Task ${task._id} missing farmer mobile number`);
-        const debug = voiceDebugInfo('VA-010', farmerName);
-        await tracer.fail('farmer_mobile', formatVoiceDebugLine(debug), debug.code);
-        continue;
-      }
-      await tracer.pass('farmer_mobile', `${farmerName} mobile present`);
+        if (isFarmerMobileBlank(farmer)) {
+          logger.warn(`Task ${task._id} missing farmer mobile number`);
+          const debug = voiceDebugInfo('VA-010', farmerName);
+          await skipVoiceTaskMissingMobile(task._id.toString(), farmerName);
+          await tracer.pass('farmer_mobile', formatVoiceDebugLine(debug));
+          continue;
+        }
+        await tracer.pass('farmer_mobile', `${farmerName} mobile present`);
 
-      await markTaskInProgressForAgent(task._id.toString(), agentId, 'Voice orchestrator started call');
-      await tracer.pass('mark_in_progress', `${farmerName} → in progress`);
+        if ((task.voiceHangRetryCount || 0) >= VOICE_MAX_TRIES) {
+          const doc = await CallTask.findById(task._id);
+          if (doc) {
+            await deferOrFinalizeVoiceNoResponse(
+              doc,
+              `Voice max ${VOICE_MAX_TRIES} tries already used`
+            );
+          }
+          continue;
+        }
 
-      const initialContext = await buildVoiceInitialContext(task, agent);
-      await VoiceCallPipeline.findByIdAndUpdate(tracer.id, { attemptId: initialContext.attempt_id });
+        await markTaskInProgressForAgent(task._id.toString(), agentId, 'Voice orchestrator started call');
+        await tracer.pass('mark_in_progress', `${farmerName} → in progress`);
 
-      const { dialNumber, overridden } = resolveVoiceDialNumber(farmer.mobileNumber, {
-        taskId: task._id.toString(),
-        source: 'orchestrator',
-        agentDialOverride: agent.voiceAgentConfig,
-      });
-      await tracer.setDialNumber(dialNumber);
-      await tracer.pass(
-        'safe_dial',
-        overridden
-          ? `Calling ${farmerName} via safe dial override`
-          : `Dialing ${farmerName}`
-      );
+        const initialContext = await buildVoiceInitialContext(task, agent);
+        await VoiceCallPipeline.findByIdAndUpdate(tracer.id, { attemptId: initialContext.attempt_id });
 
-      const triggerOptions = resolveVoiceTriggerOptions(agent, platform);
-
-      try {
-        const result = await triggerVoiceOutboundCall(
-          triggerUuid,
-          {
-            phone_number: dialNumber,
-            initial_context: { ...initialContext },
-            telephony_configuration_id: agent.voiceAgentConfig?.telephonyConfigurationId ?? null,
-          },
-          triggerOptions
+        const { dialNumber, overridden } = resolveVoiceDialNumber(farmer.mobileNumber, {
+          taskId: task._id.toString(),
+          source: 'orchestrator',
+          agentDialOverride: agent.voiceAgentConfig,
+        });
+        await tracer.setDialNumber(dialNumber);
+        await tracer.pass(
+          'safe_dial',
+          overridden
+            ? `Calling ${farmerName} via safe dial override`
+            : `Dialing ${farmerName}`
         );
 
-        await CallTask.findByIdAndUpdate(task._id, {
-          voiceWorkflowRunId: result.workflow_run_id,
-          voiceAttemptId: initialContext.attempt_id,
-        });
+        const triggerOptions = resolveVoiceTriggerOptions(agent, platform);
 
-        await tracer.setWorkflowRunId(result.workflow_run_id);
-        await tracer.pass('dograh_api', `Workflow run ${result.workflow_run_id} for ${farmerName}`);
-        await tracer.running('awaiting_webhook', `Waiting for Dograh webhook (${farmerName})`);
+        try {
+          const result = await triggerVoiceOutboundCall(
+            triggerUuid,
+            {
+              phone_number: dialNumber,
+              initial_context: { ...initialContext },
+              telephony_configuration_id: agent.voiceAgentConfig?.telephonyConfigurationId ?? null,
+            },
+            triggerOptions
+          );
 
-        await recordAgentTriggerResult(agentId, true);
+          await CallTask.findByIdAndUpdate(task._id, {
+            voiceWorkflowRunId: result.workflow_run_id,
+            voiceAttemptId: initialContext.attempt_id,
+            voiceHangRetryCount: Math.min(
+              VOICE_MAX_TRIES,
+              (task.voiceHangRetryCount || 0) + 1
+            ),
+          });
 
-        logger.info(
-          `Voice call initiated: task=${task._id} farmer=${farmerName} run=${result.workflow_run_id} agent=${agent.name}` +
-            (overridden ? ` (dial override → ${dialNumber})` : '')
-        );
-      } catch (callError) {
-        const msg = callError instanceof Error ? callError.message : 'Trigger failed';
-        logger.error(`Voice trigger failed for task ${task._id}:`, callError);
-        const debug = voiceDebugInfo('VA-011', `${farmerName}: ${msg}`);
-        await tracer.fail('dograh_api', formatVoiceDebugLine(debug), debug.code);
-        await recordAgentTriggerResult(agentId, false, msg);
-        await CallTask.findByIdAndUpdate(task._id, {
-          status: 'sampled_in_queue',
-          voiceWorkflowRunId: null,
-          voiceAttemptId: null,
-          callStartedAt: null,
-        });
+          await tracer.setWorkflowRunId(result.workflow_run_id);
+          await tracer.pass('dograh_api', `Workflow run ${result.workflow_run_id} for ${farmerName}`);
+          await tracer.running('awaiting_webhook', `Waiting for Dograh webhook (${farmerName})`);
+
+          await recordAgentTriggerResult(agentId, true);
+
+          logger.info(
+            `Voice call initiated: task=${task._id} farmer=${farmerName} run=${result.workflow_run_id} agent=${agent.name}` +
+              (overridden ? ` (dial override → ${dialNumber})` : '')
+          );
+          dialedThisTick = true;
+        } catch (callError) {
+          const msg = callError instanceof Error ? callError.message : 'Trigger failed';
+          logger.error(`Voice trigger failed for task ${task._id}:`, callError);
+          const debug = voiceDebugInfo('VA-011', `${farmerName}: ${msg}`);
+          await tracer.fail('dograh_api', formatVoiceDebugLine(debug), debug.code);
+          await recordAgentTriggerResult(agentId, false, msg);
+          await CallTask.findByIdAndUpdate(task._id, {
+            status: 'sampled_in_queue',
+            voiceWorkflowRunId: null,
+            voiceAttemptId: null,
+            callStartedAt: null,
+          });
+          break;
+        }
       }
     } catch (agentError) {
       const msg = agentError instanceof Error ? agentError.message : 'Orchestrator error';
@@ -491,7 +582,12 @@ export async function getVoiceTaskContext(taskId: string): Promise<VoiceInitialC
   return buildVoiceInitialContext(task, agent as unknown as IUser);
 }
 
-export async function handleVoiceWebhook(body: Record<string, unknown>): Promise<{ duplicate: boolean; taskId: string; staleAttempt?: boolean }> {
+export async function handleVoiceWebhook(body: Record<string, unknown>): Promise<{
+  duplicate: boolean;
+  taskId: string;
+  staleAttempt?: boolean;
+  deferredRetry?: boolean;
+}> {
   const taskId = String(body.task_id || body.taskId || '').trim();
   if (!taskId || !mongoose.Types.ObjectId.isValid(taskId)) {
     const err = new Error('Invalid or missing task_id');
@@ -540,6 +636,17 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
     return { duplicate: true, taskId, staleAttempt: true };
   }
 
+  if (
+    incomingAttemptId &&
+    task.voiceAttemptId === incomingAttemptId &&
+    task.status === 'sampled_in_queue' &&
+    (task.voiceHangRetryCount || 0) >= 1 &&
+    (task.voiceHangRetryCount || 0) < VOICE_MAX_TRIES &&
+    !task.callLog
+  ) {
+    return { duplicate: true, taskId, deferredRetry: true };
+  }
+
   if (task.callLog) {
     if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
       await VoiceWebhookReceipt.findOneAndUpdate(
@@ -563,6 +670,31 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
   }
 
   const submitInput = mapVoiceWebhookToSubmitInput(body);
+
+  if (submitInput.callStatus === 'No Answer') {
+    const result = await deferOrFinalizeVoiceNoResponse(
+      task,
+      'No answer / no response from farmer'
+    );
+    await recordAgentWebhook(agentId);
+    if (result === 'finalized') {
+      await advancePipelineOnWebhook(
+        taskId,
+        String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
+        workflowRunId
+      );
+    }
+    if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
+      await VoiceWebhookReceipt.create({
+        workflowRunId,
+        taskId: task._id,
+        attemptId: String(body.attempt_id || body.attemptId || ''),
+        processedAt: new Date(),
+      });
+    }
+    return { duplicate: false, taskId, deferredRetry: result === 'deferred' };
+  }
+
   await submitCallInteractionForTask(taskId, agentId, submitInput, {
     skipAgentCheck: true,
     historyNotes: 'Voice agent webhook submitted call interaction',

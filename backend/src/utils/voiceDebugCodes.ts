@@ -48,7 +48,7 @@ export const VOICE_DEBUG_CATALOG: Record<VoiceDebugCode, Omit<VoiceDebugInfo, 'c
   },
   'VA-007': {
     message: 'Agent already has a call in progress',
-    fix: 'Stuck calls auto-release after 1 min with no webhook. Wait one poll cycle or lower stuckCallTimeoutMinutes.',
+    fix: 'Hang/no-response disconnects after the stuck timeout, then retries once after remaining queue items (max 2 tries). Wait one poll cycle or lower stuckCallTimeoutMinutes.',
   },
   'VA-008': {
     message: 'Minimum gap between calls not satisfied',
@@ -60,7 +60,7 @@ export const VOICE_DEBUG_CATALOG: Record<VoiceDebugCode, Omit<VoiceDebugInfo, 'c
   },
   'VA-010': {
     message: 'Queued farmer has no mobile number',
-    fix: 'Add mobileNumber on the farmer record for this task.',
+    fix: 'Task is marked invalid and skipped. Add mobileNumber on the farmer record if they should be called.',
   },
   'VA-011': {
     message: 'Dograh outbound API call failed',

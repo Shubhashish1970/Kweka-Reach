@@ -138,6 +138,10 @@ export interface TaskOverrides {
   retryCount?: number;
   scheduledDate?: Date;
   samplingRunType?: 'first_sample' | 'adhoc';
+  voiceHangRetryCount?: number;
+  voiceAttemptId?: string | null;
+  voiceWorkflowRunId?: number | null;
+  callStartedAt?: Date | null;
 }
 
 export const makeTask = (

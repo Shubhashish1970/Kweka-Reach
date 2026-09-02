@@ -70,6 +70,8 @@ export interface ICallTask extends Document {
   voiceWorkflowRunId?: number | null;
   /** Per-dial attempt id sent in initial_context */
   voiceAttemptId?: string | null;
+  /** Dial attempts used for hang/no-response handling; hard cap is 2. */
+  voiceHangRetryCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -254,6 +256,12 @@ const CallTaskSchema = new Schema<ICallTask>(
       type: String,
       default: null,
       trim: true,
+    },
+    voiceHangRetryCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: [2, 'voiceHangRetryCount cannot exceed 2 (maximum 2 tries)'],
     },
   },
   {

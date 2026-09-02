@@ -374,6 +374,7 @@ jobs:
               --memory 512Mi \
               --cpu 1 \
               --min-instances 1 \
+              --no-cpu-throttling \
               --env-vars-file "$ENV_FILE" \
               --project ${{ secrets.GCP_PROJECT_ID }} \
               2>&1) || {
@@ -404,6 +405,7 @@ jobs:
               --platform managed \
               --region ${{ env.REGION }} \
               --min-instances 1 \
+              --no-cpu-throttling \
               --env-vars-file "$ENV_FILE" \
               --project ${{ secrets.GCP_PROJECT_ID }} \
               2>&1) || {

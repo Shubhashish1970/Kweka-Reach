@@ -1,36 +1,45 @@
-import cron from 'node-cron';
 import logger from '../config/logger.js';
 import { processVirtualAgentQueueOnce } from '../services/voiceAgentService.js';
 import { getOrCreateVoicePlatformSettings } from '../services/voiceAgentAdminService.js';
 
 let tickInProgress = false;
-let scheduledTask: cron.ScheduledTask | null = null;
+let intervalHandle: ReturnType<typeof setInterval> | null = null;
+let lastTickAt: Date | null = null;
+let lastTickError: string | null = null;
+let scheduledIntervalSec: number | null = null;
 
-function buildCronExpr(intervalSec: number): string {
-  const sec = Math.max(15, intervalSec);
-  if (sec >= 60) {
-    const mins = Math.max(1, Math.floor(sec / 60));
-    return `*/${mins} * * * *`;
+async function runTick(source: 'interval' | 'manual' | 'startup' = 'interval'): Promise<void> {
+  if (tickInProgress) {
+    logger.debug(`Voice orchestrator tick skipped (${source}): previous tick in progress`);
+    return;
   }
-  return `*/${sec} * * * * *`;
-}
-
-async function runTick() {
-  if (tickInProgress) return;
   tickInProgress = true;
   try {
     await processVirtualAgentQueueOnce();
+    lastTickAt = new Date();
+    lastTickError = null;
   } catch (error) {
-    logger.error('Voice orchestrator tick failed:', error);
+    lastTickError = error instanceof Error ? error.message : String(error);
+    logger.error(`Voice orchestrator tick failed (${source}):`, error);
   } finally {
     tickInProgress = false;
   }
 }
 
+export function getVoiceOrchestratorDiagnostics() {
+  return {
+    scheduled: intervalHandle != null,
+    scheduledIntervalSec,
+    lastTickAt: lastTickAt?.toISOString() || null,
+    lastTickError,
+    tickInProgress,
+  };
+}
+
 /**
  * Poll virtual agent queues and trigger Calling agent outbound API.
- * Reads poll interval from VoicePlatformSettings (DB) with env fallback.
- * Scheduling policy: Reach owns all callbacks — do not use Dograh Campaigns for Reach tasks.
+ * Uses setInterval (not node-cron) for sub-minute polling — more reliable on Cloud Run.
+ * Also expose POST /api/voice/orchestrator-tick for Cloud Scheduler (see FFA pattern).
  */
 export const setupVoiceOrchestrator = async (): Promise<void> => {
   const platform = await getOrCreateVoicePlatformSettings();
@@ -38,6 +47,7 @@ export const setupVoiceOrchestrator = async (): Promise<void> => {
 
   if (!platform.orchestratorEnabled && !envEnabled) {
     logger.info('Voice orchestrator disabled (enable in Voice Agents admin or VOICE_ORCHESTRATOR_ENABLED=true)');
+    stopVoiceOrchestrator();
     return;
   }
 
@@ -45,20 +55,34 @@ export const setupVoiceOrchestrator = async (): Promise<void> => {
     15,
     platform.pollIntervalSec || Number(process.env.VOICE_ORCHESTRATOR_INTERVAL_SEC || 30)
   );
-  const cronExpr = buildCronExpr(intervalSec);
 
-  scheduledTask = cron.schedule(cronExpr, runTick, { scheduled: true, timezone: 'Asia/Kolkata' });
+  stopVoiceOrchestrator();
+  intervalHandle = setInterval(() => {
+    void runTick('interval');
+  }, intervalSec * 1000);
+  scheduledIntervalSec = intervalSec;
 
-  logger.info(`Voice orchestrator scheduled (every ${intervalSec}s, DB settings)`);
+  logger.info(`Voice orchestrator scheduled via setInterval (every ${intervalSec}s)`);
+
+  // Run once immediately so admin does not wait for the first interval after deploy / settings save.
+  void runTick('startup');
 };
 
 export const stopVoiceOrchestrator = (): void => {
-  scheduledTask?.stop();
-  scheduledTask = null;
+  if (intervalHandle) {
+    clearInterval(intervalHandle);
+    intervalHandle = null;
+  }
+  scheduledIntervalSec = null;
 };
 
 /** Re-read platform settings and reschedule (e.g. after admin toggles orchestrator in UI). */
 export async function restartVoiceOrchestrator(): Promise<void> {
   stopVoiceOrchestrator();
   await setupVoiceOrchestrator();
+}
+
+/** Manual / HTTP / Cloud Scheduler trigger. */
+export async function runVoiceOrchestratorTick(): Promise<void> {
+  await runTick('manual');
 }

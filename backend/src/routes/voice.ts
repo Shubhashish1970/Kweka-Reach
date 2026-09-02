@@ -16,6 +16,7 @@ import {
 } from '../services/voiceAgentAdminService.js';
 import { isAgentDialOverrideActive } from '../utils/voiceDialNumber.js';
 import { User } from '../models/User.js';
+import { getVoiceOrchestratorDiagnostics, runVoiceOrchestratorTick } from '../config/voiceOrchestrator.js';
 
 const router = express.Router();
 
@@ -96,8 +97,24 @@ router.get('/status', async (_req: Request, res: Response) => {
         : null,
       agentsWithDialOverride,
       dialOverrideActive: agentsWithDialOverride > 0,
+      orchestrator: getVoiceOrchestratorDiagnostics(),
     },
   });
+});
+
+// @route   POST /api/voice/orchestrator-tick
+// @desc    Run one orchestrator poll (Cloud Scheduler / ops). Same key as webhook.
+// @access  VOICE_WEBHOOK_API_KEY via X-API-Key
+router.post('/orchestrator-tick', requireVoiceWebhookKey, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    await runVoiceOrchestratorTick();
+    res.json({
+      success: true,
+      data: getVoiceOrchestratorDiagnostics(),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // @route   GET /api/voice/agent-status

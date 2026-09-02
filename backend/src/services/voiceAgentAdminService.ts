@@ -459,6 +459,15 @@ export async function updateVoiceAgentConfig(
   agent.markModified('voiceAgentConfig');
   await agent.save();
 
+  if (patch.voiceStatus === 'running') {
+    try {
+      const { runVoiceOrchestratorTick } = await import('../config/voiceOrchestrator.js');
+      void runVoiceOrchestratorTick();
+    } catch (error) {
+      logger.warn('Immediate orchestrator tick after agent start failed:', error);
+    }
+  }
+
   await VoiceConfigAuditLog.create({
     scope: 'agent',
     agentId: agent._id,

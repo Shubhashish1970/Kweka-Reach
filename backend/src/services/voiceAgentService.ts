@@ -256,6 +256,8 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
       if (runtimeState !== 'idle') {
         if (runtimeState === 'not_configured') {
           logger.warn(`Voice agent ${agent.name} not configured (missing trigger UUID)`);
+        } else if (runtimeState !== 'calling') {
+          logger.debug(`Voice orchestrator: agent ${agent.name} skipped (state=${runtimeState})`);
         }
         continue;
       }

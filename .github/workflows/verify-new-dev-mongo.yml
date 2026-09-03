@@ -1,0 +1,25 @@
+name: Verify NEW_DEV MongoDB
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping MONGODB_URI_NEW_DEV
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install mongodb driver
+        run: npm install --no-save mongodb
+
+      - name: Ping new dev database
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI_NEW_DEV }}
+        run: node scripts/ping-mongodb-uri.mjs

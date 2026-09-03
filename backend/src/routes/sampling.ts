@@ -18,14 +18,12 @@ import {
   isEmsFfaApiEnabled,
 } from '../services/emsFfaClient.js';
 import { calculateSampleSize } from '../utils/reservoirSampling.js';
+import { formatIstCalendarYmd, parseQueryDateFrom } from '../utils/dateRangeQuery.js';
 
 const router = express.Router();
 
 function toLocalISODate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return formatIstCalendarYmd(d);
 }
 
 /**
@@ -38,21 +36,23 @@ const getSampleActivitiesFromConfig = (config: { autoRunActivateFrom?: Date | st
     return { sampleFrom: null as Date | null, displayDate: '', locked: false };
   }
   const raw = config.autoRunActivateFrom;
-  let sampleFrom: Date;
+  let sampleFrom: Date | undefined;
   if (typeof raw === 'string' && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw.trim())) {
-    sampleFrom = parseFfaEmsDefaultDateFrom(raw);
+    const m = raw.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    sampleFrom = m
+      ? parseQueryDateFrom(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`)
+      : undefined;
   } else if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw.trim())) {
     const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-    sampleFrom = m
-      ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-      : new Date(raw);
+    sampleFrom = m ? parseQueryDateFrom(`${m[1]}-${m[2]}-${m[3]}`) : undefined;
+  } else if (raw instanceof Date) {
+    sampleFrom = parseQueryDateFrom(formatIstCalendarYmd(raw));
   } else {
-    sampleFrom = new Date(raw);
+    sampleFrom = new Date(raw as string);
   }
-  if (Number.isNaN(sampleFrom.getTime())) {
+  if (!sampleFrom || Number.isNaN(sampleFrom.getTime())) {
     return { sampleFrom: null as Date | null, displayDate: '', locked: false };
   }
-  sampleFrom.setHours(0, 0, 0, 0);
   return { sampleFrom, displayDate: toLocalISODate(sampleFrom), locked: false };
 };
 
@@ -651,11 +651,14 @@ router.put(
       } else if (typeof body.autoRunActivateFrom === 'string') {
         const raw = body.autoRunActivateFrom.trim();
         if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) {
-          update.autoRunActivateFrom = parseFfaEmsDefaultDateFrom(raw);
+          const dm = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+          update.autoRunActivateFrom = dm
+            ? parseQueryDateFrom(`${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}`)
+            : parseFfaEmsDefaultDateFrom(raw);
         } else if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
           const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
           update.autoRunActivateFrom = m
-            ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+            ? parseQueryDateFrom(`${m[1]}-${m[2]}-${m[3]}`) ?? new Date(raw)
             : new Date(raw);
         } else {
           update.autoRunActivateFrom = new Date(raw);

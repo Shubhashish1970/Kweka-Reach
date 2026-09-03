@@ -4,22 +4,41 @@ on:
   workflow_dispatch:
 
 jobs:
-  ping:
+  ping-current-dev:
+    name: Ping current MONGODB_URI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install mongodb driver
+        run: npm install --no-save mongodb
+      - name: Ping current live Cloud Run database
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          echo "=== CURRENT MONGODB_URI (live Cloud Run) ==="
+          node scripts/ping-mongodb-uri.mjs
+
+  ping-new-dev:
     name: Ping MONGODB_URI_NEW_DEV
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install mongodb driver
         run: npm install --no-save mongodb
-
-      - name: Ping new dev database
+      - name: Ping new-dev / prod-backup database
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI_NEW_DEV }}
-        run: node scripts/ping-mongodb-uri.mjs
+        run: |
+          echo "=== MONGODB_URI_NEW_DEV (not live yet) ==="
+          node scripts/ping-mongodb-uri.mjs
+

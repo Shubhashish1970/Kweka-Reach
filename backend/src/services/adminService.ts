@@ -116,6 +116,104 @@ export interface AgentQueueDetail {
   }>;
 }
 
+type ActivitySamplingQueryFilters = {
+  activityType?: string;
+  territory?: string;
+  zone?: string;
+  bu?: string;
+  samplingStatus?: 'sampled' | 'not_sampled' | 'partial';
+  dateFrom?: Date;
+  dateTo?: Date;
+};
+
+function buildActivitySamplingMatch(filters: ActivitySamplingQueryFilters = {}): Record<string, unknown> {
+  const { activityType, territory, zone, bu, dateFrom, dateTo } = filters;
+  const activityQuery: Record<string, unknown> = {};
+  if (activityType) activityQuery.type = activityType;
+  if (territory) {
+    activityQuery.$or = [{ territoryName: territory }, { territory: territory }];
+  }
+  if (zone) activityQuery.zoneName = zone;
+  if (bu) activityQuery.buName = bu;
+  if (dateFrom || dateTo) {
+    const date: Record<string, Date> = {};
+    if (dateFrom) date.$gte = dateFrom;
+    if (dateTo) date.$lte = dateTo;
+    activityQuery.date = date;
+  }
+  return activityQuery;
+}
+
+/**
+ * Resolve page (or export) activity ids sorted by date desc.
+ * When samplingStatus is unset, sort+paginate first so Mongo can use the date index
+ * and never sorts lookup-bloated documents (prod 32MB sort limit).
+ * When samplingStatus is set, project to {_id, date} before sort and allow disk use.
+ */
+async function resolveActivitySamplingIds(opts: {
+  activityQuery: Record<string, unknown>;
+  samplingStatus?: 'sampled' | 'not_sampled' | 'partial';
+  skip: number;
+  limit: number;
+}): Promise<{ total: number; ids: mongoose.Types.ObjectId[] }> {
+  const { activityQuery, samplingStatus, skip, limit } = opts;
+
+  if (!samplingStatus) {
+    const [total, docs] = await Promise.all([
+      Activity.countDocuments(activityQuery),
+      Activity.find(activityQuery).sort({ date: -1 }).skip(skip).limit(limit).select('_id').lean(),
+    ]);
+    return { total, ids: docs.map((d) => d._id as mongoose.Types.ObjectId) };
+  }
+
+  const listPipeline: any[] = [
+    { $match: activityQuery },
+    {
+      $lookup: {
+        from: SamplingAudit.collection.name,
+        localField: '_id',
+        foreignField: 'activityId',
+        as: 'audits',
+      },
+    },
+    {
+      $addFields: {
+        sampledCount: { $ifNull: [{ $arrayElemAt: ['$audits.sampledCount', 0] }, 0] },
+        hasAudit: { $gt: [{ $size: { $ifNull: ['$audits', []] } }, 0] },
+      },
+    },
+    {
+      $addFields: {
+        samplingStatus: {
+          $switch: {
+            branches: [
+              { case: { $eq: ['$hasAudit', false] }, then: 'not_sampled' },
+              { case: { $gt: ['$sampledCount', 0] }, then: 'sampled' },
+            ],
+            default: 'partial',
+          },
+        },
+      },
+    },
+    { $match: { samplingStatus } },
+    { $project: { _id: 1, date: 1 } },
+    { $sort: { date: -1 } },
+    {
+      $facet: {
+        total: [{ $count: 'count' }],
+        page: [{ $skip: skip }, { $limit: limit }, { $project: { _id: 1 } }],
+      },
+    },
+  ];
+
+  const [facetResult] = await Activity.aggregate(listPipeline).allowDiskUse(true);
+  const total = (facetResult?.total?.[0] as { count: number } | undefined)?.count ?? 0;
+  const ids: mongoose.Types.ObjectId[] = (facetResult?.page ?? []).map(
+    (d: { _id: mongoose.Types.ObjectId }) => d._id
+  );
+  return { total, ids };
+}
+
 /**
  * Get all activities with sampling status and assigned agents
  * Returns activities with their sampling audit info, task counts, and assigned agents
@@ -154,84 +252,20 @@ export const getActivitiesWithSampling = async (filters?: {
 
     const skip = (page - 1) * limit;
 
-    // Build query for activities (same semantics as getActivitiesSamplingStats)
-    const activityQuery: any = {};
-    if (activityType) {
-      activityQuery.type = activityType;
-    }
-    if (territory) {
-      activityQuery.$or = [
-        { territoryName: territory },
-        { territory: territory },
-      ];
-    }
-    if (zone) {
-      activityQuery.zoneName = zone;
-    }
-    if (bu) {
-      activityQuery.buName = bu;
-    }
-    if (dateFrom || dateTo) {
-      activityQuery.date = {};
-      if (dateFrom) {
-        activityQuery.date.$gte = dateFrom;
-      }
-      if (dateTo) {
-        activityQuery.date.$lte = dateTo;
-      }
-    }
-
-    // Use same filter logic as stats: compute samplingStatus in aggregation, then paginate
-    const samplingAuditColl = SamplingAudit.collection.name;
-    const listPipeline: any[] = [
-      { $match: activityQuery },
-      { $addFields: { farmerCount: { $size: { $ifNull: ['$farmerIds', []] } } } },
-      {
-        $lookup: {
-          from: samplingAuditColl,
-          localField: '_id',
-          foreignField: 'activityId',
-          as: 'audits',
-        },
-      },
-      {
-        $addFields: {
-          sampledCount: { $ifNull: [{ $arrayElemAt: ['$audits.sampledCount', 0] }, 0] },
-          hasAudit: { $gt: [{ $size: { $ifNull: ['$audits', []] } }, 0] },
-        },
-      },
-      {
-        $addFields: {
-          samplingStatus: {
-            $switch: {
-              branches: [
-                { case: { $eq: ['$hasAudit', false] }, then: 'not_sampled' },
-                { case: { $gt: ['$sampledCount', 0] }, then: 'sampled' },
-              ],
-              default: 'partial',
-            },
-          },
-        },
-      },
-    ];
-    if (samplingStatus) {
-      listPipeline.push({ $match: { samplingStatus } });
-    }
-    listPipeline.push(
-      { $sort: { date: -1 } },
-      {
-        $facet: {
-          total: [{ $count: 'count' }],
-          page: [{ $skip: skip }, { $limit: limit }, { $project: { _id: 1 } }],
-        },
-      }
-    );
-
-    const [facetResult] = await Activity.aggregate(listPipeline);
-    const totalActivities = (facetResult?.total?.[0] as { count: number } | undefined)?.count ?? 0;
-    const pageIds: mongoose.Types.ObjectId[] = (facetResult?.page ?? []).map(
-      (d: { _id: mongoose.Types.ObjectId }) => d._id
-    );
+    const activityQuery = buildActivitySamplingMatch({
+      activityType,
+      territory,
+      zone,
+      bu,
+      dateFrom,
+      dateTo,
+    });
+    const { total: totalActivities, ids: pageIds } = await resolveActivitySamplingIds({
+      activityQuery,
+      samplingStatus,
+      skip,
+      limit,
+    });
 
     const activities = await Activity.find({ _id: { $in: pageIds } })
       .sort({ date: -1 })
@@ -611,59 +645,20 @@ export const getActivitiesSamplingExportRows = async (filters?: {
 
   const safeLimit = Math.min(Math.max(1, limit), 5000);
 
-  // Same filter logic as list and stats: aggregation with samplingStatus applied in DB
-  const activityQuery: any = {};
-  if (activityType) activityQuery.type = activityType;
-  if (territory) {
-    activityQuery.$or = [{ territoryName: territory }, { territory: territory }];
-  }
-  if (zone) activityQuery.zoneName = zone;
-  if (bu) activityQuery.buName = bu;
-  if (dateFrom || dateTo) {
-    activityQuery.date = {};
-    if (dateFrom) activityQuery.date.$gte = dateFrom;
-    if (dateTo) activityQuery.date.$lte = dateTo;
-  }
-
-  const samplingAuditColl = SamplingAudit.collection.name;
-  const exportPipeline: any[] = [
-    { $match: activityQuery },
-    { $addFields: { farmerCount: { $size: { $ifNull: ['$farmerIds', []] } } } },
-    {
-      $lookup: {
-        from: samplingAuditColl,
-        localField: '_id',
-        foreignField: 'activityId',
-        as: 'audits',
-      },
-    },
-    {
-      $addFields: {
-        sampledCount: { $ifNull: [{ $arrayElemAt: ['$audits.sampledCount', 0] }, 0] },
-        hasAudit: { $gt: [{ $size: { $ifNull: ['$audits', []] } }, 0] },
-      },
-    },
-    {
-      $addFields: {
-        samplingStatus: {
-          $switch: {
-            branches: [
-              { case: { $eq: ['$hasAudit', false] }, then: 'not_sampled' },
-              { case: { $gt: ['$sampledCount', 0] }, then: 'sampled' },
-            ],
-            default: 'partial',
-          },
-        },
-      },
-    },
-  ];
-  if (samplingStatus) {
-    exportPipeline.push({ $match: { samplingStatus } });
-  }
-  exportPipeline.push({ $sort: { date: -1 } }, { $limit: safeLimit }, { $project: { _id: 1 } });
-
-  const exportIds = await Activity.aggregate(exportPipeline);
-  const activityIds = exportIds.map((d: { _id: mongoose.Types.ObjectId }) => d._id);
+  const activityQuery = buildActivitySamplingMatch({
+    activityType,
+    territory,
+    zone,
+    bu,
+    dateFrom,
+    dateTo,
+  });
+  const { ids: activityIds } = await resolveActivitySamplingIds({
+    activityQuery,
+    samplingStatus,
+    skip: 0,
+    limit: safeLimit,
+  });
 
   if (activityIds.length === 0) {
     return [];
@@ -791,19 +786,14 @@ export const getActivitiesSamplingStats = async (filters?: {
     dateTo,
   } = filters || {};
 
-  // Build activity query (same semantics as list)
-  const activityQuery: any = {};
-  if (activityType) activityQuery.type = activityType;
-  if (territory) {
-    activityQuery.$or = [{ territoryName: territory }, { territory: territory }];
-  }
-  if (zone) activityQuery.zoneName = zone;
-  if (bu) activityQuery.buName = bu;
-  if (dateFrom || dateTo) {
-    activityQuery.date = {};
-    if (dateFrom) activityQuery.date.$gte = dateFrom;
-    if (dateTo) activityQuery.date.$lte = dateTo;
-  }
+  const activityQuery = buildActivitySamplingMatch({
+    activityType,
+    territory,
+    zone,
+    bu,
+    dateFrom,
+    dateTo,
+  });
 
   const samplingAuditCollection = SamplingAudit.collection.name;
   const farmerCollection = Farmer.collection.name;

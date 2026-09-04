@@ -46,7 +46,7 @@ import {
 } from 'lucide-react';
 import Button from '../shared/Button';
 import StyledSelect from '../shared/StyledSelect';
-import { type DateRangePreset, getPresetRange, formatPretty, toISODateLocal } from '../../utils/dateRangeUtils';
+import { type DateRangePreset, getPresetRange, formatPretty } from '../../utils/dateRangeUtils';
 import { COMMON_DATE_RANGE_PRESETS, loadJsonStorage, parseBoolean, parseIsoDate, parsePreset, parseString, saveJsonStorage } from '../../utils/filterPersistence';
 import {
   buildPerformanceHierarchy,
@@ -104,11 +104,7 @@ const GROUP_BY_OPTIONS: { value: EmsReportGroupBy; label: string }[] = [
 ];
 
 function getDefaultDateRange(): { dateFrom: string; dateTo: string } {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const start = new Date(today);
-  start.setDate(start.getDate() - 29);
-  return { dateFrom: toISODateLocal(start), dateTo: toISODateLocal(today) };
+  return getPresetRange('Last 30 days');
 }
 
 const EMS_PROGRESS_FILTERS_KEY = 'admin.emsProgress.filters';

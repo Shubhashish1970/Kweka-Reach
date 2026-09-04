@@ -3,8 +3,7 @@
  * ActivityEmsProgressView, ActivitySamplingView, AgentHistoryView, AgentAnalyticsView,
  * TaskList, TaskDashboardView, SamplingControlView, CallbackRequestView.
  *
- * Uses local date components (not toISOString()) so that fiscal YTD (1 Apr)
- * is consistently April 1st in all timezones.
+ * Uses IST (Asia/Kolkata) calendar days for presets and YYYY-MM-DD values.
  */
 
 export type DateRangePreset =
@@ -20,15 +19,36 @@ export type DateRangePreset =
   | 'Last 90 days'
   | 'YTD';
 
-/** Format a Date as YYYY-MM-DD in local timezone (avoids UTC shift e.g. for YTD April 1). */
-export function toISODateLocal(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+export const APP_TIMEZONE = 'Asia/Kolkata';
+
+/** Format a Date as YYYY-MM-DD in IST (Reach calendar days). */
+export function toISODateIST(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: APP_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
 }
 
-export const APP_TIMEZONE = 'Asia/Kolkata';
+/** @deprecated Use toISODateIST. Kept so existing call sites keep compiling. */
+export function toISODateLocal(d: Date): string {
+  return toISODateIST(d);
+}
+
+function addIstDays(ymd: string, delta: number): string {
+  const t = new Date(`${ymd}T12:00:00.000+05:30`);
+  t.setTime(t.getTime() + delta * 86_400_000);
+  return toISODateIST(t);
+}
+
+function istSundayOffset(d: Date): number {
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: APP_TIMEZONE,
+    weekday: 'short',
+  }).format(d);
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday);
+}
 
 function parseDateInput(value: string | Date | null | undefined): Date | null {
   if (value == null || value === '') return null;
@@ -94,7 +114,7 @@ export interface PresetRangeResult {
 }
 
 /**
- * Get start/end dates for a preset. Uses local dates.
+ * Get start/end dates for a preset. Uses IST calendar days.
  * YTD = fiscal year to date (1 Apr of current FY → today): Apr–Dec use this year's Apr 1;
  * Jan–Mar use previous year's Apr 1.
  * For Custom, pass the current custom range (customFrom, customTo); they are returned as-is.
@@ -104,60 +124,45 @@ export function getPresetRange(
   customFrom?: string,
   customTo?: string
 ): PresetRangeResult {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const day = today.getDay(); // 0 = Sunday
+  const todayYmd = toISODateIST(new Date());
+  const sundayOffset = istSundayOffset(new Date());
 
   switch (preset) {
     case 'Today':
-      return { start: toISODateLocal(today), end: toISODateLocal(today) };
+      return { start: todayYmd, end: todayYmd };
     case 'Yesterday': {
-      const y = new Date(today);
-      y.setDate(y.getDate() - 1);
-      return { start: toISODateLocal(y), end: toISODateLocal(y) };
+      const y = addIstDays(todayYmd, -1);
+      return { start: y, end: y };
     }
     case 'This week (Sun - Today)': {
-      const s = new Date(today);
-      s.setDate(s.getDate() - day);
-      return { start: toISODateLocal(s), end: toISODateLocal(today) };
+      return { start: addIstDays(todayYmd, -sundayOffset), end: todayYmd };
     }
     case 'Last 7 days': {
-      const s = new Date(today);
-      s.setDate(s.getDate() - 6);
-      return { start: toISODateLocal(s), end: toISODateLocal(today) };
+      return { start: addIstDays(todayYmd, -6), end: todayYmd };
     }
     case 'Last week (Sun - Sat)': {
-      const lastSat = new Date(today);
-      lastSat.setDate(lastSat.getDate() - (day + 1));
-      const lastSun = new Date(lastSat);
-      lastSun.setDate(lastSun.getDate() - 6);
-      return { start: toISODateLocal(lastSun), end: toISODateLocal(lastSat) };
+      const lastSat = addIstDays(todayYmd, -(sundayOffset + 1));
+      const lastSun = addIstDays(lastSat, -6);
+      return { start: lastSun, end: lastSat };
     }
     case 'Last 14 days': {
-      const s = new Date(today);
-      s.setDate(s.getDate() - 13);
-      return { start: toISODateLocal(s), end: toISODateLocal(today) };
+      return { start: addIstDays(todayYmd, -13), end: todayYmd };
     }
     case 'Last 28 days': {
-      const s = new Date(today);
-      s.setDate(s.getDate() - 27);
-      return { start: toISODateLocal(s), end: toISODateLocal(today) };
+      return { start: addIstDays(todayYmd, -27), end: todayYmd };
     }
     case 'Last 30 days': {
-      const s = new Date(today);
-      s.setDate(s.getDate() - 29);
-      return { start: toISODateLocal(s), end: toISODateLocal(today) };
+      return { start: addIstDays(todayYmd, -29), end: todayYmd };
     }
     case 'Last 90 days': {
-      const s = new Date(today);
-      s.setDate(s.getDate() - 89);
-      return { start: toISODateLocal(s), end: toISODateLocal(today) };
+      return { start: addIstDays(todayYmd, -89), end: todayYmd };
     }
     case 'YTD': {
-      // Fiscal year starts 1 Apr: Apr–Dec → this year; Jan–Mar → previous year
-      const fyStartYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
-      const apr1 = new Date(fyStartYear, 3, 1);
-      return { start: toISODateLocal(apr1), end: toISODateLocal(today) };
+      const [yearStr, monthStr] = todayYmd.split('-');
+      const year = Number(yearStr);
+      const month = Number(monthStr);
+      const fyStartYear = month >= 4 ? year : year - 1;
+      return { start: `${fyStartYear}-04-01`, end: todayYmd };
     }
     case 'Custom':
     default:

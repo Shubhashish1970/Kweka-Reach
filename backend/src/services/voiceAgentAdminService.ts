@@ -365,7 +365,7 @@ export async function getVoiceAgentDetail(agentId: string) {
     .limit(20)
     .lean();
 
-  const pipelineTraces = await getRecentPipelineTraces(agentId, 12);
+  const pipelineTraces = await getRecentPipelineTraces(agentId, 24);
 
   return {
     agent: agent.toObject(),

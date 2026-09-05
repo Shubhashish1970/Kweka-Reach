@@ -1,12 +1,16 @@
 import logger from '../config/logger.js';
 import { processVirtualAgentQueueOnce } from '../services/voiceAgentService.js';
-import { getOrCreateVoicePlatformSettings } from '../services/voiceAgentAdminService.js';
+import {
+  countLiveVirtualAgents,
+  getOrCreateVoicePlatformSettings,
+} from '../services/voiceAgentAdminService.js';
 
 let tickInProgress = false;
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 let lastTickAt: Date | null = null;
 let lastTickError: string | null = null;
 let scheduledIntervalSec: number | null = null;
+let idleReason: 'disabled' | 'no_live_agents' | null = null;
 
 async function runTick(source: 'interval' | 'manual' | 'startup' = 'interval'): Promise<void> {
   if (tickInProgress) {
@@ -33,6 +37,7 @@ export function getVoiceOrchestratorDiagnostics() {
     lastTickAt: lastTickAt?.toISOString() || null,
     lastTickError,
     tickInProgress,
+    idleReason,
   };
 }
 
@@ -48,6 +53,15 @@ export const setupVoiceOrchestrator = async (): Promise<void> => {
   if (!platform.orchestratorEnabled && !envEnabled) {
     logger.info('Voice orchestrator disabled (enable in Voice Agents admin or VOICE_ORCHESTRATOR_ENABLED=true)');
     stopVoiceOrchestrator();
+    idleReason = 'disabled';
+    return;
+  }
+
+  const liveAgents = await countLiveVirtualAgents();
+  if (liveAgents === 0) {
+    logger.info('Voice orchestrator idle — no running virtual agents; polling stopped');
+    stopVoiceOrchestrator();
+    idleReason = 'no_live_agents';
     return;
   }
 
@@ -57,12 +71,13 @@ export const setupVoiceOrchestrator = async (): Promise<void> => {
   );
 
   stopVoiceOrchestrator();
+  idleReason = null;
   intervalHandle = setInterval(() => {
     void runTick('interval');
   }, intervalSec * 1000);
   scheduledIntervalSec = intervalSec;
 
-  logger.info(`Voice orchestrator scheduled via setInterval (every ${intervalSec}s)`);
+  logger.info(`Voice orchestrator scheduled via setInterval (every ${intervalSec}s, ${liveAgents} live agent(s))`);
 
   // Run once immediately so admin does not wait for the first interval after deploy / settings save.
   void runTick('startup');

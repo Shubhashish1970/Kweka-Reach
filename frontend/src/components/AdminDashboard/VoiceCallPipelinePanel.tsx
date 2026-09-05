@@ -50,6 +50,7 @@ export interface OrchestratorDiagnostics {
   lastTickAt: string | null;
   lastTickError: string | null;
   tickInProgress: boolean;
+  idleReason?: 'disabled' | 'no_live_agents' | null;
 }
 
 type TraceFilter = 'all' | 'calls' | 'ticks';
@@ -268,7 +269,12 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
           <div className="text-xs rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1">
             <p className="font-bold text-slate-700 flex items-center gap-1">
               <Radio size={12} className={orchestrator.scheduled ? 'text-emerald-600' : 'text-red-500'} />
-              Background poller: {orchestrator.scheduled ? 'active' : 'not scheduled'}
+              Background poller:{' '}
+              {orchestrator.scheduled
+                ? 'active'
+                : orchestrator.idleReason === 'no_live_agents'
+                  ? 'idle — no live agents'
+                  : 'not scheduled'}
               {orchestrator.scheduledIntervalSec ? ` (every ${orchestrator.scheduledIntervalSec}s)` : ''}
             </p>
             {orchestrator.lastTickAt && (

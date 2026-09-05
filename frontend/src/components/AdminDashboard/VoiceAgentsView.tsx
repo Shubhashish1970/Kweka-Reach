@@ -282,14 +282,19 @@ const VoiceAgentsView: React.FC = () => {
             <h3 className="font-bold text-violet-900">Global platform settings</h3>
           </div>
           <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-              <input
-                type="checkbox"
-                checked={settings.orchestratorEnabled}
-                onChange={(e) => setSettings({ ...settings, orchestratorEnabled: e.target.checked })}
-                className="rounded border-violet-300 text-violet-600 focus:ring-violet-400"
-              />
-              Orchestrator enabled
+            <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.orchestratorEnabled}
+                  onChange={(e) => setSettings({ ...settings, orchestratorEnabled: e.target.checked })}
+                  className="rounded border-violet-300 text-violet-600 focus:ring-violet-400"
+                />
+                Orchestrator enabled
+              </span>
+              <span className="text-xs font-normal text-slate-500">
+                Polling stops automatically when every agent is paused or stopped.
+              </span>
             </label>
             <label className="text-sm">
               <span className="font-medium text-slate-700">Poll interval (sec)</span>

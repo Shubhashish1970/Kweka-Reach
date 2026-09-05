@@ -27,6 +27,7 @@ import {
   recordAgentTriggerResult,
   recordAgentWebhook,
   resolveVoiceTriggerOptions,
+  isVirtualAgentLive,
 } from './voiceAgentAdminService.js';
 
 async function getStuckCallTimeoutMs(): Promise<number> {
@@ -290,6 +291,7 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
   }).select('_id name isActive languageCapabilities voiceAgentConfig');
 
   for (const agent of virtualAgents) {
+    if (!isVirtualAgentLive(agent)) continue;
     const agentId = agent._id.toString();
     const tracer = await VoicePipelineTracer.start(agentId, 'orchestrator_tick');
     await tracer.pass('orchestrator_enabled', 'Platform orchestrator is on');

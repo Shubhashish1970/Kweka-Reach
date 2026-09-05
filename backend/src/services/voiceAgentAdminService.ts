@@ -239,6 +239,20 @@ export async function countAgentCallsToday(agentId: string, timezone: string): P
   });
 }
 
+export function isVirtualAgentLive(agent: VoiceAgentConfigSource): boolean {
+  if (agent.isActive === false) return false;
+  return (agent.voiceAgentConfig?.voiceStatus || 'paused') === 'running';
+}
+
+export async function countLiveVirtualAgents(): Promise<number> {
+  return User.countDocuments({
+    role: 'cc_agent',
+    agentKind: 'virtual',
+    isActive: true,
+    'voiceAgentConfig.voiceStatus': 'running',
+  });
+}
+
 export type DerivedVoiceRuntimeState =
   | 'idle'
   | 'calling'
@@ -467,10 +481,17 @@ export async function updateVoiceAgentConfig(
 
   if (patch.voiceStatus === 'running') {
     try {
-      const { runVoiceOrchestratorTick } = await import('../config/voiceOrchestrator.js');
-      void runVoiceOrchestratorTick();
+      const { restartVoiceOrchestrator } = await import('../config/voiceOrchestrator.js');
+      await restartVoiceOrchestrator();
     } catch (error) {
-      logger.warn('Immediate orchestrator tick after agent start failed:', error);
+      logger.warn('Voice orchestrator restart after agent start failed:', error);
+    }
+  } else if (patch.voiceStatus === 'paused' || patch.voiceStatus === 'stopped') {
+    try {
+      const { restartVoiceOrchestrator } = await import('../config/voiceOrchestrator.js');
+      await restartVoiceOrchestrator();
+    } catch (error) {
+      logger.warn('Voice orchestrator restart after agent pause/stop failed:', error);
     }
   }
 
@@ -509,6 +530,15 @@ export async function recordAgentTriggerResult(
       cfg.pauseReason = `Auto-paused after ${cfg.consecutiveApiFailures} consecutive API failures`;
       cfg.pausedAt = new Date();
       logger.warn(`Voice agent ${agent.name} auto-paused after API failures`);
+      agent.markModified('voiceAgentConfig');
+      await agent.save();
+      try {
+        const { restartVoiceOrchestrator } = await import('../config/voiceOrchestrator.js');
+        await restartVoiceOrchestrator();
+      } catch (error) {
+        logger.warn('Voice orchestrator restart after auto-pause failed:', error);
+      }
+      return;
     }
   }
   agent.markModified('voiceAgentConfig');

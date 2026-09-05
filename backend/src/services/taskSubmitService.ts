@@ -144,7 +144,12 @@ export async function markTaskInProgressForAgent(
   return task;
 }
 
-export async function agentHasActiveVoiceCall(agentId: string): Promise<boolean> {
+export async function getActiveVoiceCall(agentId: string): Promise<{
+  taskId: string;
+  farmerName: string;
+  callStartedAt: Date | null;
+  workflowRunId: number | null;
+} | null> {
   const active = await CallTask.findOne({
     assignedAgentId: new mongoose.Types.ObjectId(agentId),
     status: 'in_progress',
@@ -157,6 +162,20 @@ export async function agentHasActiveVoiceCall(agentId: string): Promise<boolean>
         ],
       },
     ],
-  }).select('_id');
-  return !!active;
+  })
+    .populate('farmerId', 'name')
+    .select('_id farmerId callStartedAt voiceWorkflowRunId');
+
+  if (!active) return null;
+  const farmer = active.farmerId as { name?: string } | null;
+  return {
+    taskId: active._id.toString(),
+    farmerName: farmer?.name?.trim() || 'Unknown farmer',
+    callStartedAt: active.callStartedAt || null,
+    workflowRunId: active.voiceWorkflowRunId ?? null,
+  };
+}
+
+export async function agentHasActiveVoiceCall(agentId: string): Promise<boolean> {
+  return Boolean(await getActiveVoiceCall(agentId));
 }

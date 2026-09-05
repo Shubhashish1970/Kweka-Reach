@@ -351,6 +351,22 @@ const VoiceAgentsView: React.FC = () => {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-violet-400 focus:border-violet-400"
               />
             </label>
+            <label className="text-sm">
+              <span className="font-medium text-slate-700">Wait for webhook (minutes)</span>
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={settings.stuckCallTimeoutMinutes ?? 1}
+                onChange={(e) =>
+                  setSettings({ ...settings, stuckCallTimeoutMinutes: Number(e.target.value) })
+                }
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-violet-400 focus:border-violet-400"
+              />
+              <span className="block mt-1 text-[11px] text-slate-500">
+                Do not start the next call until Dograh posts the webhook, or this many minutes pass with no webhook.
+              </span>
+            </label>
             <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
               <input
                 type="checkbox"
@@ -657,16 +673,17 @@ const VoiceAgentsView: React.FC = () => {
                 <PhoneCall size={16} />
                 Test trigger call
               </Button>
-
-              {/* TEMP: pipeline debug panel — remove from Voice Agents once a dedicated diagnostics view exists */}
-              <VoiceCallPipelinePanel
-                traces={agentDetail.pipelineTraces || []}
-                orchestrator={agentDetail.orchestratorDiagnostics}
-              />
             </div>
           )}
         </div>
       </div>
+
+      {selectedAgentId && agentDetail && (
+        <VoiceCallPipelinePanel
+          traces={agentDetail.pipelineTraces || []}
+          orchestrator={agentDetail.orchestratorDiagnostics}
+        />
+      )}
 
       {showTestModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

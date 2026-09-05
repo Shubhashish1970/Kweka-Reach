@@ -48,7 +48,7 @@ export const VOICE_DEBUG_CATALOG: Record<VoiceDebugCode, Omit<VoiceDebugInfo, 'c
   },
   'VA-007': {
     message: 'Agent already has a call in progress',
-    fix: 'Hang/no-response disconnects after the stuck timeout, then retries once after remaining queue items (max 2 tries). Wait one poll cycle or lower stuckCallTimeoutMinutes.',
+    fix: 'Wait for the Dograh webhook. If none arrives, the next call starts after Wait for webhook (minutes) in Global platform settings.',
   },
   'VA-008': {
     message: 'Minimum gap between calls not satisfied',

@@ -26,6 +26,8 @@ export interface IVoiceCallPipeline extends Document {
   dialNumberMasked?: string;
   /** Farmer (or test) name for the dial target / next queue item */
   farmerName?: string;
+  /** Payload posted to Dograh (phone masked). Peek-only ticks store task_id. */
+  outboundPayload?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,6 +69,7 @@ const VoiceCallPipelineSchema = new Schema<IVoiceCallPipeline>(
     steps: { type: [PipelineStepSchema], default: [] },
     dialNumberMasked: { type: String },
     farmerName: { type: String, trim: true },
+    outboundPayload: { type: Schema.Types.Mixed },
   },
   { timestamps: true }
 );

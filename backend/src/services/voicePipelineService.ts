@@ -144,6 +144,21 @@ export class VoicePipelineTracer {
     });
   }
 
+  async setTaskId(taskId: string): Promise<void> {
+    if (!taskId || !mongoose.Types.ObjectId.isValid(taskId)) return;
+    await VoiceCallPipeline.findByIdAndUpdate(this.docId, {
+      taskId: new mongoose.Types.ObjectId(taskId),
+      updatedAt: new Date(),
+    });
+  }
+
+  async setOutboundPayload(payload: Record<string, unknown>): Promise<void> {
+    await VoiceCallPipeline.findByIdAndUpdate(this.docId, {
+      outboundPayload: payload,
+      updatedAt: new Date(),
+    });
+  }
+
   get id(): string {
     return this.docId.toString();
   }
@@ -151,10 +166,16 @@ export class VoicePipelineTracer {
 
 export async function getRecentPipelineTraces(agentId: string, limit = 10) {
   if (!mongoose.Types.ObjectId.isValid(agentId)) return [];
-  return VoiceCallPipeline.find({ agentId: new mongoose.Types.ObjectId(agentId) })
+  const traces = await VoiceCallPipeline.find({ agentId: new mongoose.Types.ObjectId(agentId) })
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
+  return traces.map((trace) => ({
+    ...trace,
+    _id: trace._id.toString(),
+    taskId: trace.taskId ? String(trace.taskId) : undefined,
+    agentId: trace.agentId ? String(trace.agentId) : undefined,
+  }));
 }
 
 export async function advancePipelineOnWebhook(

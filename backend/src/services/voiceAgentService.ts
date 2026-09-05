@@ -11,6 +11,7 @@ import {
   markTaskInProgressForAgent,
   submitCallInteractionForTask,
   SubmitCallInteractionInput,
+  getActiveVoiceCall,
 } from './taskSubmitService.js';
 import { triggerVoiceOutboundCall } from './voiceApiClient.js';
 import { getOutcomeFromStatus } from '../utils/outcomeHelper.js';
@@ -30,14 +31,6 @@ import {
 
 async function getStuckCallTimeoutMs(): Promise<number> {
   const platform = await getOrCreateVoicePlatformSettings();
-  const envSec = process.env.VOICE_STUCK_TASK_SECONDS;
-  if (envSec && !Number.isNaN(Number(envSec))) {
-    return Math.max(30, Number(envSec)) * 1000;
-  }
-  const envMin = process.env.VOICE_STUCK_TASK_MINUTES;
-  if (envMin && !Number.isNaN(Number(envMin))) {
-    return Math.max(1, Number(envMin)) * 60 * 1000;
-  }
   const minutes = platform.stuckCallTimeoutMinutes || 1;
   return Math.max(1, minutes) * 60 * 1000;
 }
@@ -150,6 +143,12 @@ async function peekNextQueuedFarmer(agentId: string): Promise<{ taskId: string; 
   const farmer = task.farmerId as { name?: string } | null;
   const farmerName = farmer?.name?.trim() || 'Unknown farmer';
   return { taskId: String(task._id), farmerName };
+}
+
+function maskDialForTrace(dialNumber: string): string {
+  const digits = dialNumber.replace(/\D/g, '');
+  if (digits.length < 4) return '****';
+  return `***${digits.slice(-4)}`;
 }
 
 export interface VoiceInitialContext {
@@ -391,20 +390,49 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
     const tracer = await VoicePipelineTracer.start(agentId, 'orchestrator_tick');
     await tracer.pass('orchestrator_enabled', 'Platform orchestrator is on');
 
-    const nextQueued = await peekNextQueuedFarmer(agentId);
-    if (nextQueued) {
-      await tracer.setFarmerName(nextQueued.farmerName);
-      await tracer.pass(
-        'queue_peek',
-        `${nextQueued.farmerName} (task …${nextQueued.taskId.slice(-6)})`
-      );
-    } else {
-      await tracer.pass('queue_peek', 'Queue is empty — no farmer to dial');
-    }
+    const waitMinutes = platform.stuckCallTimeoutMinutes || 1;
 
     try {
       await releaseStuckVoiceTasks(agentId);
       await finalizeExhaustedVoiceTries(agentId);
+
+      const activeCall = await getActiveVoiceCall(agentId);
+      if (activeCall) {
+        await tracer.setFarmerName(activeCall.farmerName);
+        await tracer.setTaskId(activeCall.taskId);
+        const started = activeCall.callStartedAt ? new Date(activeCall.callStartedAt).getTime() : Date.now();
+        const elapsedMin = Math.max(0, (Date.now() - started) / 60_000);
+        const remainingMin = Math.max(0, waitMinutes - elapsedMin);
+        await tracer.setOutboundPayload({
+          sent: true,
+          waiting_for_webhook: true,
+          wait_minutes: waitMinutes,
+          remaining_minutes: Number(remainingMin.toFixed(1)),
+          workflow_run_id: activeCall.workflowRunId,
+          initial_context: { task_id: activeCall.taskId },
+        });
+        await tracer.pass(
+          'queue_peek',
+          `${activeCall.farmerName} on call (task_id ${activeCall.taskId}) — waiting for webhook`
+        );
+      } else {
+        const nextQueued = await peekNextQueuedFarmer(agentId);
+        if (nextQueued) {
+          await tracer.setFarmerName(nextQueued.farmerName);
+          await tracer.setTaskId(nextQueued.taskId);
+          await tracer.setOutboundPayload({
+            sent: false,
+            reason: 'Peek only — not posted until a queue call starts',
+            initial_context: { task_id: nextQueued.taskId },
+          });
+          await tracer.pass(
+            'queue_peek',
+            `${nextQueued.farmerName} (task_id ${nextQueued.taskId})`
+          );
+        } else {
+          await tracer.pass('queue_peek', 'Queue is empty — no farmer to dial');
+        }
+      }
 
       const runtimeState = await deriveAgentRuntimeState(agent, platform);
 
@@ -416,7 +444,12 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         }
         const debug =
           runtimeState === 'calling'
-            ? voiceDebugInfo('VA-007')
+            ? voiceDebugInfo(
+                'VA-007',
+                activeCall
+                  ? `${activeCall.farmerName} — next call after webhook or ${waitMinutes} min`
+                  : `next call after webhook or ${waitMinutes} min`
+              )
             : explainRuntimeBlock(agent, runtimeState);
         await tracer.block('agent_runtime', formatVoiceDebugLine(debug), debug.code);
         continue;
@@ -513,15 +546,22 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
         );
 
         const triggerOptions = resolveVoiceTriggerOptions(agent, platform);
+        const triggerPayload = {
+          phone_number: dialNumber,
+          initial_context: { ...initialContext },
+          telephony_configuration_id: agent.voiceAgentConfig?.telephonyConfigurationId ?? null,
+        };
+        await tracer.setOutboundPayload({
+          sent: true,
+          phone_number: maskDialForTrace(dialNumber),
+          initial_context: { ...initialContext },
+          telephony_configuration_id: triggerPayload.telephony_configuration_id,
+        });
 
         try {
           const result = await triggerVoiceOutboundCall(
             triggerUuid,
-            {
-              phone_number: dialNumber,
-              initial_context: { ...initialContext },
-              telephony_configuration_id: agent.voiceAgentConfig?.telephonyConfigurationId ?? null,
-            },
+            triggerPayload,
             triggerOptions
           );
 

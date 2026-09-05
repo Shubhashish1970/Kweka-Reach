@@ -590,24 +590,33 @@ export async function testVoiceAgentTrigger(
   await tracer.pass('trigger_uuid', triggerUuid.slice(0, 8) + '…');
   await tracer.pass('safe_dial', `Test dial → ${dialNumber.replace(/\d(?=\d{4})/g, '*')}`);
 
+  const initialContext = {
+    task_id: 'voice-test',
+    attempt_id: attemptId,
+    farmer_name: 'Test Farmer',
+    agent_name: agent.name,
+    village_name: 'Test Village',
+    mdo_name: 'Test MDO',
+    event_date: new Date().toISOString(),
+    product_name: 'Test Product',
+    preferred_language: agent.languageCapabilities?.[0] || 'Hindi',
+  };
+  const triggerPayload = {
+    phone_number: dialNumber,
+    initial_context: initialContext,
+    telephony_configuration_id: agent.voiceAgentConfig?.telephonyConfigurationId ?? null,
+  };
+  await tracer.setOutboundPayload({
+    sent: true,
+    phone_number: dialNumber.replace(/\d(?=\d{4})/g, '*'),
+    initial_context: initialContext,
+    telephony_configuration_id: triggerPayload.telephony_configuration_id,
+  });
+
   try {
     const result = await triggerVoiceOutboundCall(
       triggerUuid,
-      {
-        phone_number: dialNumber,
-        initial_context: {
-          task_id: 'voice-test',
-          attempt_id: attemptId,
-          farmer_name: 'Test Farmer',
-          agent_name: agent.name,
-          village_name: 'Test Village',
-          mdo_name: 'Test MDO',
-          event_date: new Date().toISOString(),
-          product_name: 'Test Product',
-          preferred_language: agent.languageCapabilities?.[0] || 'Hindi',
-        },
-        telephony_configuration_id: agent.voiceAgentConfig?.telephonyConfigurationId ?? null,
-      },
+      triggerPayload,
       triggerOptions
     );
 

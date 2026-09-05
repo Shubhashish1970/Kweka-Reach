@@ -137,7 +137,12 @@ const TaskQueueTable: React.FC<TaskQueueTableProps> = ({
       let cmp = 0;
       if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
       else cmp = String(va).localeCompare(String(vb));
-      if (cmp === 0) return a.idx - b.idx;
+      if (cmp === 0) {
+        const ca = new Date(a.task.createdAt || 0).getTime();
+        const cb = new Date(b.task.createdAt || 0).getTime();
+        if (ca !== cb) return dir === 'asc' ? ca - cb : cb - ca;
+        return String(a.task.taskId).localeCompare(String(b.task.taskId));
+      }
       return dir === 'asc' ? cmp : -cmp;
     });
     return mapped.map((m) => m.task);

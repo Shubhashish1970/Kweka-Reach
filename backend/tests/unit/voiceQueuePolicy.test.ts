@@ -117,6 +117,32 @@ describe('getNextVoiceTaskForAgent hang retry order', () => {
     expect(next?._id.toString()).toBe(primary._id.toString());
   });
 
+  test('same scheduled date follows task-list order (createdAt, then id)', async () => {
+    const lead = await makeTeamLead();
+    const agent = await makeAgent(lead._id);
+    const farmerA = await makeFarmer({ name: 'First On List' });
+    const farmerB = await makeFarmer({ name: 'Second On List' });
+    const activity = await makeActivity([farmerA._id, farmerB._id]);
+    const when = new Date('2026-09-03T00:00:00.000Z');
+
+    const first = await makeTask(farmerA._id, activity._id, {
+      status: 'sampled_in_queue',
+      assignedAgentId: agent._id,
+      scheduledDate: when,
+      voiceHangRetryCount: 0,
+    });
+    const second = await makeTask(farmerB._id, activity._id, {
+      status: 'sampled_in_queue',
+      assignedAgentId: agent._id,
+      scheduledDate: when,
+      voiceHangRetryCount: 0,
+    });
+
+    const next = await getNextVoiceTaskForAgent(agent._id.toString());
+    expect(next?._id.toString()).toBe(first._id.toString());
+    expect(next?._id.toString()).not.toBe(second._id.toString());
+  });
+
   test('picks hang retry after first-pass queue is empty', async () => {
     const lead = await makeTeamLead();
     const agent = await makeAgent(lead._id);

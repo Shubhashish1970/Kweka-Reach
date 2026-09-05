@@ -6,6 +6,7 @@ import { Farmer } from '../models/Farmer.js';
 import mongoose from 'mongoose';
 import logger from '../config/logger.js';
 import * as XLSX from 'xlsx';
+import { QUEUE_CALL_SORT } from './taskService.js';
 
 const AGENT_QUEUE_EXPORT_MAX = 5000;
 
@@ -1293,7 +1294,7 @@ export const getAgentQueue = async (
               { $project: { _id: 0 } },
             ],
             tasks: [
-              { $sort: { scheduledDate: 1 } },
+              { $sort: QUEUE_CALL_SORT },
               { $skip: skip },
               { $limit: limit },
               {
@@ -1420,7 +1421,7 @@ export const getAgentQueue = async (
     let tasks = await CallTask.find(findMatch)
       .populate('farmerId', 'name mobileNumber preferredLanguage location')
       .populate('activityId', 'type date officerName territory territoryName zoneName buName state crops products')
-      .sort({ scheduledDate: 1 });
+      .sort(QUEUE_CALL_SORT);
 
     if (language) {
       tasks = tasks.filter((task) => {

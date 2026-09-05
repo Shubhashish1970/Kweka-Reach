@@ -344,6 +344,9 @@ export const getAvailableTasksForAgent = async (agentId: string): Promise<any[]>
   }
 };
 
+/** Same order as Agent Queues task list: scheduled date, then created, then id. */
+export const QUEUE_CALL_SORT = { scheduledDate: 1, createdAt: 1, _id: 1 } as const;
+
 /** First-pass queue: not yet deferred for hang / no-response. */
 const VOICE_PRIMARY_QUEUE_FILTER = {
   status: 'sampled_in_queue',
@@ -361,8 +364,9 @@ const VOICE_DEFERRED_QUEUE_FILTER = {
 };
 
 /**
- * Next task for the voice orchestrator — matches human dialer open queue (no scheduledDate gate).
- * Hang/no-response retries are picked only after remaining first-pass tasks.
+ * Next task for the voice orchestrator.
+ * First pass follows the Agent Queues list (scheduledDate, createdAt, _id).
+ * Hang / no-response retries are then picked only after remaining first-pass tasks.
  */
 export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | null> => {
   try {
@@ -380,7 +384,7 @@ export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | n
       CallTask.findOne({ assignedAgentId: oid, ...filter })
         .populate(populateFarmer)
         .populate(populateActivity)
-        .sort({ scheduledDate: 1 })
+        .sort(QUEUE_CALL_SORT)
         .limit(1)
         .lean();
 
@@ -397,7 +401,7 @@ export const getNextVoiceTaskForAgent = async (agentId: string): Promise<any | n
       })
         .populate(populateFarmer)
         .populate(populateActivity)
-        .sort({ scheduledDate: 1 })
+        .sort(QUEUE_CALL_SORT)
         .limit(1)
         .lean();
     }

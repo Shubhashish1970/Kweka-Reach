@@ -28,6 +28,8 @@ export interface IVoiceCallPipeline extends Document {
   farmerName?: string;
   /** Payload posted to Dograh (phone masked). Peek-only ticks store task_id. */
   outboundPayload?: Record<string, unknown>;
+  /** Raw webhook JSON posted back from Dograh (once received). */
+  inboundWebhookPayload?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,6 +72,7 @@ const VoiceCallPipelineSchema = new Schema<IVoiceCallPipeline>(
     dialNumberMasked: { type: String },
     farmerName: { type: String, trim: true },
     outboundPayload: { type: Schema.Types.Mixed },
+    inboundWebhookPayload: { type: Schema.Types.Mixed },
   },
   { timestamps: true }
 );

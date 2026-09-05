@@ -178,11 +178,19 @@ export async function getRecentPipelineTraces(agentId: string, limit = 10) {
   }));
 }
 
-export async function advancePipelineOnWebhook(
+function cloneJson(value: Record<string, unknown>): Record<string, unknown> {
+  try {
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  } catch {
+    return { note: 'Webhook body could not be serialized' };
+  }
+}
+
+function webhookTraceQuery(
   taskId: string,
   attemptId: string | undefined,
   workflowRunId: number | null
-): Promise<void> {
+): Record<string, unknown> | null {
   const query: Record<string, unknown> = {
     overallStatus: { $in: ['running', 'blocked'] },
   };
@@ -194,32 +202,66 @@ export async function advancePipelineOnWebhook(
   } else if (mongoose.Types.ObjectId.isValid(taskId)) {
     query.taskId = new mongoose.Types.ObjectId(taskId);
   } else {
-    return;
+    return null;
   }
+  return query;
+}
+
+export async function advancePipelineOnWebhook(
+  taskId: string,
+  attemptId: string | undefined,
+  workflowRunId: number | null,
+  inboundPayload?: Record<string, unknown>,
+  options?: { complete?: boolean }
+): Promise<void> {
+  const query = webhookTraceQuery(taskId, attemptId, workflowRunId);
+  if (!query) return;
 
   const trace = await VoiceCallPipeline.findOne(query).sort({ createdAt: -1 });
   if (!trace) return;
 
-  const steps: IPipelineStep[] = [
+  const now = new Date();
+  const complete = options?.complete !== false;
+  const inbound = inboundPayload ? cloneJson(inboundPayload) : undefined;
+
+  if (!complete) {
+    await VoiceCallPipeline.findByIdAndUpdate(trace._id, {
+      $set: {
+        ...(inbound ? { inboundWebhookPayload: inbound } : {}),
+        updatedAt: now,
+      },
+    });
+    return;
+  }
+
+  const steps = (trace.steps || []).map((step) =>
+    step.key === 'awaiting_webhook' && step.status === 'running'
+      ? { ...step, status: 'success' as const, message: step.message || 'Webhook received' }
+      : step
+  );
+  steps.push(
     {
       key: 'webhook_received',
       label: PIPELINE_STEP_LABELS.webhook_received,
       status: 'success',
       message: 'Dograh posted call result to Reach',
-      at: new Date(),
+      at: now,
     },
     {
       key: 'task_complete',
       label: PIPELINE_STEP_LABELS.task_complete,
       status: 'success',
       message: `Task ${taskId} updated`,
-      at: new Date(),
-    },
-  ];
+      at: now,
+    }
+  );
 
   await VoiceCallPipeline.findByIdAndUpdate(trace._id, {
-    $push: { steps: { $each: steps } },
-    overallStatus: 'success',
-    updatedAt: new Date(),
+    $set: {
+      steps,
+      overallStatus: 'success',
+      updatedAt: now,
+      ...(inbound ? { inboundWebhookPayload: inbound } : {}),
+    },
   });
 }

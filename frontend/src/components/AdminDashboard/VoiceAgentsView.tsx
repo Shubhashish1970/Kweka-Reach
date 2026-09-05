@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Mic, Loader2, RefreshCw, Save, Settings2, Play, Pause, Square,
-  Clock, AlertCircle, CheckCircle2, Copy, ChevronRight, PhoneCall,
+  Clock, AlertCircle, CheckCircle2, Copy, PhoneCall,
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { voiceAdminAPI } from '../../services/api';
@@ -253,7 +253,7 @@ const VoiceAgentsView: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-black text-slate-900 flex items-center gap-2">
@@ -406,97 +406,91 @@ const VoiceAgentsView: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Agent list */}
-        <div className="space-y-3">
-          <h3 className="font-bold text-slate-800">Virtual agents ({agents.length})</h3>
-          {agents.length === 0 ? (
-            <div className="bg-violet-50 border border-violet-200 rounded-xl p-6 text-center text-slate-600">
-              No virtual agents found. Create a CC agent with kind &quot;Virtual&quot; in User Management.
-            </div>
-          ) : (
-            agents.map((agent) => {
-              const badge = runtimeBadge(agent.runtimeState);
-              const selected = selectedAgentId === agent.agentId;
-              return (
-                <button
-                  key={agent.agentId}
-                  type="button"
-                  onClick={() => setSelectedAgentId(agent.agentId)}
-                  className={`w-full text-left rounded-xl border-2 p-4 transition-all ${
-                    selected
-                      ? 'bg-violet-50 border-violet-400 shadow-md'
-                      : 'bg-white border-violet-200 hover:border-violet-300'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-violet-100 border border-violet-300 flex items-center justify-center">
-                        <Mic className="text-violet-600" size={20} />
+      <div className="bg-white rounded-2xl border-2 border-violet-200 shadow-sm overflow-hidden">
+        <div className="bg-violet-50 border-b border-violet-200 px-6 py-3">
+          <h3 className="font-bold text-violet-900">Virtual agents ({agents.length})</h3>
+        </div>
+        {agents.length === 0 ? (
+          <div className="p-6 text-center text-slate-600">
+            No virtual agents found. Create a CC agent with kind &quot;Virtual&quot; in User Management.
+          </div>
+        ) : (
+          <div className="flex flex-col lg:flex-row">
+            <div className="lg:w-72 shrink-0 lg:border-r border-violet-200 divide-y divide-violet-100 bg-violet-50/40">
+              {agents.map((agent) => {
+                const badge = runtimeBadge(agent.runtimeState);
+                const selected = selectedAgentId === agent.agentId;
+                const dueNow = agent.queueCounts.due_now ?? agent.queueCounts.sampled_in_queue;
+                return (
+                  <button
+                    key={agent.agentId}
+                    type="button"
+                    onClick={() => setSelectedAgentId(agent.agentId)}
+                    className={`w-full text-left px-4 py-3 transition-colors ${
+                      selected ? 'bg-white border-l-4 border-l-violet-500' : 'hover:bg-white/80 border-l-4 border-l-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-violet-100 border border-violet-300 flex items-center justify-center shrink-0">
+                        <Mic className="text-violet-600" size={16} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 truncate">{agent.name}</p>
+                        <p className="text-[11px] text-slate-500 truncate">{agent.employeeId}</p>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${badge.className}`}>
+                        {badge.label}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-violet-100 text-violet-800 border border-violet-200">
+                        {agent.voiceStatus}
+                      </span>
+                      {agent.voiceDialOverrideEnabled && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-sky-100 text-sky-800 border border-sky-200">
+                          Safe dial
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 grid grid-cols-4 gap-1 text-center text-[10px]">
+                      <div>
+                        <p className="font-black text-violet-700">{agent.queueCounts.sampled_in_queue}</p>
+                        <p className="text-slate-500">Queued</p>
                       </div>
                       <div>
-                        <p className="font-bold text-slate-900">{agent.name}</p>
-                        <p className="text-xs text-slate-500">{agent.employeeId} · {agent.email}</p>
+                        <p className={`font-black ${dueNow === 0 && agent.queueCounts.sampled_in_queue > 0 ? 'text-red-700' : 'text-indigo-700'}`}>
+                          {dueNow}
+                        </p>
+                        <p className="text-slate-500">Due</p>
+                      </div>
+                      <div>
+                        <p className="font-black text-amber-700">{agent.queueCounts.in_progress}</p>
+                        <p className="text-slate-500">In prog</p>
+                      </div>
+                      <div>
+                        <p className="font-black text-emerald-700">{agent.queueCounts.completed_today}</p>
+                        <p className="text-slate-500">Done</p>
                       </div>
                     </div>
-                    <ChevronRight className={`text-violet-400 shrink-0 ${selected ? 'rotate-90' : ''}`} size={18} />
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${badge.className}`}>
-                      {badge.label}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-violet-100 text-violet-800 border border-violet-200">
-                      {agent.voiceStatus}
-                    </span>
-                    {!agent.voiceTriggerUuid && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-red-100 text-red-800 border border-red-200">
-                        No UUID
-                      </span>
-                    )}
-                    {agent.voiceDialOverrideEnabled && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-sky-100 text-sky-800 border border-sky-200">
-                        Safe dial
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-2 grid grid-cols-4 gap-2 text-center text-xs">
-                    <div className="bg-slate-50 rounded-lg py-1">
-                      <p className="font-black text-violet-700">{agent.queueCounts.sampled_in_queue}</p>
-                      <p className="text-slate-500">Queued</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg py-1">
-                      <p className={`font-black ${(agent.queueCounts.due_now ?? agent.queueCounts.sampled_in_queue) === 0 && agent.queueCounts.sampled_in_queue > 0 ? 'text-red-700' : 'text-indigo-700'}`}>
-                        {agent.queueCounts.due_now ?? agent.queueCounts.sampled_in_queue}
-                      </p>
-                      <p className="text-slate-500">Due now</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg py-1">
-                      <p className="font-black text-amber-700">{agent.queueCounts.in_progress}</p>
-                      <p className="text-slate-500">In progress</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg py-1">
-                      <p className="font-black text-emerald-700">{agent.queueCounts.completed_today}</p>
-                      <p className="text-slate-500">Done today</p>
-                    </div>
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
+                  </button>
+                );
+              })}
+            </div>
 
-        {/* Agent detail */}
-        <div className="bg-white rounded-2xl border-2 border-violet-200 shadow-sm min-h-[320px]">
+            <div className="flex-1 min-w-0">
           {!selectedAgentId || !agentDetail ? (
-            <div className="flex flex-col items-center justify-center h-full py-16 text-slate-500">
+            <div className="flex flex-col items-center justify-center py-16 text-slate-500">
               <Mic className="text-violet-300 mb-3" size={40} />
               <p>Select a virtual agent to configure</p>
             </div>
           ) : (
-            <div className="p-6 space-y-5">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-violet-900">{agentDetail.agent?.name}</h3>
-                <div className="flex gap-2">
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-violet-900">{agentDetail.agent?.name}</h3>
+                  <p className="text-xs text-slate-500">{agentDetail.agent?.email}</p>
+                </div>
+                <div className="flex gap-2 shrink-0">
                   <button
                     type="button"
                     disabled={savingAgent}
@@ -540,28 +534,29 @@ const VoiceAgentsView: React.FC = () => {
                 </div>
               )}
 
-              <label className="block text-sm">
-                <span className="font-medium text-slate-700">API Trigger UUID</span>
-                <input
-                  type="text"
-                  value={String(agentForm.voiceTriggerUuid || '')}
-                  onChange={(e) => setAgentForm({ ...agentForm, voiceTriggerUuid: e.target.value })}
-                  placeholder="Dograh API trigger UUID for this agent"
-                  className="mt-1 w-full rounded-lg border border-violet-200 px-3 py-2 text-sm font-mono focus:ring-violet-400 focus:border-violet-400"
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="font-medium text-slate-700">Trigger route</span>
-                <select
-                  value={String(agentForm.triggerRouteType || 'api_trigger')}
-                  onChange={(e) => setAgentForm({ ...agentForm, triggerRouteType: e.target.value })}
-                  className="mt-1 w-full rounded-lg border border-violet-200 px-3 py-2 text-sm focus:ring-violet-400 focus:border-violet-400"
-                >
-                  <option value="api_trigger">API trigger (test / production)</option>
-                  <option value="workflow">Workflow UUID path</option>
-                </select>
-              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">API Trigger UUID</span>
+                  <input
+                    type="text"
+                    value={String(agentForm.voiceTriggerUuid || '')}
+                    onChange={(e) => setAgentForm({ ...agentForm, voiceTriggerUuid: e.target.value })}
+                    placeholder="Dograh API trigger UUID for this agent"
+                    className="mt-1 w-full rounded-lg border border-violet-200 px-3 py-2 text-sm font-mono focus:ring-violet-400 focus:border-violet-400"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">Trigger route</span>
+                  <select
+                    value={String(agentForm.triggerRouteType || 'api_trigger')}
+                    onChange={(e) => setAgentForm({ ...agentForm, triggerRouteType: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-violet-200 px-3 py-2 text-sm focus:ring-violet-400 focus:border-violet-400"
+                  >
+                    <option value="api_trigger">API trigger (test / production)</option>
+                    <option value="workflow">Workflow UUID path</option>
+                  </select>
+                </label>
+              </div>
 
               <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-3">
                 <p className="text-sm font-bold text-sky-900">Safe dial override (dev / UAT)</p>
@@ -595,15 +590,26 @@ const VoiceAgentsView: React.FC = () => {
                 )}
               </div>
 
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={Boolean(agentForm.inheritGlobalCallingWindow)}
-                  onChange={(e) => setAgentForm({ ...agentForm, inheritGlobalCallingWindow: e.target.checked })}
-                  className="rounded border-violet-300 text-violet-600"
-                />
-                Inherit global calling window
-              </label>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(agentForm.inheritGlobalCallingWindow)}
+                    onChange={(e) => setAgentForm({ ...agentForm, inheritGlobalCallingWindow: e.target.checked })}
+                    className="rounded border-violet-300 text-violet-600"
+                  />
+                  Inherit global calling window
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(agentForm.inheritGlobalLimits)}
+                    onChange={(e) => setAgentForm({ ...agentForm, inheritGlobalLimits: e.target.checked })}
+                    className="rounded border-violet-300 text-violet-600"
+                  />
+                  Inherit global limits
+                </label>
+              </div>
 
               {!agentForm.inheritGlobalCallingWindow && (
                 <div className="grid grid-cols-2 gap-3">
@@ -628,16 +634,6 @@ const VoiceAgentsView: React.FC = () => {
                 </div>
               )}
 
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={Boolean(agentForm.inheritGlobalLimits)}
-                  onChange={(e) => setAgentForm({ ...agentForm, inheritGlobalLimits: e.target.checked })}
-                  className="rounded border-violet-300 text-violet-600"
-                />
-                Inherit global limits
-              </label>
-
               {agentDetail.lastTriggerError && (
                 <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
                   <AlertCircle size={16} className="shrink-0 mt-0.5" />
@@ -646,7 +642,7 @@ const VoiceAgentsView: React.FC = () => {
               )}
 
               {(agentDetail.voiceAgentConfig?.lastTriggerAt || agentDetail.voiceAgentConfig?.lastWebhookAt) && (
-                <div className="text-xs text-slate-500 space-y-1">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                   {agentDetail.voiceAgentConfig?.lastTriggerAt && (
                     <p>Last trigger: {formatDateTimeIST(agentDetail.voiceAgentConfig.lastTriggerAt)}</p>
                   )}
@@ -659,23 +655,26 @@ const VoiceAgentsView: React.FC = () => {
                 </div>
               )}
 
-              <Button onClick={handleSaveAgent} disabled={savingAgent} className="bg-violet-600 hover:bg-violet-500 text-white w-full">
-                {savingAgent ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-                Save agent configuration
-              </Button>
-
-              <Button
-                variant="secondary"
-                onClick={() => setShowTestModal(true)}
-                disabled={!agentForm.voiceTriggerUuid}
-                className="w-full flex items-center justify-center gap-2 border-violet-200 text-violet-800 hover:bg-violet-50"
-              >
-                <PhoneCall size={16} />
-                Test trigger call
-              </Button>
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={handleSaveAgent} disabled={savingAgent} className="bg-violet-600 hover:bg-violet-500 text-white">
+                  {savingAgent ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                  Save agent configuration
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowTestModal(true)}
+                  disabled={!agentForm.voiceTriggerUuid}
+                  className="flex items-center justify-center gap-2 border-violet-200 text-violet-800 hover:bg-violet-50"
+                >
+                  <PhoneCall size={16} />
+                  Test trigger call
+                </Button>
+              </div>
             </div>
           )}
-        </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {selectedAgentId && agentDetail && (

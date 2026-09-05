@@ -39,6 +39,7 @@ export interface PipelineTrace {
   attemptId?: string;
   taskId?: string;
   outboundPayload?: Record<string, unknown>;
+  inboundWebhookPayload?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -109,18 +110,30 @@ function farmerRole(trace: PipelineTrace) {
   return 'next';
 }
 
+function resolvedStepStatus(trace: PipelineTrace, step: PipelineStep): PipelineStepStatus {
+  if (
+    step.key === 'awaiting_webhook' &&
+    step.status === 'running' &&
+    (trace.overallStatus === 'success' ||
+      trace.steps.some((s) => s.key === 'webhook_received' && s.status === 'success'))
+  ) {
+    return 'success';
+  }
+  return step.status;
+}
+
 function resultSummary(trace: PipelineTrace): string {
   const failed = trace.steps.find((s) => s.key === trace.failedAtStep) || trace.steps.find((s) => s.status === 'failed');
-  if (failed) {
+  if (failed && trace.overallStatus !== 'success') {
     const code = failed.errorCode || trace.failedErrorCode;
     const msg = (failed.message || '').replace(/^\[[A-Z]+-\d+\]\s*/, '');
     return [code, msg || failed.label].filter(Boolean).join(' · ');
   }
-  const running = [...trace.steps].reverse().find((s) => s.status === 'running');
-  if (running) return running.message || running.label;
   if (trace.overallStatus === 'success') {
     return trace.workflowRunId != null ? `Completed · run #${trace.workflowRunId}` : 'Completed';
   }
+  const running = [...trace.steps].reverse().find((s) => resolvedStepStatus(trace, s) === 'running');
+  if (running) return running.message || running.label;
   return trace.overallStatus;
 }
 
@@ -129,6 +142,43 @@ function stepTooltip(step: PipelineStep): string {
     .filter(Boolean)
     .join('\n');
 }
+
+function inboundWebhookJson(trace: PipelineTrace): string | null {
+  if (trace.inboundWebhookPayload && Object.keys(trace.inboundWebhookPayload).length > 0) {
+    return JSON.stringify(trace.inboundWebhookPayload, null, 2);
+  }
+  return null;
+}
+
+const JsonBlock: React.FC<{ title: string; json: string | null; empty: string }> = ({ title, json, empty }) => {
+  const copyJson = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (json) void navigator.clipboard.writeText(json);
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-950 text-slate-100 overflow-hidden min-w-0">
+      <div className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-slate-800">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-300">{title}</p>
+        {json && (
+          <button
+            type="button"
+            onClick={copyJson}
+            className="flex items-center gap-1 text-[11px] font-bold text-violet-300 hover:text-white"
+          >
+            <Copy size={12} />
+            Copy JSON
+          </button>
+        )}
+      </div>
+      {json ? (
+        <pre className="px-3 py-2 text-[11px] leading-5 overflow-x-auto whitespace-pre max-h-80">{json}</pre>
+      ) : (
+        <p className="px-3 py-2 text-xs text-slate-400">{empty}</p>
+      )}
+    </div>
+  );
+};
 
 function debugPayloadJson(trace: PipelineTrace): string | null {
   if (trace.outboundPayload && Object.keys(trace.outboundPayload).length > 0) {
@@ -310,7 +360,7 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
                           <div className="flex items-center gap-0.5">
                             {trace.steps.map((step, idx) => (
                               <span key={`${trace._id}-${step.key}-${idx}`} title={stepTooltip(step)}>
-                                {stepIcon(step.status, 14)}
+                                {stepIcon(resolvedStepStatus(trace, step), 14)}
                               </span>
                             ))}
                           </div>
@@ -341,37 +391,27 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
 };
 
 const TraceDetail: React.FC<{ trace: PipelineTrace }> = ({ trace }) => {
-  const json = debugPayloadJson(trace);
+  const outboundJson = debugPayloadJson(trace);
+  const inboundJson = inboundWebhookJson(trace);
   const taskId = taskIdFromTrace(trace);
-
-  const copyJson = (event: React.MouseEvent) => {
-    event.stopPropagation();
-    if (json) void navigator.clipboard.writeText(json);
-  };
 
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-slate-200 bg-slate-950 text-slate-100 overflow-hidden">
-        <div className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-slate-800">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-300">
-            {trace.outboundPayload?.sent === false ? 'Peek JSON (not posted to Dograh)' : 'Data passed to Dograh'}
-          </p>
-          {json && (
-            <button
-              type="button"
-              onClick={copyJson}
-              className="flex items-center gap-1 text-[11px] font-bold text-violet-300 hover:text-white"
-            >
-              <Copy size={12} />
-              Copy JSON
-            </button>
-          )}
-        </div>
-        {json ? (
-          <pre className="px-3 py-2 text-[11px] leading-5 overflow-x-auto whitespace-pre">{json}</pre>
-        ) : (
-          <p className="px-3 py-2 text-xs text-slate-400">No outbound JSON on this trace.</p>
-        )}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        <JsonBlock
+          title={trace.outboundPayload?.sent === false ? 'Peek JSON (not posted to Dograh)' : 'Data passed to Dograh'}
+          json={outboundJson}
+          empty="No outbound JSON on this trace."
+        />
+        <JsonBlock
+          title="JSON received from Dograh webhook"
+          json={inboundJson}
+          empty={
+            trace.overallStatus === 'success'
+              ? 'No webhook JSON stored on this trace (received before this was added).'
+              : 'Waiting for Dograh webhook.'
+          }
+        />
       </div>
       {taskId && (
         <p className="text-xs text-slate-700">
@@ -389,13 +429,15 @@ const TraceDetail: React.FC<{ trace: PipelineTrace }> = ({ trace }) => {
         )}
       </div>
       <ol className="space-y-1.5">
-        {trace.steps.map((step, idx) => (
+        {trace.steps.map((step, idx) => {
+          const status = resolvedStepStatus(trace, step);
+          return (
           <li key={`${trace._id}-detail-${step.key}-${idx}`} className="flex gap-2 text-sm">
-            <div className="mt-0.5">{stepIcon(step.status)}</div>
+            <div className="mt-0.5">{stepIcon(status)}</div>
             <div className="min-w-0">
               <p
                 className={`font-medium ${
-                  step.status === 'failed' ? 'text-red-800' : step.status === 'success' ? 'text-slate-800' : 'text-slate-600'
+                  status === 'failed' ? 'text-red-800' : status === 'success' ? 'text-slate-800' : 'text-slate-600'
                 }`}
               >
                 {step.label}
@@ -412,7 +454,8 @@ const TraceDetail: React.FC<{ trace: PipelineTrace }> = ({ trace }) => {
               {step.at && <p className="text-[10px] text-slate-400">{formatDateTimeIST(step.at)}</p>}
             </div>
           </li>
-        ))}
+          );
+        })}
       </ol>
       {trace.failedAtStep && trace.overallStatus !== 'success' && (
         <div className="px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-900 space-y-1">

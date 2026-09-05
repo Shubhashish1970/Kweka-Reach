@@ -721,7 +721,17 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
       await advancePipelineOnWebhook(
         taskId,
         String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
-        workflowRunId
+        workflowRunId,
+        body,
+        { complete: true }
+      );
+    } else {
+      await advancePipelineOnWebhook(
+        taskId,
+        String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
+        workflowRunId,
+        body,
+        { complete: false }
       );
     }
     if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
@@ -745,7 +755,9 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
   await advancePipelineOnWebhook(
     taskId,
     String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
-    workflowRunId
+    workflowRunId,
+    body,
+    { complete: true }
   );
 
   if (workflowRunId != null && !Number.isNaN(workflowRunId)) {

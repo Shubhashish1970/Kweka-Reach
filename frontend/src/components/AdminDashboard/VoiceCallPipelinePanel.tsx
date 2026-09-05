@@ -54,6 +54,8 @@ export interface OrchestratorDiagnostics {
 
 type TraceFilter = 'all' | 'calls' | 'ticks';
 
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+
 function stepIcon(status: PipelineStepStatus, size = 16) {
   switch (status) {
     case 'success':
@@ -211,6 +213,8 @@ interface VoiceCallPipelinePanelProps {
 const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces, orchestrator }) => {
   const [filter, setFilter] = useState<TraceFilter>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
+  const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     if (filter === 'calls') return traces.filter(isCallTrace);
@@ -220,9 +224,28 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
 
   const callCount = traces.filter(isCallTrace).length;
   const tickCount = traces.length - callCount;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const paged = filtered.slice(pageStart, pageStart + pageSize);
+  const showingFrom = filtered.length === 0 ? 0 : pageStart + 1;
+  const showingTo = Math.min(pageStart + pageSize, filtered.length);
 
   const toggleRow = (id: string) => {
     setExpandedId((current) => (current === id ? null : id));
+  };
+
+  const changeFilter = (value: TraceFilter) => {
+    setFilter(value);
+    setPage(1);
+  };
+
+  const changePageSize = (value: number) => {
+    const next = PAGE_SIZE_OPTIONS.includes(value as (typeof PAGE_SIZE_OPTIONS)[number])
+      ? (value as (typeof PAGE_SIZE_OPTIONS)[number])
+      : 10;
+    setPageSize(next);
+    setPage(1);
   };
 
   return (
@@ -273,7 +296,7 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
             <button
               key={value}
               type="button"
-              onClick={() => setFilter(value)}
+              onClick={() => changeFilter(value)}
               className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
                 filter === value
                   ? 'bg-violet-600 text-white border-violet-600'
@@ -292,7 +315,8 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
               : 'No pipeline traces yet. Run a test call or wait for the orchestrator poll.'}
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
             <table className="w-full text-xs min-w-[880px]">
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wide">
                 <tr>
@@ -307,7 +331,7 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((trace) => {
+                {paged.map((trace) => {
                   const expanded = expandedId === trace._id;
                   const callRow = isCallTrace(trace);
                   return (
@@ -383,6 +407,49 @@ const VoiceCallPipelinePanel: React.FC<VoiceCallPipelinePanelProps> = ({ traces,
                 })}
               </tbody>
             </table>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 py-2 border-t border-slate-200 bg-slate-50">
+            <p className="text-xs text-slate-600">
+              Showing {showingFrom}–{showingTo} of {filtered.length}
+            </p>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <span className="font-bold uppercase tracking-wide text-slate-400">Rows</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => changePageSize(Number(e.target.value))}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800 focus:border-violet-400 focus:ring-violet-400"
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-2 py-1 rounded-md border border-slate-300 text-xs font-bold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white"
+                >
+                  Previous
+                </button>
+                <span className="px-2 text-xs text-slate-600 whitespace-nowrap">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-2 py-1 rounded-md border border-slate-300 text-xs font-bold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
           </div>
         )}
       </div>

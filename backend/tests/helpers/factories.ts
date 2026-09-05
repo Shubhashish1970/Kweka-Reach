@@ -141,7 +141,11 @@ export interface TaskOverrides {
   voiceHangRetryCount?: number;
   voiceAttemptId?: string | null;
   voiceWorkflowRunId?: number | null;
+  voiceWorkflowId?: number | null;
+  voiceDograhEndedAt?: Date | null;
+  voiceResultSource?: 'webhook' | 'timeout' | null;
   callStartedAt?: Date | null;
+  callLog?: Record<string, unknown> | null;
 }
 
 export const makeTask = (

@@ -12,8 +12,8 @@ import {
   submitCallInteractionForTask,
   getActiveVoiceCall,
 } from './taskSubmitService.js';
-import { ingestVoiceWebhookCallResult, loadVoiceCallContext } from './voiceWebhookIngestion.js';
-import { triggerVoiceOutboundCall } from './voiceApiClient.js';
+import { ingestVoiceWebhookCallResult, loadVoiceCallContext, mapVoiceWebhookToSubmitInput } from './voiceWebhookIngestion.js';
+import { triggerVoiceOutboundCall, fetchVoiceWorkflowRun, isVoiceWorkflowRunCompleted, resolveVoiceWorkflowId, type VoiceWorkflowRun } from './voiceApiClient.js';
 import { getOutcomeFromStatus } from '../utils/outcomeHelper.js';
 import { resolveVoiceDialNumber } from '../utils/voiceDialNumber.js';
 import { explainRuntimeBlock, formatVoiceDebugLine, voiceDebugInfo } from '../utils/voiceDebugCodes.js';
@@ -38,6 +38,64 @@ async function getStuckCallTimeoutMs(): Promise<number> {
 
 const VOICE_MAX_TRIES = 2;
 const MAX_BLANK_MOBILE_SKIPS_PER_TICK = 20;
+/** Safety cap if Dograh never reports the run completed (API down). */
+export const LIVE_CALL_HOLD_MINUTES = 10;
+
+export type VoiceRunLookup = (
+  workflowId: string | number,
+  runId: string | number
+) => Promise<VoiceWorkflowRun | null>;
+
+function isSyntheticTimeoutResult(task: ICallTask): boolean {
+  if (task.voiceResultSource === 'timeout') return true;
+  const reason = task.callLog?.nonPurchaseReason || '';
+  return /no webhook|timed out/i.test(reason);
+}
+
+async function observeDograhCallEnded(
+  task: ICallTask,
+  fetchRun: VoiceRunLookup
+): Promise<Date | null> {
+  if (task.voiceDograhEndedAt) return task.voiceDograhEndedAt;
+  if (task.voiceWorkflowRunId == null) return null;
+  const workflowId = resolveVoiceWorkflowId(task.voiceWorkflowId);
+  if (workflowId == null) return null;
+  try {
+    const run = await fetchRun(workflowId, task.voiceWorkflowRunId);
+    if (!isVoiceWorkflowRunCompleted(run)) return null;
+    task.voiceDograhEndedAt = new Date();
+    await task.save();
+    return task.voiceDograhEndedAt;
+  } catch (error) {
+    logger.warn('Voice run completion lookup skipped', {
+      taskId: String(task._id),
+      runId: task.voiceWorkflowRunId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return null;
+  }
+}
+
+async function shouldReleaseVoiceTask(
+  task: ICallTask,
+  baseTimeoutMs: number,
+  fetchRun: VoiceRunLookup
+): Promise<boolean> {
+  const startedAt = task.callStartedAt || task.updatedAt;
+  if (!startedAt) return false;
+  const ageMs = Date.now() - new Date(startedAt).getTime();
+
+  if (task.voiceWorkflowRunId == null) {
+    return ageMs >= baseTimeoutMs;
+  }
+
+  const endedAt = await observeDograhCallEnded(task, fetchRun);
+  if (endedAt) {
+    return Date.now() - new Date(endedAt).getTime() >= baseTimeoutMs;
+  }
+
+  return ageMs >= LIVE_CALL_HOLD_MINUTES * 60_000;
+}
 
 function blankCallLog(callStatus: ICallLog['callStatus'], nonPurchaseReason: string): ICallLog {
   return {
@@ -93,13 +151,17 @@ export async function deferOrFinalizeVoiceNoResponse(
   task: ICallTask,
   reason: string
 ): Promise<'deferred' | 'finalized'> {
-  const used = task.voiceHangRetryCount || 0;
+  const used = Math.min(VOICE_MAX_TRIES, (task.voiceHangRetryCount || 0) + 1);
+  task.voiceHangRetryCount = used;
+  task.callStartedAt = null;
+  task.voiceDograhEndedAt = null;
+  task.voiceResultSource = 'timeout';
+
   if (used >= VOICE_MAX_TRIES) {
     task.status = 'not_reachable';
     task.outcome = getOutcomeFromStatus('not_reachable');
     task.voiceWorkflowRunId = null;
     task.voiceAttemptId = null;
-    task.callStartedAt = null;
     task.callLog = blankCallLog('No Answer', reason);
     task.interactionHistory.push({
       timestamp: new Date(),
@@ -110,16 +172,12 @@ export async function deferOrFinalizeVoiceNoResponse(
     return 'finalized';
   }
 
-  if (used < 1) {
-    task.voiceHangRetryCount = 1;
-  }
   task.status = 'sampled_in_queue';
   task.outcome = getOutcomeFromStatus('sampled_in_queue');
-  task.callStartedAt = null;
   task.interactionHistory.push({
     timestamp: new Date(),
     status: 'sampled_in_queue',
-    notes: `${reason} — disconnected; will retry once after remaining queue items (try ${task.voiceHangRetryCount}/${VOICE_MAX_TRIES})`,
+    notes: `${reason} — disconnected; will retry once after remaining queue items (try ${used}/${VOICE_MAX_TRIES})`,
   });
   await task.save();
   return 'deferred';
@@ -229,11 +287,11 @@ export async function buildVoiceInitialContext(
   };
 }
 
-export async function releaseStuckVoiceTasks(agentId?: string): Promise<number> {
-  const timeoutMs = await getStuckCallTimeoutMs();
-  const cutoff = new Date(Date.now() - timeoutMs);
-  const timeoutLabel =
-    timeoutMs >= 60_000 ? `${Math.round(timeoutMs / 60_000)} min` : `${Math.round(timeoutMs / 1000)}s`;
+export async function releaseStuckVoiceTasks(
+  agentId?: string,
+  fetchRun: VoiceRunLookup = fetchVoiceWorkflowRun
+): Promise<number> {
+  const baseTimeoutMs = await getStuckCallTimeoutMs();
 
   const query: Record<string, unknown> = {
     status: 'in_progress',
@@ -256,16 +314,21 @@ export async function releaseStuckVoiceTasks(agentId?: string): Promise<number> 
 
   let count = 0;
   for (const task of stuck) {
-    const startedAt = task.callStartedAt || task.updatedAt;
-    if (!startedAt || startedAt >= cutoff) continue;
+    if (!(await shouldReleaseVoiceTask(task, baseTimeoutMs, fetchRun))) continue;
 
+    const endedAt = task.voiceDograhEndedAt;
+    const holdLabel = endedAt
+      ? `${Math.round(baseTimeoutMs / 60_000)} min after Dograh closed the call`
+      : task.voiceWorkflowRunId != null
+        ? `${LIVE_CALL_HOLD_MINUTES} min safety hold`
+        : `${Math.round(baseTimeoutMs / 60_000)} min`;
     const result = await deferOrFinalizeVoiceNoResponse(
       task,
-      `Voice call timed out after ${timeoutLabel} — no webhook received`
+      `Voice call timed out after ${holdLabel} — no webhook received`
     );
     count += 1;
     logger.warn(
-      `Released stuck voice task ${task._id} for agent ${task.assignedAgentId} after ${timeoutLabel} (${result})`
+      `Released stuck voice task ${task._id} for agent ${task.assignedAgentId} after ${holdLabel} (${result})`
     );
   }
 
@@ -293,10 +356,7 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
   for (const agent of virtualAgents) {
     if (!isVirtualAgentLive(agent)) continue;
     const agentId = agent._id.toString();
-    const tracer = await VoicePipelineTracer.start(agentId, 'orchestrator_tick');
-    await tracer.pass('orchestrator_enabled', 'Platform orchestrator is on');
-
-    const waitMinutes = platform.stuckCallTimeoutMinutes || 1;
+    let tracer: VoicePipelineTracer | null = null;
 
     try {
       await releaseStuckVoiceTasks(agentId);
@@ -304,40 +364,47 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
 
       const activeCall = await getActiveVoiceCall(agentId);
       if (activeCall) {
-        await tracer.setFarmerName(activeCall.farmerName);
-        await tracer.setTaskId(activeCall.taskId);
-        const started = activeCall.callStartedAt ? new Date(activeCall.callStartedAt).getTime() : Date.now();
-        const elapsedMin = Math.max(0, (Date.now() - started) / 60_000);
-        const remainingMin = Math.max(0, waitMinutes - elapsedMin);
+        logger.debug(
+          `Voice orchestrator: ${agent.name} waiting on ${activeCall.farmerName} (run ${activeCall.workflowRunId ?? 'n/a'}) — skip tick`
+        );
+        continue;
+      }
+
+      const limits = resolveEffectiveLimits(agent, platform);
+      const nextDialAt = agent.voiceAgentConfig?.voiceNextDialAt
+        ? new Date(agent.voiceAgentConfig.voiceNextDialAt)
+        : limits.minGapBetweenCallsSec > 0 && agent.voiceAgentConfig?.lastTriggerAt
+          ? new Date(
+              new Date(agent.voiceAgentConfig.lastTriggerAt).getTime() +
+                limits.minGapBetweenCallsSec * 1000
+            )
+          : null;
+      if (nextDialAt && nextDialAt.getTime() > Date.now()) {
+        logger.debug(
+          `Voice orchestrator: ${agent.name} cooling down until ${nextDialAt.toISOString()} — skip tick`
+        );
+        continue;
+      }
+
+      const tracerStarted = await VoicePipelineTracer.start(agentId, 'orchestrator_tick');
+      tracer = tracerStarted;
+      await tracer.pass('orchestrator_enabled', 'Platform orchestrator is on');
+
+      const nextQueued = await peekNextQueuedFarmer(agentId);
+      if (nextQueued) {
+        await tracer.setFarmerName(nextQueued.farmerName);
+        await tracer.setTaskId(nextQueued.taskId);
         await tracer.setOutboundPayload({
-          sent: true,
-          waiting_for_webhook: true,
-          wait_minutes: waitMinutes,
-          remaining_minutes: Number(remainingMin.toFixed(1)),
-          workflow_run_id: activeCall.workflowRunId,
-          initial_context: { task_id: activeCall.taskId },
+          sent: false,
+          reason: 'Peek only — not posted until a queue call starts',
+          initial_context: { task_id: nextQueued.taskId },
         });
         await tracer.pass(
           'queue_peek',
-          `${activeCall.farmerName} on call (task_id ${activeCall.taskId}) — waiting for webhook`
+          `${nextQueued.farmerName} (task_id ${nextQueued.taskId})`
         );
       } else {
-        const nextQueued = await peekNextQueuedFarmer(agentId);
-        if (nextQueued) {
-          await tracer.setFarmerName(nextQueued.farmerName);
-          await tracer.setTaskId(nextQueued.taskId);
-          await tracer.setOutboundPayload({
-            sent: false,
-            reason: 'Peek only — not posted until a queue call starts',
-            initial_context: { task_id: nextQueued.taskId },
-          });
-          await tracer.pass(
-            'queue_peek',
-            `${nextQueued.farmerName} (task_id ${nextQueued.taskId})`
-          );
-        } else {
-          await tracer.pass('queue_peek', 'Queue is empty — no farmer to dial');
-        }
+        await tracer.pass('queue_peek', 'Queue is empty — no farmer to dial');
       }
 
       const runtimeState = await deriveAgentRuntimeState(agent, platform);
@@ -345,34 +412,14 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
       if (runtimeState !== 'idle') {
         if (runtimeState === 'not_configured') {
           logger.warn(`Voice agent ${agent.name} not configured (missing trigger UUID)`);
-        } else if (runtimeState !== 'calling') {
+        } else {
           logger.debug(`Voice orchestrator: agent ${agent.name} skipped (state=${runtimeState})`);
         }
-        const debug =
-          runtimeState === 'calling'
-            ? voiceDebugInfo(
-                'VA-007',
-                activeCall
-                  ? `${activeCall.farmerName} — next call after webhook or ${waitMinutes} min`
-                  : `next call after webhook or ${waitMinutes} min`
-              )
-            : explainRuntimeBlock(agent, runtimeState);
+        const debug = explainRuntimeBlock(agent, runtimeState);
         await tracer.block('agent_runtime', formatVoiceDebugLine(debug), debug.code);
         continue;
       }
       await tracer.pass('agent_runtime', 'Agent is ready');
-
-      const limits = resolveEffectiveLimits(agent, platform);
-
-      if (limits.minGapBetweenCallsSec > 0 && agent.voiceAgentConfig?.lastTriggerAt) {
-        const elapsedSec = (Date.now() - new Date(agent.voiceAgentConfig.lastTriggerAt).getTime()) / 1000;
-        if (elapsedSec < limits.minGapBetweenCallsSec) {
-          const waitSec = Math.ceil(limits.minGapBetweenCallsSec - elapsedSec);
-          const debug = voiceDebugInfo('VA-008', `wait ${waitSec}s`);
-          await tracer.block('min_gap', formatVoiceDebugLine(debug), debug.code);
-          continue;
-        }
-      }
       await tracer.pass('min_gap', 'Gap satisfied');
 
       let dialedThisTick = false;
@@ -473,11 +520,10 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
 
           await CallTask.findByIdAndUpdate(task._id, {
             voiceWorkflowRunId: result.workflow_run_id,
+            ...(result.workflow_id != null ? { voiceWorkflowId: result.workflow_id } : {}),
             voiceAttemptId: initialContext.attempt_id,
-            voiceHangRetryCount: Math.min(
-              VOICE_MAX_TRIES,
-              (task.voiceHangRetryCount || 0) + 1
-            ),
+            voiceDograhEndedAt: null,
+            voiceResultSource: null,
           });
 
           await tracer.setWorkflowRunId(result.workflow_run_id);
@@ -509,7 +555,9 @@ export async function processVirtualAgentQueueOnce(): Promise<void> {
     } catch (agentError) {
       const msg = agentError instanceof Error ? agentError.message : 'Orchestrator error';
       logger.error(`Voice orchestrator error for agent ${agent._id}:`, agentError);
-      await tracer.fail('agent_runtime', msg);
+      if (tracer) {
+        await tracer.fail('agent_runtime', msg);
+      }
     }
   }
 }
@@ -571,6 +619,11 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
     throw err;
   }
 
+  const effectiveRunId =
+    workflowRunId != null && !Number.isNaN(workflowRunId)
+      ? workflowRunId
+      : task.voiceWorkflowRunId ?? null;
+
   if (
     incomingAttemptId &&
     task.voiceAttemptId &&
@@ -582,21 +635,12 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
     return { duplicate: true, taskId, staleAttempt: true };
   }
 
-  if (
-    incomingAttemptId &&
-    task.voiceAttemptId === incomingAttemptId &&
-    task.status === 'sampled_in_queue' &&
-    (task.voiceHangRetryCount || 0) >= 1 &&
-    (task.voiceHangRetryCount || 0) < VOICE_MAX_TRIES &&
-    !task.callLog
-  ) {
-    return { duplicate: true, taskId, deferredRetry: true };
-  }
+  const timeoutPlaceholder = isSyntheticTimeoutResult(task);
 
-  if (task.callLog) {
-    if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
+  if (task.callLog && !timeoutPlaceholder) {
+    if (effectiveRunId != null) {
       await VoiceWebhookReceipt.findOneAndUpdate(
-        { workflowRunId },
+        { workflowRunId: effectiveRunId },
         {
           taskId: task._id,
           attemptId: String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
@@ -619,6 +663,42 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
     callContext: await loadVoiceCallContext(task),
   });
 
+  if (
+    !timeoutPlaceholder &&
+    incomingAttemptId &&
+    task.voiceAttemptId === incomingAttemptId &&
+    task.status === 'sampled_in_queue' &&
+    (task.voiceHangRetryCount || 0) >= 1 &&
+    (task.voiceHangRetryCount || 0) < VOICE_MAX_TRIES &&
+    !task.callLog &&
+    submitInput.callStatus === 'No Answer'
+  ) {
+    return { duplicate: true, taskId, deferredRetry: true };
+  }
+
+  if (submitInput.callStatus === 'No Answer' && timeoutPlaceholder) {
+    await recordAgentWebhook(agentId);
+    await advancePipelineOnWebhook(
+      taskId,
+      String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
+      effectiveRunId,
+      body,
+      { complete: true }
+    );
+    if (effectiveRunId != null) {
+      await VoiceWebhookReceipt.findOneAndUpdate(
+        { workflowRunId: effectiveRunId },
+        {
+          taskId: task._id,
+          attemptId: String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
+          processedAt: new Date(),
+        },
+        { upsert: true }
+      );
+    }
+    return { duplicate: true, taskId };
+  }
+
   if (submitInput.callStatus === 'No Answer') {
     const result = await deferOrFinalizeVoiceNoResponse(
       task,
@@ -629,7 +709,7 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
       await advancePipelineOnWebhook(
         taskId,
         String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
-        workflowRunId,
+        effectiveRunId,
         body,
         { complete: true }
       );
@@ -637,25 +717,37 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
       await advancePipelineOnWebhook(
         taskId,
         String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
-        workflowRunId,
+        effectiveRunId,
         body,
         { complete: false }
       );
     }
-    if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
-      await VoiceWebhookReceipt.create({
-        workflowRunId,
-        taskId: task._id,
-        attemptId: String(body.attempt_id || body.attemptId || ''),
-        processedAt: new Date(),
-      });
+    if (effectiveRunId != null) {
+      await VoiceWebhookReceipt.findOneAndUpdate(
+        { workflowRunId: effectiveRunId },
+        {
+          taskId: task._id,
+          attemptId: String(body.attempt_id || body.attemptId || ''),
+          processedAt: new Date(),
+        },
+        { upsert: true }
+      );
     }
     return { duplicate: false, taskId, deferredRetry: result === 'deferred' };
   }
 
   await submitCallInteractionForTask(taskId, agentId, submitInput, {
     skipAgentCheck: true,
-    historyNotes: 'Voice agent webhook submitted call interaction',
+    historyNotes: timeoutPlaceholder
+      ? 'Voice webhook replaced timeout placeholder'
+      : 'Voice agent webhook submitted call interaction',
+  });
+
+  await CallTask.findByIdAndUpdate(taskId, {
+    $set: {
+      voiceResultSource: 'webhook',
+      voiceDograhEndedAt: null,
+    },
   });
 
   await recordAgentWebhook(agentId);
@@ -663,18 +755,21 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
   await advancePipelineOnWebhook(
     taskId,
     String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
-    workflowRunId,
+    effectiveRunId,
     body,
     { complete: true }
   );
 
-  if (workflowRunId != null && !Number.isNaN(workflowRunId)) {
-    await VoiceWebhookReceipt.create({
-      workflowRunId,
-      taskId: task._id,
-      attemptId: String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
-      processedAt: new Date(),
-    });
+  if (effectiveRunId != null) {
+    await VoiceWebhookReceipt.findOneAndUpdate(
+      { workflowRunId: effectiveRunId },
+      {
+        taskId: task._id,
+        attemptId: String(body.attempt_id || body.attemptId || task.voiceAttemptId || ''),
+        processedAt: new Date(),
+      },
+      { upsert: true }
+    );
   }
 
   return { duplicate: false, taskId };

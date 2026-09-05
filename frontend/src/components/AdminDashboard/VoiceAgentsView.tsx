@@ -369,7 +369,7 @@ const VoiceAgentsView: React.FC = () => {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-violet-400 focus:border-violet-400"
               />
               <span className="block mt-1 text-[11px] text-slate-500">
-                Do not start the next call until Dograh posts the webhook, or this many minutes pass with no webhook.
+                Starts after Dograh closes the call, not when we dial. Wait this many minutes for the webhook before timing out. The next farmer is not dialed while the call is still live.
               </span>
             </label>
             <label className="flex items-center gap-2 text-sm font-medium text-slate-700">

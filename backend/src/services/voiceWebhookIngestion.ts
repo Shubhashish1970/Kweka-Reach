@@ -192,7 +192,18 @@ function parseInteger(value: unknown): number | null {
 }
 
 function mapVoiceCallStatus(payload: Record<string, unknown>): ICallLog['callStatus'] {
-  const raw = String(pick(payload, 'call_status', 'callStatus', 'telephony_status', 'end_reason') ?? '').trim();
+  const raw = String(
+    pick(
+      payload,
+      'call_status',
+      'callStatus',
+      'telephony_status',
+      'end_reason',
+      'call_disposition',
+      'callDisposition',
+      'disposition'
+    ) ?? ''
+  ).trim();
   const s = raw.toLowerCase().replace(/_/g, ' ');
   if (!raw) return 'No Answer';
   if (VOICE_CALL_STATUSES.includes(raw as ICallLog['callStatus'])) {
@@ -361,7 +372,10 @@ export function mapVoiceWebhookToSubmitInput(
 ): SubmitCallInteractionInput {
   const payload = flattenWebhookBody(body);
   const callStatus = mapVoiceCallStatus(payload);
-  const duration = Math.max(0, parseInteger(pick(payload, 'call_duration_seconds', 'callDurationSeconds')) || 0);
+  const duration = Math.max(
+    0,
+    parseInteger(pick(payload, 'call_duration_seconds', 'callDurationSeconds', 'duration', 'call_duration')) || 0
+  );
   const recordingUrl = pickHttpUrl(
     payload,
     'voice_recording_url',

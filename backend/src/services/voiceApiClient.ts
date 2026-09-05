@@ -5,6 +5,7 @@ export interface VoiceTriggerResponse {
   status: string;
   workflow_run_id: number;
   workflow_run_name: string;
+  workflow_id?: number;
 }
 
 export interface VoiceTriggerPayload {
@@ -97,6 +98,9 @@ export async function triggerVoiceOutboundCall(
 export interface VoiceWorkflowRun {
   id?: number;
   workflow_id?: number;
+  is_completed?: boolean;
+  status?: string;
+  current_status?: string;
   transcript_url?: string | null;
   transcript_public_url?: string | null;
   recording_url?: string | null;
@@ -104,6 +108,22 @@ export interface VoiceWorkflowRun {
   cost_info?: { call_duration_seconds?: number | string };
   gathered_context?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+export function isVoiceWorkflowRunCompleted(run: VoiceWorkflowRun | null | undefined): boolean {
+  if (!run) return false;
+  if (run.is_completed === true) return true;
+  const status = String(run.status ?? run.current_status ?? '')
+    .toLowerCase()
+    .replace(/[_-]/g, ' ')
+    .trim();
+  return ['completed', 'failed', 'ended', 'done', 'complete'].includes(status);
+}
+
+export function resolveVoiceWorkflowId(taskWorkflowId?: number | null): string | number | null {
+  if (taskWorkflowId != null && Number.isFinite(taskWorkflowId)) return taskWorkflowId;
+  const fromEnv = process.env.VOICE_WORKFLOW_ID?.trim();
+  return fromEnv || null;
 }
 
 function withTimeout(timeoutMs: number): AbortSignal {

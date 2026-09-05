@@ -72,6 +72,12 @@ export interface ICallTask extends Document {
   voiceAttemptId?: string | null;
   /** Dial attempts used for hang/no-response handling; hard cap is 2. */
   voiceHangRetryCount?: number;
+  /** Dograh workflow id for run lookup (`GET /workflow/{id}/runs/{runId}`). */
+  voiceWorkflowId?: number | null;
+  /** When Reach observed Dograh `is_completed` for the current run. */
+  voiceDograhEndedAt?: Date | null;
+  /** How the current callLog was written — timeout placeholders can be replaced by a late webhook. */
+  voiceResultSource?: 'webhook' | 'timeout' | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -262,6 +268,19 @@ const CallTaskSchema = new Schema<ICallTask>(
       default: 0,
       min: 0,
       max: [2, 'voiceHangRetryCount cannot exceed 2 (maximum 2 tries)'],
+    },
+    voiceWorkflowId: {
+      type: Number,
+      default: null,
+    },
+    voiceDograhEndedAt: {
+      type: Date,
+      default: null,
+    },
+    voiceResultSource: {
+      type: String,
+      enum: ['webhook', 'timeout'],
+      default: null,
     },
   },
   {

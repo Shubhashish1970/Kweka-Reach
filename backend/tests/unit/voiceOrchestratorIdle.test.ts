@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { isVirtualAgentLive } from '../../src/services/voiceAgentAdminService.js';
+import { apiFailBackoffMs, isVirtualAgentLive } from '../../src/services/voiceAgentAdminService.js';
 
 describe('isVirtualAgentLive', () => {
   test('running and active is live', () => {
@@ -31,5 +31,16 @@ describe('isVirtualAgentLive', () => {
       } as any)
     ).toBe(false);
     expect(isVirtualAgentLive({ isActive: true } as any)).toBe(false);
+  });
+});
+
+describe('apiFailBackoffMs', () => {
+  test('backs off 2 then 4 minutes, capped at 10', () => {
+    expect(apiFailBackoffMs(0)).toBe(0);
+    expect(apiFailBackoffMs(1)).toBe(2 * 60 * 1000);
+    expect(apiFailBackoffMs(2)).toBe(4 * 60 * 1000);
+    expect(apiFailBackoffMs(3)).toBe(8 * 60 * 1000);
+    expect(apiFailBackoffMs(4)).toBe(10 * 60 * 1000);
+    expect(apiFailBackoffMs(8)).toBe(10 * 60 * 1000);
   });
 });

@@ -22,6 +22,7 @@ export const DEFAULT_VOICE_AGENT_CONFIG = (): IVoiceAgentConfig => ({
   inheritGlobalCallingWindow: true,
   inheritGlobalLimits: true,
   consecutiveApiFailures: 0,
+  voiceNextDialAt: null,
   voiceDialOverrideEnabled: false,
   voiceDialOverrideNumber: null,
 });
@@ -251,6 +252,12 @@ export async function countLiveVirtualAgents(): Promise<number> {
     isActive: true,
     'voiceAgentConfig.voiceStatus': 'running',
   });
+}
+
+export function apiFailBackoffMs(consecutiveFailures: number): number {
+  if (consecutiveFailures <= 0) return 0;
+  const minutes = Math.min(10, 2 ** Math.min(consecutiveFailures, 4));
+  return minutes * 60 * 1000;
 }
 
 export type DerivedVoiceRuntimeState =
@@ -517,14 +524,20 @@ export async function recordAgentTriggerResult(
 
   const cfg = agent.voiceAgentConfig;
   cfg.lastTriggerAt = new Date();
+  const platform = await getOrCreateVoicePlatformSettings();
+  const limits = resolveEffectiveLimits(agent, platform);
+  const gapMs = Math.max(0, (limits.minGapBetweenCallsSec || 0) * 1000);
+
   if (success) {
     cfg.lastSuccessfulTriggerAt = new Date();
     cfg.lastTriggerError = null;
     cfg.consecutiveApiFailures = 0;
+    cfg.voiceNextDialAt = gapMs > 0 ? new Date(Date.now() + gapMs) : null;
   } else {
     cfg.lastTriggerError = errorMessage || 'Trigger failed';
     cfg.consecutiveApiFailures = (cfg.consecutiveApiFailures || 0) + 1;
-    const platform = await getOrCreateVoicePlatformSettings();
+    const backoffMs = apiFailBackoffMs(cfg.consecutiveApiFailures);
+    cfg.voiceNextDialAt = new Date(Date.now() + Math.max(gapMs, backoffMs));
     if (cfg.consecutiveApiFailures >= platform.autoPauseAfterConsecutiveFailures) {
       cfg.voiceStatus = 'paused';
       cfg.pauseReason = `Auto-paused after ${cfg.consecutiveApiFailures} consecutive API failures`;

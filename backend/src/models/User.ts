@@ -31,6 +31,8 @@ export interface IVoiceAgentConfig {
   lastTriggerError?: string | null;
   lastWebhookAt?: Date;
   lastSuccessfulTriggerAt?: Date;
+  /** Earliest time the orchestrator may place another outbound dial for this agent. */
+  voiceNextDialAt?: Date | null;
   configUpdatedAt?: Date;
   configUpdatedByUserId?: mongoose.Types.ObjectId;
   /** When true, orchestrator dials voiceDialOverrideNumber instead of farmer mobile */
@@ -144,6 +146,7 @@ const UserSchema = new Schema<IUser>(
       lastTriggerError: { type: String, default: null },
       lastWebhookAt: { type: Date, default: null },
       lastSuccessfulTriggerAt: { type: Date, default: null },
+      voiceNextDialAt: { type: Date, default: null },
       configUpdatedAt: { type: Date, default: null },
       configUpdatedByUserId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
       voiceDialOverrideEnabled: { type: Boolean, default: false },

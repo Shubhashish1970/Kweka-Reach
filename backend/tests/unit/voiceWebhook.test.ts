@@ -1,5 +1,5 @@
 import { describe, expect, test, afterEach, jest } from '@jest/globals';
-import { buildVoiceTriggerUrl } from '../../src/services/voiceApiClient.js';
+import { buildVoiceTriggerUrl, isVoiceWorkflowRunCompleted } from '../../src/services/voiceApiClient.js';
 import {
   mapVoiceWebhookToSubmitInput,
   ingestVoiceWebhookCallResult,
@@ -99,6 +99,22 @@ describe('voice integration helpers', () => {
       telephony_status: 'no-answer',
     });
     expect(input.callStatus).toBe('No Answer');
+  });
+
+  test('maps Dograh call_disposition and duration fields', () => {
+    const input = mapVoiceWebhookToSubmitInput({
+      call_disposition: 'completed',
+      duration: 86,
+    });
+    expect(input.callStatus).toBe('Connected');
+    expect(input.callDurationSeconds).toBe(86);
+  });
+
+  test('isVoiceWorkflowRunCompleted uses is_completed and status', () => {
+    expect(isVoiceWorkflowRunCompleted({ is_completed: true })).toBe(true);
+    expect(isVoiceWorkflowRunCompleted({ is_completed: false, status: 'in_progress' })).toBe(false);
+    expect(isVoiceWorkflowRunCompleted({ status: 'completed' })).toBe(true);
+    expect(isVoiceWorkflowRunCompleted(null)).toBe(false);
   });
 
   const masters = {

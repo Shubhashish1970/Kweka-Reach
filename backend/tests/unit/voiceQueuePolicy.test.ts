@@ -53,7 +53,7 @@ describe('deferOrFinalizeVoiceNoResponse', () => {
     expect(updated?.callStartedAt).toBeNull();
   });
 
-  test('hang after first counted try still requeues (retry remaining)', async () => {
+  test('hang after first counted try is the second miss and closes the task', async () => {
     const farmer = await makeFarmer();
     const activity = await makeActivity([farmer._id]);
     const task = await makeTask(farmer._id, activity._id, {
@@ -64,10 +64,11 @@ describe('deferOrFinalizeVoiceNoResponse', () => {
 
     const result = await deferOrFinalizeVoiceNoResponse(task, 'No answer');
 
-    expect(result).toBe('deferred');
+    expect(result).toBe('finalized');
     const updated = await CallTask.findById(task._id);
-    expect(updated?.status).toBe('sampled_in_queue');
-    expect(updated?.voiceHangRetryCount).toBe(1);
+    expect(updated?.status).toBe('not_reachable');
+    expect(updated?.voiceHangRetryCount).toBe(2);
+    expect(updated?.voiceResultSource).toBe('timeout');
   });
 
   test('third attempt is blocked — hang at 2 tries marks not_reachable', async () => {
@@ -194,6 +195,110 @@ describe('releaseStuckVoiceTasks', () => {
     expect(updated?.status).toBe('sampled_in_queue');
     expect(updated?.voiceHangRetryCount).toBe(1);
   });
+
+  test('does not release a live Dograh run after only a few minutes', async () => {
+    const lead = await makeTeamLead();
+    const agent = await makeAgent(lead._id);
+    const farmer = await makeFarmer();
+    const activity = await makeActivity([farmer._id]);
+    const task = await makeTask(farmer._id, activity._id, {
+      status: 'in_progress',
+      assignedAgentId: agent._id,
+      voiceAttemptId: 'live-run',
+      voiceWorkflowRunId: 440,
+      callStartedAt: new Date(Date.now() - 2 * 60 * 1000),
+    });
+
+    const count = await releaseStuckVoiceTasks(agent._id.toString());
+    expect(count).toBe(0);
+
+    const updated = await CallTask.findById(task._id);
+    expect(updated?.status).toBe('in_progress');
+  });
+
+  test('releases a live Dograh run after the 10 minute hold', async () => {
+    const lead = await makeTeamLead();
+    const agent = await makeAgent(lead._id);
+    const farmer = await makeFarmer();
+    const activity = await makeActivity([farmer._id]);
+    const task = await makeTask(farmer._id, activity._id, {
+      status: 'in_progress',
+      assignedAgentId: agent._id,
+      voiceAttemptId: 'live-run-expired',
+      voiceWorkflowRunId: 440,
+      callStartedAt: new Date(Date.now() - 11 * 60 * 1000),
+    });
+
+    const count = await releaseStuckVoiceTasks(agent._id.toString());
+    expect(count).toBe(1);
+
+    const updated = await CallTask.findById(task._id);
+    expect(updated?.status).toBe('sampled_in_queue');
+  });
+
+  test('does not start webhook wait until Dograh has closed the call', async () => {
+    const lead = await makeTeamLead();
+    const agent = await makeAgent(lead._id);
+    const farmer = await makeFarmer();
+    const activity = await makeActivity([farmer._id]);
+    const task = await makeTask(farmer._id, activity._id, {
+      status: 'in_progress',
+      assignedAgentId: agent._id,
+      voiceAttemptId: 'live-still-on',
+      voiceWorkflowRunId: 440,
+      voiceWorkflowId: 9,
+      callStartedAt: new Date(Date.now() - 8 * 60 * 1000),
+    });
+
+    const count = await releaseStuckVoiceTasks(agent._id.toString(), async () => ({
+      is_completed: false,
+    }));
+    expect(count).toBe(0);
+    const updated = await CallTask.findById(task._id);
+    expect(updated?.status).toBe('in_progress');
+    expect(updated?.voiceDograhEndedAt).toBeNull();
+  });
+
+  test('waits the configured minutes after Dograh closes before timing out', async () => {
+    const lead = await makeTeamLead();
+    const agent = await makeAgent(lead._id);
+    const farmer = await makeFarmer();
+    const activity = await makeActivity([farmer._id]);
+    const task = await makeTask(farmer._id, activity._id, {
+      status: 'in_progress',
+      assignedAgentId: agent._id,
+      voiceAttemptId: 'just-ended',
+      voiceWorkflowRunId: 440,
+      voiceDograhEndedAt: new Date(Date.now() - 20 * 1000),
+      callStartedAt: new Date(Date.now() - 5 * 60 * 1000),
+    });
+
+    const count = await releaseStuckVoiceTasks(agent._id.toString());
+    expect(count).toBe(0);
+    const updated = await CallTask.findById(task._id);
+    expect(updated?.status).toBe('in_progress');
+  });
+
+  test('releases after wait-for-webhook minutes once Dograh closed the call', async () => {
+    const lead = await makeTeamLead();
+    const agent = await makeAgent(lead._id);
+    const farmer = await makeFarmer();
+    const activity = await makeActivity([farmer._id]);
+    const task = await makeTask(farmer._id, activity._id, {
+      status: 'in_progress',
+      assignedAgentId: agent._id,
+      voiceAttemptId: 'ended-waited',
+      voiceWorkflowRunId: 440,
+      voiceDograhEndedAt: new Date(Date.now() - 2 * 60 * 1000),
+      callStartedAt: new Date(Date.now() - 6 * 60 * 1000),
+    });
+
+    const count = await releaseStuckVoiceTasks(agent._id.toString());
+    expect(count).toBe(1);
+    const updated = await CallTask.findById(task._id);
+    expect(updated?.status).toBe('sampled_in_queue');
+    expect(updated?.voiceResultSource).toBe('timeout');
+  });
 });
 
 describe('handleVoiceWebhook no-response retry', () => {
@@ -268,5 +373,53 @@ describe('handleVoiceWebhook no-response retry', () => {
     expect(result.deferredRetry).toBe(false);
     const updated = await CallTask.findById(task._id);
     expect(updated?.status).toBe('not_reachable');
+  });
+
+  test('late webhook replaces a timeout No Answer with the real call result', async () => {
+    const lead = await makeTeamLead();
+    const agent = await makeAgent(lead._id);
+    const farmer = await makeFarmer();
+    const activity = await makeActivity([farmer._id]);
+    const task = await makeTask(farmer._id, activity._id, {
+      status: 'not_reachable',
+      assignedAgentId: agent._id,
+      voiceAttemptId: null,
+      voiceWorkflowRunId: 440,
+      voiceResultSource: 'timeout',
+      voiceHangRetryCount: 2,
+      callLog: {
+        timestamp: new Date(),
+        callStatus: 'No Answer',
+        callDurationSeconds: 0,
+        didAttend: null,
+        didRecall: null,
+        cropsDiscussed: [],
+        productsDiscussed: [],
+        hasPurchased: null,
+        willingToPurchase: null,
+        likelyPurchaseDate: '',
+        nonPurchaseReason: 'Voice call timed out after 1 min after Dograh closed the call — no webhook received',
+        purchasedProducts: [],
+        farmerComments: '',
+        sentiment: 'N/A',
+      },
+    });
+
+    const result = await handleVoiceWebhook({
+      task_id: task._id.toString(),
+      workflow_run_id: 440,
+      call_disposition: 'completed',
+      duration: 86,
+      did_attend: 'Yes, I attended',
+      did_recall: true,
+      farmer_comments: 'Will buy next week',
+    });
+
+    expect(result.duplicate).toBe(false);
+    const updated = await CallTask.findById(task._id);
+    expect(updated?.status).toBe('completed');
+    expect(updated?.callLog?.callStatus).toBe('Connected');
+    expect(updated?.callLog?.callDurationSeconds).toBe(86);
+    expect(updated?.voiceResultSource).toBe('webhook');
   });
 });

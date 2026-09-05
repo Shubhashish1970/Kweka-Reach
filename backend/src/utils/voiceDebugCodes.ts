@@ -48,7 +48,7 @@ export const VOICE_DEBUG_CATALOG: Record<VoiceDebugCode, Omit<VoiceDebugInfo, 'c
   },
   'VA-007': {
     message: 'Agent already has a call in progress',
-    fix: 'Wait for the Dograh webhook. If none arrives, the next call starts after Wait for webhook (minutes) in Global platform settings.',
+    fix: 'Wait until Dograh closes the call and the webhook arrives. Wait for webhook (minutes) starts after the call ends, not when it is dialed.',
   },
   'VA-008': {
     message: 'Minimum gap between calls not satisfied',

@@ -94,6 +94,83 @@ export async function triggerVoiceOutboundCall(
   return data as VoiceTriggerResponse;
 }
 
+export interface VoiceWorkflowRun {
+  id?: number;
+  workflow_id?: number;
+  transcript_url?: string | null;
+  transcript_public_url?: string | null;
+  recording_url?: string | null;
+  recording_public_url?: string | null;
+  cost_info?: { call_duration_seconds?: number | string };
+  gathered_context?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+function withTimeout(timeoutMs: number): AbortSignal {
+  return AbortSignal.timeout(timeoutMs);
+}
+
+function voiceAuthHeaders(): Record<string, string> {
+  return {
+    Accept: 'application/json, text/plain, */*',
+    'X-API-Key': getVoiceApiKey(),
+  };
+}
+
+/** Look up a Dograh run for artifact URLs, duration, and gathered_context. */
+export async function fetchVoiceWorkflowRun(
+  workflowId: string | number,
+  runId: string | number,
+  timeoutMs = 8000
+): Promise<VoiceWorkflowRun | null> {
+  const url = `${getVoiceApiBaseUrl()}/api/v1/workflow/${workflowId}/runs/${runId}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: voiceAuthHeaders(),
+    signal: withTimeout(timeoutMs),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    logger.warn('Voice workflow run lookup failed', {
+      status: response.status,
+      workflowId,
+      runId,
+      body: text.slice(0, 300),
+    });
+    return null;
+  }
+  try {
+    return text ? (JSON.parse(text) as VoiceWorkflowRun) : null;
+  } catch {
+    logger.warn('Voice workflow run response was not JSON', { workflowId, runId });
+    return null;
+  }
+}
+
+/** Download a transcript/recording URL. Sends the org API key when configured. */
+export async function fetchVoiceArtifactText(url: string, timeoutMs = 8000): Promise<string> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json, text/plain, */*',
+  };
+  try {
+    headers['X-API-Key'] = getVoiceApiKey();
+  } catch {
+    /* public artifact URLs do not need the org key */
+  }
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    redirect: 'follow',
+    signal: withTimeout(timeoutMs),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Transcript fetch returned ${response.status}`);
+  }
+  return text;
+}
+
 export function toIndianE164(mobileNumber: string): string {
   const digits = String(mobileNumber || '').replace(/\D/g, '');
   if (digits.length === 10) return `+91${digits}`;

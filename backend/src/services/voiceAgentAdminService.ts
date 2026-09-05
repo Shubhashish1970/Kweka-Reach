@@ -599,6 +599,8 @@ export async function testVoiceAgentTrigger(
     mdo_name: 'Test MDO',
     event_date: new Date().toISOString(),
     product_name: 'Test Product',
+    product_names: 'Test Product',
+    crop_names: '',
     preferred_language: agent.languageCapabilities?.[0] || 'Hindi',
   };
   const triggerPayload = {

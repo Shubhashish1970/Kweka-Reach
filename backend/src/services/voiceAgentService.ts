@@ -10,9 +10,9 @@ import { getNextVoiceTaskForAgent } from './taskService.js';
 import {
   markTaskInProgressForAgent,
   submitCallInteractionForTask,
-  SubmitCallInteractionInput,
   getActiveVoiceCall,
 } from './taskSubmitService.js';
+import { ingestVoiceWebhookCallResult, loadVoiceCallContext } from './voiceWebhookIngestion.js';
 import { triggerVoiceOutboundCall } from './voiceApiClient.js';
 import { getOutcomeFromStatus } from '../utils/outcomeHelper.js';
 import { resolveVoiceDialNumber } from '../utils/voiceDialNumber.js';
@@ -160,6 +160,8 @@ export interface VoiceInitialContext {
   mdo_name: string;
   event_date: string;
   product_name: string;
+  product_names: string;
+  crop_names: string;
   preferred_language: string;
 }
 
@@ -178,116 +180,11 @@ function formatActivityEventDate(date: Date | string | undefined): string {
   return `${day}-${month}-${year} ${pad(hours)}:${minutes} ${ampm}`;
 }
 
-function parseStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map((v) => String(v).trim()).filter(Boolean);
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return [];
-    if (trimmed.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed)) return parsed.map((v) => String(v).trim()).filter(Boolean);
-      } catch {
-        /* fall through */
-      }
-    }
-    return trimmed.split(/[,;|]/).map((s) => s.trim()).filter(Boolean);
-  }
-  return [];
-}
-
-function parseBoolean(value: unknown): boolean | null {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'boolean') return value;
-  const s = String(value).toLowerCase().trim();
-  if (['true', 'yes', '1'].includes(s)) return true;
-  if (['false', 'no', '0'].includes(s)) return false;
-  return null;
-}
-
-function mapVoiceCallStatus(payload: Record<string, unknown>): ICallLog['callStatus'] {
-  const raw =
-    payload.call_status ||
-    payload.callStatus ||
-    payload.telephony_status ||
-    payload.end_reason ||
-    '';
-  const s = String(raw).toLowerCase().replace(/_/g, ' ');
-
-  if (s.includes('invalid')) return 'Invalid';
-  if (s.includes('no answer') || s === 'no-answer' || s.includes('not reachable')) return 'No Answer';
-  if (s.includes('busy') || s.includes('disconnected')) return 'Disconnected';
-  if (s.includes('voicemail')) return 'No Answer';
-  if (s.includes('connect') || s.includes('completed') || s.includes('end call') || s.includes('bot hangup')) {
-    return 'Connected';
-  }
-  if (s.includes('failed') || s.includes('error') || s.includes('canceled')) return 'Not Reachable';
-  return 'Connected';
-}
-
-function mapDidAttend(value: unknown): ICallLog['didAttend'] {
-  if (value === null || value === undefined || value === '') return null;
-  const s = String(value).trim();
-  const allowed: ICallLog['didAttend'][] = [
-    'Yes, I attended',
-    'No, I missed',
-    "Don't recall",
-    'Identity Wrong',
-    'Not a Farmer',
-  ];
-  if (allowed.includes(s as ICallLog['didAttend'])) return s as ICallLog['didAttend'];
-  const lower = s.toLowerCase();
-  if (lower.includes('yes') || lower.includes('attended')) return 'Yes, I attended';
-  if (lower.includes('missed') || lower.includes('no')) return 'No, I missed';
-  if (lower.includes("don't") || lower.includes('recall')) return "Don't recall";
-  if (lower.includes('wrong') || lower.includes('identity')) return 'Identity Wrong';
-  if (lower.includes('not a farmer')) return 'Not a Farmer';
-  return null;
-}
-
-function mapSentiment(value: unknown): ICallLog['sentiment'] {
-  const s = String(value || 'N/A').trim();
-  if (['Positive', 'Negative', 'Neutral', 'N/A'].includes(s)) return s as ICallLog['sentiment'];
-  const lower = s.toLowerCase();
-  if (lower.includes('pos')) return 'Positive';
-  if (lower.includes('neg')) return 'Negative';
-  if (lower.includes('neut')) return 'Neutral';
-  return 'N/A';
-}
-
-export function mapVoiceWebhookToSubmitInput(body: Record<string, unknown>): SubmitCallInteractionInput {
-  const recordingUrl = String(
-    body.recording_url ?? body.recordingUrl ?? body.recording ?? ''
-  ).trim();
-  const transcriptUrl = String(
-    body.transcript_url ?? body.transcriptUrl ?? body.transcript ?? ''
-  ).trim();
-
-  return {
-    callStatus: mapVoiceCallStatus(body),
-    callDurationSeconds: Number(body.call_duration_seconds ?? body.callDurationSeconds ?? 0),
-    didAttend: mapDidAttend(body.did_attend ?? body.didAttend),
-    didRecall: parseBoolean(body.did_recall ?? body.didRecall),
-    cropsDiscussed: parseStringArray(body.crops_discussed ?? body.cropsDiscussed),
-    productsDiscussed: parseStringArray(body.products_discussed ?? body.productsDiscussed),
-    hasPurchased: parseBoolean(body.has_purchased ?? body.hasPurchased),
-    willingToPurchase: parseBoolean(body.willing_to_purchase ?? body.willingToPurchase),
-    likelyPurchaseDate: String(body.likely_purchase_date ?? body.likelyPurchaseDate ?? ''),
-    nonPurchaseReason: String(body.non_purchase_reason ?? body.nonPurchaseReason ?? ''),
-    farmerComments: String(body.farmer_comments ?? body.farmerComments ?? ''),
-    sentiment: mapSentiment(body.sentiment),
-    activityQuality:
-      body.activity_quality != null && body.activity_quality !== ''
-        ? Number(body.activity_quality)
-        : body.activityQuality != null && body.activityQuality !== ''
-          ? Number(body.activityQuality)
-          : null,
-    ...(recordingUrl && { recordingUrl }),
-    ...(transcriptUrl && { transcriptUrl }),
-  };
-}
+export {
+  mapVoiceWebhookToSubmitInput,
+  ingestVoiceWebhookCallResult,
+  hasStructuredCallResult,
+} from './voiceWebhookIngestion.js';
 
 export async function resolveVoiceTriggerUuid(_preferredLanguage: string, agent?: IUser): Promise<string | null> {
   if (agent) {
@@ -308,8 +205,13 @@ export async function buildVoiceInitialContext(
   const farmerName = farmer?.name || '';
   const villageName = farmer?.location || activity?.location || activity?.territoryName || activity?.territory || '';
   const mdoName = activity?.officerName || '';
-  const products = Array.isArray(activity?.products) ? activity.products : [];
-  const productName = products.length > 0 ? String(products[0]) : '';
+  const products = Array.isArray(activity?.products)
+    ? activity.products.map((value: unknown) => String(value).trim()).filter(Boolean)
+    : [];
+  const crops = Array.isArray(activity?.crops)
+    ? activity.crops.map((value: unknown) => String(value).trim()).filter(Boolean)
+    : [];
+  const productName = products[0] || '';
 
   return {
     task_id: task._id.toString(),
@@ -320,6 +222,8 @@ export async function buildVoiceInitialContext(
     mdo_name: mdoName,
     event_date: formatActivityEventDate(activity?.date),
     product_name: productName,
+    product_names: products.join(', '),
+    crop_names: crops.join(', '),
     preferred_language: farmer?.preferredLanguage || '',
   };
 }
@@ -709,7 +613,9 @@ export async function handleVoiceWebhook(body: Record<string, unknown>): Promise
     throw err;
   }
 
-  const submitInput = mapVoiceWebhookToSubmitInput(body);
+  const submitInput = await ingestVoiceWebhookCallResult(body, {
+    callContext: await loadVoiceCallContext(task),
+  });
 
   if (submitInput.callStatus === 'No Answer') {
     const result = await deferOrFinalizeVoiceNoResponse(

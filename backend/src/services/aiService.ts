@@ -189,11 +189,13 @@ export interface ExtractedData {
   sentiment?: 'Positive' | 'Negative' | 'Neutral' | 'N/A'; // Sentiment indicator
 }
 
-interface ExtractionContext {
+export interface ExtractionContext {
   farmerName?: string;
   activityType?: string;
   crops?: string[];
   products?: string[];
+  activityCrops?: string[];
+  activityProducts?: string[];
   territory?: string;
 }
 
@@ -213,6 +215,87 @@ function sanitizeJSON(jsonString: string): string {
   return sanitized;
 }
 
+async function generateGeminiJsonObject(
+  prompt: string,
+  meta: { label: string; inputLength: number }
+): Promise<Record<string, unknown>> {
+  const activeGenAI = genAI || getGenAI();
+  if (!activeGenAI) {
+    throw new Error('Gemini API key not configured. Please set GEMINI_API_KEY environment variable.');
+  }
+
+  const modelName = await getAvailableModel();
+  const model = activeGenAI.getGenerativeModel({
+    model: modelName,
+    generationConfig: {
+      temperature: 0.1,
+      topP: 0.8,
+      topK: 40,
+    },
+  });
+
+  logger.info(`Processing ${meta.label} with Gemini AI`, {
+    inputLength: meta.inputLength,
+    modelName,
+  });
+
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+
+  if (!response) {
+    throw new Error('No response received from AI service');
+  }
+
+  const candidates = response.candidates;
+  if (!candidates || candidates.length === 0) {
+    const finishReason = (response as any).promptFeedback?.blockReason || 'UNKNOWN';
+    throw new Error(`AI response was blocked. Reason: ${finishReason}`);
+  }
+
+  let text: string;
+  try {
+    text = response.text();
+  } catch (error) {
+    logger.error('Failed to extract text from AI response', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      finishReason: (candidates[0] as any)?.finishReason,
+    });
+    throw new Error('Failed to parse AI response. The response may have been blocked.');
+  }
+
+  if (!text || text.trim().length === 0) {
+    throw new Error('Empty response from AI service');
+  }
+
+  let jsonText = text.trim();
+  jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  jsonText = jsonText.replace(/^\s+|\s+$/g, '');
+  const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    jsonText = jsonMatch[0];
+  }
+
+  logger.info('Gemini AI response received', {
+    label: meta.label,
+    responseLength: jsonText.length,
+    preview: jsonText.substring(0, 200),
+  });
+
+  const sanitizedJson = sanitizeJSON(jsonText);
+  try {
+    return JSON.parse(sanitizedJson) as Record<string, unknown>;
+  } catch (parseError) {
+    logger.error('JSON parse error', {
+      originalJson: jsonText.substring(0, 500),
+      sanitizedJson: sanitizedJson.substring(0, 500),
+      error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+    });
+    throw new Error(
+      `Failed to parse AI response as JSON: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`
+    );
+  }
+}
+
 /**
  * Extract structured data from scratchpad notes using Gemini AI
  */
@@ -220,35 +303,9 @@ export const extractDataFromNotes = async (
   notes: string,
   context?: ExtractionContext
 ): Promise<ExtractedData> => {
-  if (!genAI) {
-    throw new Error('Gemini API key not configured. Please set GEMINI_API_KEY environment variable.');
-  }
-
   if (!notes || !notes.trim()) {
     throw new Error('Notes cannot be empty');
   }
-
-  // Get the best available model dynamically
-  const modelName = await getAvailableModel();
-
-  // Use JSON mode for more reliable structured data extraction
-  const generationConfig = {
-    temperature: 0.1, // Lower temperature for more deterministic responses
-    topP: 0.8,
-    topK: 40,
-  };
-
-  // Ensure we have a valid genAI instance
-  const activeGenAI = genAI || getGenAI();
-  if (!activeGenAI) {
-    throw new Error('Failed to initialize Gemini AI. Please check GEMINI_API_KEY configuration.');
-  }
-
-  // Get model dynamically based on available models
-  const model = activeGenAI.getGenerativeModel({ 
-    model: modelName,
-    generationConfig,
-  });
 
   // Build context string
   const contextInfo = context
@@ -369,82 +426,11 @@ Important:
 - Return valid JSON only, no markdown formatting`;
 
   try {
-    logger.info('Processing notes with Gemini AI', {
-      notesLength: notes.length,
-      hasContext: !!context,
-      farmerName: context?.farmerName,
-      modelName: modelName,
-    });
+    const extracted = (await generateGeminiJsonObject(prompt, {
+      label: 'scratchpad notes',
+      inputLength: notes.length,
+    })) as ExtractedData;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    
-    // Check for blocked responses or errors
-    if (!response) {
-      throw new Error('No response received from AI service');
-    }
-
-    // Check response candidates for safety blocks
-    const candidates = response.candidates;
-    if (!candidates || candidates.length === 0) {
-      const finishReason = (response as any).promptFeedback?.blockReason || 'UNKNOWN';
-      throw new Error(`AI response was blocked. Reason: ${finishReason}`);
-    }
-
-    // Safely get text with error handling
-    let text: string;
-    try {
-      text = response.text();
-    } catch (error) {
-      logger.error('Failed to extract text from AI response', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        finishReason: (candidates[0] as any)?.finishReason,
-      });
-      throw new Error('Failed to parse AI response. The response may have been blocked.');
-    }
-
-    if (!text || text.trim().length === 0) {
-      throw new Error('Empty response from AI service');
-    }
-
-    // Clean JSON response (remove markdown code blocks if present)
-    let jsonText = text.trim();
-    jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    
-    // Remove any leading/trailing whitespace or newlines
-    jsonText = jsonText.replace(/^\s+|\s+$/g, '');
-
-    // Try to extract JSON if it's wrapped in text
-    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      jsonText = jsonMatch[0];
-    }
-
-    logger.info('Gemini AI response received', { 
-      responseLength: jsonText.length,
-      preview: jsonText.substring(0, 200),
-    });
-
-    if (!jsonText || jsonText.length === 0) {
-      throw new Error('Empty response from AI service');
-    }
-
-    // Sanitize JSON to handle any undefined values that might slip through
-    const sanitizedJson = sanitizeJSON(jsonText);
-    
-    let extracted: ExtractedData;
-    try {
-      extracted = JSON.parse(sanitizedJson) as ExtractedData;
-    } catch (parseError) {
-      logger.error('JSON parse error', {
-        originalJson: jsonText.substring(0, 500),
-        sanitizedJson: sanitizedJson.substring(0, 500),
-        error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
-      });
-      throw new Error(`Failed to parse AI response as JSON: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
-    }
-
-    // Validate and clean extracted data
     const validated = validateAndCleanExtractedData(extracted, context);
 
     logger.info('AI extraction successful', {
@@ -642,6 +628,90 @@ const validateAndCleanExtractedData = (
 
   return validated;
 };
+
+function toSnakeKey(key: string): string {
+  if (key.includes('_')) return key;
+  return key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`).replace(/^_/, '');
+}
+
+/**
+ * Extract Reach call-result JSON from a voice transcript (Hindi/English).
+ * Returns snake_case webhook keys. Does not apply human-form dependent rules.
+ */
+export async function extractVoiceCallFromTranscript(
+  transcript: string,
+  context?: ExtractionContext
+): Promise<Record<string, unknown>> {
+  if (!transcript || !transcript.trim()) {
+    throw new Error('Transcript cannot be empty');
+  }
+
+  const contextInfo = context
+    ? `
+Known call context (canonical Reach records — use these spellings):
+- Farmer name: ${context.farmerName || 'Unknown'}
+- Village / territory: ${context.territory || 'Unknown'}
+- Activity type: ${context.activityType || 'Unknown'}
+- Crops on this activity: ${context.activityCrops?.join(', ') || 'N/A'}
+- Products on this activity: ${context.activityProducts?.join(', ') || 'N/A'}
+- Crop master names (JSON must use these exact spellings when they match): ${
+        context.crops?.slice(0, 120).join(', ') || 'N/A'
+      }
+- Product master names (JSON must use these exact spellings when they match): ${
+        context.products?.slice(0, 120).join(', ') || 'N/A'
+      }
+`
+    : '';
+
+  const prompt = `You extract a structured call-centre survey from a voice-agent transcript (Hindi and/or English).
+
+${contextInfo}
+
+Transcript:
+${transcript}
+
+Return ONLY valid JSON. No markdown. Start with { and end with }.
+
+{
+  "call_status": "Connected" | "Disconnected" | "Incoming N/A" | "No Answer" | "Invalid",
+  "did_attend": "Yes, I attended" | "No, I missed" | "Don't recall" | "Identity Wrong" | "Not a Farmer" | null,
+  "did_recall": true | false | null,
+  "crops_discussed": ["exact crop master names"],
+  "products_discussed": ["exact product master names"],
+  "activity_quality": 1 | 2 | 3 | 4 | 5 | null,
+  "has_purchased": true | false | null,
+  "purchased_products": [{"product": "name", "quantity": "1", "unit": "kg" | "gms" | "lt"}],
+  "willing_to_purchase": true | false | null,
+  "likely_purchase_date": "YYYY-MM-DD" | "today" | "tomorrow" | "आज" | "कल" | "परसों" | "",
+  "non_purchase_reason": "Price" | "Availability" | "Brand preference" | "No requirement" | "Not convinced" | "Other" | "",
+  "farmer_comments": "short summary of what the farmer said",
+  "sentiment": "Positive" | "Negative" | "Neutral" | "N/A"
+}
+
+Rules:
+- If the farmer spoke and there was a conversation, call_status is Connected.
+- If nobody picked up or there is no farmer speech, call_status is No Answer.
+- If the person on the call is clearly not the expected farmer, did_attend is Identity Wrong.
+- Prefer activity crop/product names when the farmer is talking about that meeting.
+- Crop and product values MUST use the exact master spellings above when they refer to the same thing (Paddy not paddy, Eraze Strong not eraze). Keep the spoken name only if nothing on the master list matches.
+- activity_quality is the farmer's 1-5 rating of the activity/meeting if they gave one.
+- likely_purchase_date: keep आज/कल/परसों/today/tomorrow as spoken, or YYYY-MM-DD if a calendar date was given.
+- purchased_products.unit must be kg, gms, or lt.
+- Do not invent facts that were not said. Do not add crops/products that were not mentioned.
+- NEVER use undefined. Use null, [] or "".
+`;
+
+  const raw = await generateGeminiJsonObject(prompt, {
+    label: 'voice transcript',
+    inputLength: transcript.length,
+  });
+
+  const extracted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    extracted[toSnakeKey(key)] = value;
+  }
+  return extracted;
+}
 
 /**
  * Check if AI service is available
